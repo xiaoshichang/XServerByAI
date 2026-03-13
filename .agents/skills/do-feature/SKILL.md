@@ -16,9 +16,7 @@ Execute one development-plan feature item in a repeatable way for XServerByAI.
 3. Write a feature design note in `docs/` named after the item (e.g., `docs/M1-01.md`). Break it into 3-10 subpoints based on complexity.
 4. Implement the feature following the design note. Update code and tests as needed.
 5. Summarize changes. If you are making a commit, include the `developer` role tag in the message.
-6. If the latest commit on the branch is commit by `developer`, just stop and wait `tester` 's feedback.
-7. If the latest commit on the branch is commit by `tester`, iterate this feature according its feedback.
-8. If the latest commit on the branch is commit by `tester`, and there is no more feedback, report and stop.
+6. Check latest commit on the branch, to see what to do next. If it is feedback from `tester`, iterate the feature according to the feedback. 
 
 ## Examples
 - `do-feature M1-01`
@@ -27,4 +25,3 @@ Execute one development-plan feature item in a repeatable way for XServerByAI.
 ## import rule
 - you are `developer`.
 - all relatived documents must be updated if needed.
-- 
