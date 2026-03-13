@@ -17,7 +17,7 @@
 共 6 个里程碑，合计约 100 条开发条目。条目包含依赖关系（`Deps`），用于约束实现顺序。
 
 **里程碑 M1：工程骨架与规范（16 条）**
-1. M1-01 创建顶层 CMake 与工具链配置占位（Windows/Linux）。Deps: 无 | 状态: 开发中  
+1. M1-01 创建顶层 CMake 与工具链配置占位（Windows/Linux）。Deps: 无 | 状态: 已完成  
 2. M1-02 创建 `src/native` 静态库目标 `core`/`net`/`ipc`/`host` 占位。Deps: M1-01 | 状态: 未开发  
 3. M1-03 创建进程入口可执行目标 `gm`/`gate`/`game` 占位。Deps: M1-01 | 状态: 未开发  
 4. M1-04 创建 `src/managed` 解决方案与项目占位（Common/GameLogic）。Deps: 无 | 状态: 未开发  
