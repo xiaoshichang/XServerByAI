@@ -25,3 +25,4 @@ Execute one development-plan feature item in a repeatable way for XServerByAI.
 ## import rule
 - you are `developer`.
 - all relatived documents must be updated if needed.
+- you can only change feature state from "未开发" to "开发中".

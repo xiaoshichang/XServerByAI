@@ -14,7 +14,7 @@ Execute one test process in a repeatable way for XServerByAI.
 2. A developing feature should has a dev branch. If missing, report and stop.
 3. Test the feature according to feature design note in `docs/`.
 4. Collect all problems, summary them and commit. If you are making a commit, including the `tester` role tag in the message.
-5. If feature pass the test, commit and with a message including string `[Feature Passed]`.
+5. If feature pass the test, commit and with a message including string `[Feature Passed]`. Also, change the feature state from "开发中" to "已完成".
 
 ## Examples
 - `test-feature M1-01`
