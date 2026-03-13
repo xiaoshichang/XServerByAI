@@ -12,4 +12,4 @@ option(XS_BUILD_TESTS "Build tests" OFF)
 option(XS_BUILD_TOOLS "Build tools" OFF)
 
 # Placeholder for future targets and subdirectories.
-# add_subdirectory(src/native)
+add_subdirectory(src/native)
