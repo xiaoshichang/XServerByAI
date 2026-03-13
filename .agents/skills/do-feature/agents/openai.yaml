@@ -1,4 +1,0 @@
-interface:
-  display_name: "Do Feature"
-  short_description: "Implement one development-plan feature for XServerByAI"
-  default_prompt: "Implement one feature item from docs/DEVELOPMENT_PLAN.md for XServerByAI."
