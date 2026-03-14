@@ -5,7 +5,7 @@
 **基础规则**
 1. `msgId` 使用 `uint32_t` 表示，`0` 为保留值，表示“无效 / 未初始化消息”。
 2. `msgId` 只表达“消息语义”；响应沿用请求原始 `msgId`，并通过 `PacketHeader.flags.Response` 表示响应语义。
-3. 错误语义通过 `PacketHeader.flags.Error` 表示，不单独创建成对的 `ErrorResponse` `msgId`。
+3. 错误语义通过 `PacketHeader.flags.Error` 表示，不单独创建成对的 `ErrorResponse` `msgId`；具体错误码范围与编码规则见 `docs/ERROR_CODE.md`。
 4. 同一个消息一旦对外分配编号，不得复用；废弃时仅标记为 `Deprecated` 并保留历史记录。
 5. 生产协议只能使用稳定号段；临时联调或测试消息必须进入测试号段，联调结束后要么删除，要么重新走正式分配。
 
