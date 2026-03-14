@@ -95,6 +95,7 @@ struct PacketHeader {
 4. `configs/` 运行配置。
 5. `cmake/` CMake 公共脚本与工具链配置。
 6. `docs/` 文档与规范。
+7. 目录、命名与命名空间细则统一见 `docs/CONVENTIONS.md`。
 
 **后续建议里程碑**
 1. 先实现 GM + Game 的最小握手与心跳。

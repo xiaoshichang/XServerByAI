@@ -49,7 +49,7 @@ dotnet new sln -n XServerByAI.Managed -f sln
 
 **创建类库项目**
 ```powershell
-dotnet new classlib -n Common -o .\src\managed\Common
+dotnet new classlib -n Foundation -o .\src\managed\Foundation
 ```
 
 **创建控制台项目**
@@ -59,7 +59,7 @@ dotnet new console -n ServerTool -o .\src\managed\ServerTool
 
 **创建 xUnit 测试项目**
 ```powershell
-dotnet new xunit -n Common.Tests -o .\src\managed\Tests\Common.Tests
+dotnet new xunit -n Foundation.Tests -o .\src\managed\Tests\Foundation.Tests
 ```
 
 **查看某个模板的参数**
@@ -78,7 +78,7 @@ dotnet new console -h
 
 **将项目加入解决方案**
 ```powershell
-dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Common\Common.csproj
+dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Foundation\Foundation.csproj
 dotnet sln .\XServerByAI.Managed.sln add .\src\managed\GameLogic\GameLogic.csproj
 ```
 
@@ -94,12 +94,12 @@ dotnet sln .\XServerByAI.Managed.sln remove .\src\managed\GameLogic\GameLogic.cs
 
 **给项目添加项目引用**
 ```powershell
-dotnet add .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Common\Common.csproj
+dotnet add .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Foundation\Foundation.csproj
 ```
 
 **移除项目引用**
 ```powershell
-dotnet remove .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Common\Common.csproj
+dotnet remove .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Foundation\Foundation.csproj
 ```
 
 ## NuGet 包管理
@@ -212,7 +212,7 @@ dotnet test
 
 **运行指定测试项目**
 ```powershell
-dotnet test .\src\managed\Tests\Common.Tests\Common.Tests.csproj
+dotnet test .\src\managed\Tests\Foundation.Tests\Foundation.Tests.csproj
 ```
 
 **使用 Release 配置测试**
@@ -282,12 +282,12 @@ dotnet format .\XServerByAI.Managed.sln
 
 **将类库打成 NuGet 包**
 ```powershell
-dotnet pack .\src\managed\Common\Common.csproj -c Release
+dotnet pack .\src\managed\Foundation\Foundation.csproj -c Release
 ```
 
 **输出到指定目录**
 ```powershell
-dotnet pack .\src\managed\Common\Common.csproj -c Release -o .\artifacts\packages
+dotnet pack .\src\managed\Foundation\Foundation.csproj -c Release -o .\artifacts\packages
 ```
 
 ## 工作负载与工具
@@ -333,11 +333,11 @@ dotnet tool update --global dotnet-ef
 
 ```powershell
 dotnet new sln -n XServerByAI.Managed -f sln
-dotnet new classlib -n Common -o .\src\managed\Common
+dotnet new classlib -n Foundation -o .\src\managed\Foundation
 dotnet new classlib -n GameLogic -o .\src\managed\GameLogic
-dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Common\Common.csproj
+dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Foundation\Foundation.csproj
 dotnet sln .\XServerByAI.Managed.sln add .\src\managed\GameLogic\GameLogic.csproj
-dotnet add .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Common\Common.csproj
+dotnet add .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Foundation\Foundation.csproj
 dotnet restore .\XServerByAI.Managed.sln
 dotnet build .\XServerByAI.Managed.sln -c Debug
 ```

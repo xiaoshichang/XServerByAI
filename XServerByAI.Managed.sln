@@ -7,7 +7,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "managed", "managed", "{740F2F8A-03DD-0AB5-5B09-13F1E599E4C1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "src\managed\Common\Common.csproj", "{077F8F06-FF87-4042-9A03-139F97465C77}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Foundation", "src\managed\Foundation\Foundation.csproj", "{077F8F06-FF87-4042-9A03-139F97465C77}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameLogic", "src\managed\GameLogic\GameLogic.csproj", "{46867288-B1FF-43EE-A7DC-A161972BCCA5}"
 EndProject

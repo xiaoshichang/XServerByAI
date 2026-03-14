@@ -20,8 +20,8 @@
 1. M1-01 创建顶层 CMake 与工具链配置占位（Windows/Linux）。Deps: 无 | 状态: 已完成  
 2. M1-02 创建 `src/native` 静态库目标 `core`/`net`/`ipc`/`host` 占位。Deps: M1-01 | 状态: 已完成  
 3. M1-03 创建进程入口可执行目标 `gm`/`gate`/`game` 占位。Deps: M1-01 | 状态: 已完成  
-4. M1-04 创建 `src/managed` 解决方案与项目占位（Common/GameLogic）。Deps: 无 | 状态: 已完成  
-5. M1-05 约定目录结构、命名与命名空间规则（文档）。Deps: 无 | 状态: 未开发  
+4. M1-04 创建 `src/managed` 解决方案与项目占位（Foundation/GameLogic）。Deps: 无 | 状态: 已完成  
+5. M1-05 约定目录结构、命名与命名空间规则（文档）。Deps: 无 | 状态: 开发中  
 6. M1-06 定义二进制协议包头结构与常量。Deps: 无 | 状态: 未开发  
 7. M1-07 定义 msgId 分段与命名规范（文档）。Deps: M1-06 | 状态: 未开发  
 8. M1-08 定义错误码范围与编码规则（文档）。Deps: M1-06 | 状态: 未开发  

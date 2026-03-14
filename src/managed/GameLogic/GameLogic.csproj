@@ -1,15 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\Common\Common.csproj" />
+    <ProjectReference Include="..\Foundation\Foundation.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyName>XServerByAI.Managed.GameLogic</AssemblyName>
-    <RootNamespace>XServerByAI.Managed.GameLogic</RootNamespace>
+    <AssemblyName>XServer.Managed.GameLogic</AssemblyName>
+    <RootNamespace>XServer.Managed.GameLogic</RootNamespace>
   </PropertyGroup>
 
 </Project>

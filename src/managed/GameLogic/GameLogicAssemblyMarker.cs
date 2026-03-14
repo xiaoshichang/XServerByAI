@@ -1,8 +1,8 @@
-using XServerByAI.Managed.Common;
+using XServer.Managed.Foundation;
 
-namespace XServerByAI.Managed.GameLogic;
+namespace XServer.Managed.GameLogic;
 
 public static class GameLogicAssemblyMarker
 {
-    public static string DependencyName => CommonAssemblyMarker.Name;
+    public static string DependencyName => FoundationAssemblyMarker.Name;
 }
