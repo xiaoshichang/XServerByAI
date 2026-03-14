@@ -58,6 +58,16 @@
 
 以上表格只表示“子段预留”，不表示具体错误码已经完成分配。后续条目在定义错误返回机制或业务失败场景时，应在所属子段内补充精确错误码。
 
+**已登记控制面错误码**
+
+| errorCode | CanonicalName | Domain | Status | Owner | Description |
+| --- | --- | --- | --- | --- | --- |
+| `3000` | `Control.ProcessTypeInvalid` | `control` | `Active` | `gm` | `processType` 非法或当前阶段不支持该进程类型 |
+| `3001` | `Control.InstanceIdConflict` | `control` | `Active` | `gm` | `instanceId` 已被活动注册占用，当前连接不能重复注册 |
+| `3002` | `Control.ServiceEndpointInvalid` | `control` | `Active` | `gm` | 注册消息缺少可发布服务地址，或端口配置非法 |
+| `3003` | `Control.RegistrationNotFound` | `control` | `Active` | `gm` | 心跳引用未知 `registrationId`，当前连接需要重新注册 |
+| `3004` | `Control.RegistrationExpired` | `control` | `Active` | `gm` | 心跳对应的注册租约已失效，发送方必须重新注册 |
+
 **命名规范**
 1. 每个错误码都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Reason>` 或 `<Area>.<Subject>.<Reason>`。
 2. 公共错误优先使用 `Common` 作为域名，例如 `Common.InvalidArgument`、`Common.Timeout`、`Common.RateLimited`。
