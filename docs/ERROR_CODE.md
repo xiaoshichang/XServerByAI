@@ -68,6 +68,15 @@
 | `3003` | `Control.RegistrationNotFound` | `control` | `Active` | `gm` | 心跳引用未知 `registrationId`，当前连接需要重新注册 |
 | `3004` | `Control.RegistrationExpired` | `control` | `Active` | `gm` | 心跳对应的注册租约已失效，发送方必须重新注册 |
 
+**已登记 Relay 错误码**
+
+| errorCode | CanonicalName | Domain | Status | Owner | Description |
+| --- | --- | --- | --- | --- | --- |
+| `3100` | `Relay.ClientMessageIdInvalid` | `relay` | `Active` | `game` | 中继封装中的 `clientMsgId` 为 `0` 或落在内部保留号段，不能作为客户端消息编号 |
+| `3101` | `Relay.SessionNotFound` | `relay` | `Active` | `game` | 目标 `sessionId` 在当前接收方上下文中不存在 |
+| `3102` | `Relay.RouteOwnershipMismatch` | `relay` | `Active` | `game` | `sessionId` / `playerId` 与当前 Game 持有的路由或绑定关系不一致 |
+| `3103` | `Relay.ClientFlagsInvalid` | `relay` | `Active` | `game` | `clientFlags` 包含非法组合或未定义标志位 |
+
 **命名规范**
 1. 每个错误码都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Reason>` 或 `<Area>.<Subject>.<Reason>`。
 2. 公共错误优先使用 `Common` 作为域名，例如 `Common.InvalidArgument`、`Common.Timeout`、`Common.RateLimited`。

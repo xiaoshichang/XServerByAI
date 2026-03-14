@@ -58,6 +58,7 @@ struct PacketHeader {
 1. Gate 维护到多个 Game 的连接池。
 2. 请求类型消息需要 `seq`，响应消息带回相同 `seq`。
 3. 支持双向推送（例如 Game → Gate → Client）。
+4. Gate↔Game 中继封装字段、响应语义与客户端包元数据约定见 `docs/GATE_GAME_ENVELOPE.md`。
 
 **KCP 连接模型（客户端）**
 1. 客户端与 Gate 通过 UDP 进行 KCP 会话建立。

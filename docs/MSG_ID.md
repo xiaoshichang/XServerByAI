@@ -49,6 +49,13 @@
 | `1000` | `Control.ProcessRegister` | `Gate/Game -> GM` | `gm` | `Active` | 进程注册请求；成功或失败响应都复用同一 `msgId` |
 | `1100` | `Control.ProcessHeartbeat` | `Gate/Game -> GM` | `gm` | `Active` | 注册后的周期心跳与轻量负载上报；响应复用同一 `msgId` |
 
+**已登记 Relay 消息**
+
+| msgId | CanonicalName | Direction | Owner | Status | Description |
+| --- | --- | --- | --- | --- | --- |
+| `2000` | `Relay.ForwardToGame` | `Gate -> Game` | `gate` | `Active` | Gate 将客户端请求中继到已绑定 Game；响应复用同一 `msgId` |
+| `2001` | `Relay.PushToClient` | `Game -> Gate` | `game` | `Active` | Game 发起的单向下行推送，由 Gate 重新封装后发送给客户端 |
+
 **命名规范**
 1. 每个消息都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Action>` 或 `<Area>.<Subject>.<Action>`。
 2. `<Area>` 必须与所属号段的责任域一致，例如 `Control.ProcessRegister`、`Relay.ForwardToGame`、`Player.LoadProfile`、`Room.SyncState`、`Match.Enqueue`。
