@@ -63,7 +63,8 @@ struct PacketHeader {
 **KCP 连接模型（客户端）**
 1. 客户端与 Gate 通过 UDP 进行 KCP 会话建立。
 2. KCP 会话与客户端账号/角色绑定，Gate 维护会话生命周期。
-3. 建议默认参数可配置，例如 `interval`、`sndwnd`、`rcvwnd`、`nodelay`。
+3. Gate 侧 KCP 配置项、默认值与调优边界见 `docs/KCP_CONFIG.md`。
+4. KCP 算法参数与应用层心跳/断线策略分离定义；KCP 负责传输层重传与拥塞相关行为，业务超时策略由后续会话条目另行约定。
 
 **会话与路由**
 1. Gate 维护 `sessionId → playerId → gameInstance` 的路由关系。
