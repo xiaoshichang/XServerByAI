@@ -19,22 +19,30 @@
 
 **进程角色**
 1. `GM` 进程  
-负责集群控制面，提供启动/关闭流程、注册表、健康检查、配置分发、负载汇总。
+每个服务器组固定 `1` 个，负责该组的集群控制面，提供启动/关闭流程、注册表、健康检查、配置分发、负载汇总。
 2. `Gate` 进程  
-负责客户端连接维护、KCP 会话管理、鉴权与路由转发，不承载业务逻辑。
+每个服务器组部署 `N` 个（`N >= 1`），负责客户端连接维护、KCP 会话管理、鉴权与路由转发，不承载业务逻辑。
 3. `Game` 进程  
-负责核心游戏逻辑与状态管理，按需求可多实例横向扩展。
+每个服务器组部署 `M` 个（`M >= 1`），负责核心游戏逻辑与状态管理。
+
+**NodeID 约定**
+1. Gate 与 Game 的稳定逻辑身份统一称为 `NodeID`。
+2. `NodeID` 使用区分大小写的格式 `<ProcessType><index>`，例如 `Gate0`、`Gate1`、`Game0`、`Game1`。
+3. 同一服务器组内 `NodeID` 必须唯一；进程重启后应复用原 `NodeID`，而不是重新分配新的逻辑身份。
 
 **单机多进程拓扑**
-1. GM 与 Gate/Game 通过内部 TCP 通信。
-2. Gate 与 Game 通过内部 TCP 长连接通信。
-3. 客户端通过 UDP + KCP 与 Gate 通信。
+1. 一个服务器组固定为 `1 GM + N Gate + M Game`，其中 `N >= 1`、`M >= 1`。
+2. GM 与所属服务器组内每个 Gate/Game 通过内部 TCP 控制链路通信。
+3. 同一服务器组内 Gate 与 Game 通过内部 TCP 长连接形成全连接拓扑。
+4. Game 与 Game 之间不直接连接。
+5. Gate 与 Gate 之间不直接连接。
+6. 客户端通过 UDP + KCP 与 Gate 通信。
 
 **启动与注册流程（建议）**
 1. GM 启动，监听控制端口，加载配置。
 2. Game 启动后向 GM 注册，持续心跳上报，携带能力与负载。
-3. Gate 启动后向 GM 注册，拉取可用 Game 列表或订阅变更。
-4. 客户端连接 Gate，完成鉴权后建立会话，Gate 将会话绑定到目标 Game。
+3. Gate 启动后向 GM 注册，拉取可用 Game 节点路由目录或订阅变更。
+4. 客户端连接 Gate，完成鉴权后建立会话，Gate 将会话绑定到目标 Game 节点。
 5. 注册与心跳消息结构、字段含义与默认时序约定见 `docs/PROCESS_CONTROL.md`。
 
 **进程间二进制协议**
@@ -55,10 +63,11 @@ struct PacketHeader {
 5. 包头与常量细则见 `docs/PACKET_HEADER.md`，`msgId` 分段与命名细则见 `docs/MSG_ID.md`，错误码范围与编码规则见 `docs/ERROR_CODE.md`；后续扩展字段如 `crc`、`traceId`、`routeId` 等需在兼容性约束下另行定义。
 
 **Gate ↔ Game 通信模型**
-1. Gate 维护到多个 Game 的连接池。
-2. 请求类型消息需要 `seq`，响应消息带回相同 `seq`。
-3. 支持双向推送（例如 Game → Gate → Client）。
-4. Gate↔Game 中继封装字段、响应语义与客户端包元数据约定见 `docs/GATE_GAME_ENVELOPE.md`。
+1. 同一服务器组内，每个 Gate 与每个 Game 节点维持直接内部 TCP 长连接，构成全连接拓扑。
+2. Gate↔Gate 与 Game↔Game 不直接通信；所有客户端业务转发都经由 Gate ↔ Game 链路完成。
+3. 请求类型消息需要 `seq`，响应消息带回相同 `seq`。
+4. 支持双向推送（例如 Game → Gate → Client）。
+5. Gate↔Game 中继封装字段、响应语义与客户端包元数据约定见 `docs/GATE_GAME_ENVELOPE.md`。
 
 **KCP 连接模型（客户端）**
 1. 客户端与 Gate 通过 UDP 进行 KCP 会话建立。
@@ -67,9 +76,9 @@ struct PacketHeader {
 4. KCP 算法参数与应用层心跳、断线清理和路由策略分离定义；KCP 负责传输层重传与拥塞相关行为，会话与路由数据模型见 `docs/SESSION_ROUTING.md`。
 
 **会话与路由**
-1. Gate 维护 `sessionId -> SessionRecord` 主表，以及按 `playerId`、`gameInstanceId` 回查的反向索引，核心字段语义见 `docs/SESSION_ROUTING.md`。
-2. 当前阶段默认采用“同一会话生命周期内固定绑定到一个 Game”的路由模型；如发生 Game 重启、租约失效或内部连接中断，会话进入 `RouteLost`，不做静默迁移。
-3. GM 维护 Game 实例注册表、租约与负载信息，供 Gate 生成本地 `GameDirectoryEntry` 路由目录并选择目标 Game。
+1. Gate 维护 `sessionId -> SessionRecord` 主表，以及按 `playerId`、`gameNodeId` 回查的反向索引，核心字段语义见 `docs/SESSION_ROUTING.md`。
+2. 当前阶段默认采用“同一会话生命周期内固定绑定到一个 Game 节点”的路由模型；如发生 Game 节点重启、租约失效或内部连接中断，会话进入 `RouteLost`，不做静默迁移。
+3. GM 维护 Game 节点注册表、租约与负载信息，供 Gate 生成本地 `GameDirectoryEntry` 路由目录并选择目标 Game 节点。
 
 **心跳与健康检查（建议默认值）**
 1. Gate/Game 对 GM 心跳间隔建议 5 秒，超时建议 15 秒。

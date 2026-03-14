@@ -8,6 +8,7 @@
 3. `Relay.PushToClient` 的方向为 `Game -> Gate`，当前为单向消息，不定义显式协议级确认。
 4. `PacketHeader.flags.Error` 在本链路中只表达“中继层失败”，不直接等价于客户端业务层失败。
 5. 会话与路由模型的字段语义、状态机与失效规则见 `docs/SESSION_ROUTING.md`；本文件只约定中继封装如何保留并传递最小会话标识字段。
+6. 当前默认同一服务器组内 Gate 与 Game 节点采用全连接内部 TCP 拓扑；Game↔Game 与 Gate↔Gate 不直接通信，本文件不定义多跳转发语义。
 
 **共享编码约定**
 1. 所有内部整数沿用内部协议统一约定，使用网络字节序（大端）编码。
@@ -32,7 +33,7 @@
 `RelayEnvelopeHeader` 是中继链路与客户端消息语义之间的最小桥接头。Gate 与 Game 不应在内部链路中重新引入客户端原始头部的 `magic`、`version`、`length` 或内部控制 `msgId`。
 
 **Relay.ForwardToGame（`msgId = 2000`）**
-1. 用途：Gate 将客户端请求或经 Gate 归一化后的业务请求转发给已经选定的 Game。
+1. 用途：Gate 将客户端请求或经 Gate 归一化后的业务请求转发给同一服务器组内已选定、且已与当前 Gate 建立直接连接的 Game 节点。
 2. 请求时外层 `PacketHeader.seq` 必须为非零值；成功或失败响应必须回显同一 `seq`。
 3. 请求包中的 `clientFlags` 当前不得设置 `Response` 或 `Error`；若原始客户端包存在 `Compressed` 语义，可由 Gate 决定是否在归一化后保留到 `clientFlags`。
 
@@ -73,7 +74,7 @@
 3. 常见错误码为 `3100 Relay.ClientMessageIdInvalid`、`3101 Relay.SessionNotFound`、`3102 Relay.RouteOwnershipMismatch`、`3103 Relay.ClientFlagsInvalid`。
 
 **Relay.PushToClient（`msgId = 2001`）**
-1. 用途：Game 主动要求 Gate 向客户端发送单向推送消息。
+1. 用途：Game 节点主动要求 Gate 向客户端发送单向推送消息。
 2. 外层 `PacketHeader.seq` 当前应为 `0`；若后续引入推送确认或重试，再扩展新的协议字段或消息类型。
 3. 该消息不定义协议级响应；Gate 的本地投递失败由日志、metrics 或未来的诊断消息处理。
 

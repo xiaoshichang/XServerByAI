@@ -6,6 +6,7 @@
 1. 当前仅覆盖 `Control.ProcessRegister`（`msgId = 1000`）与 `Control.ProcessHeartbeat`（`msgId = 1100`）两类消息。
 2. 请求方向为 `Gate/Game -> GM`，响应方向为 `GM -> Gate/Game`，响应复用同一 `msgId` 并设置 `PacketHeader.flags.Response`。
 3. 失败响应通过 `PacketHeader.flags.Error` 与 `docs/ERROR_CODE.md` 中登记的控制面错误码表达。
+4. 当前默认每个服务器组固定 `1` 个 GM，管理该组内 `N` 个 Gate 节点与 `M` 个 Game 节点，其中 `N >= 1`、`M >= 1`。
 
 **共享编码约定**
 1. 消息体中的整数沿用内部协议统一约定，使用网络字节序（大端）编码。
@@ -24,6 +25,12 @@
 | `2` | `Game` | 业务逻辑与状态承载进程 |
 
 当前阶段只有 `Gate` 与 `Game` 允许向 GM 发送注册与心跳消息；其他值返回 `3000 Control.ProcessTypeInvalid`。
+
+**共享概念：NodeID**
+1. `nodeId` 表示 Gate/Game 在所属服务器组内的稳定逻辑身份。
+2. `nodeId` 使用区分大小写的格式 `<ProcessType><index>`，例如 `Gate0`、`Gate1`、`Game0`、`Game1`。
+3. 同一服务器组内 `nodeId` 必须唯一；进程重启后应保留原 `nodeId`。
+4. `GM` 不参与 `nodeId` 编号体系；每个服务器组固定 `1` 个 GM，负责管理该组内全部 Gate/Game 节点。
 
 **共享结构：Endpoint**
 
@@ -57,9 +64,9 @@
 | --- | --- | --- |
 | `processType` | `uint16` | 进程类型，取值见 `ProcessType` |
 | `processFlags` | `uint16` | 当前保留，发送方必须置 `0` |
-| `instanceId` | `string` | 进程在当前集群内的稳定逻辑标识，例如 `gate-1`、`game-2` |
+| `nodeId` | `string` | 进程在所属服务器组内的稳定逻辑标识（`NodeID`），例如 `Gate0`、`Game1` |
 | `pid` | `uint32` | 本地操作系统进程号，用于诊断与管理展示 |
-| `startedAtUnixMs` | `uint64` | 该进程本次启动时间，用于区分同名实例重启 |
+| `startedAtUnixMs` | `uint64` | 该进程本次启动时间，用于区分同一 `NodeID` 的重启 |
 | `serviceEndpoint` | `Endpoint` | 该进程对外发布的服务入口，不能为空 |
 | `buildVersion` | `string` | 可读构建版本或 Git 描述字符串，用于兼容性排查 |
 | `capabilityTags` | `string[]` | 能力标签列表，例如 `room-basic`、`chat-disabled`；没有时传空数组 |
@@ -114,7 +121,7 @@
 
 **时序与校验规则**
 1. 连接建立后，发送方必须先发送一次 `Control.ProcessRegister`；注册成功前不得发送心跳。
-2. `instanceId` 表示稳定逻辑身份，GM 应拒绝同一时刻重复的活动 `instanceId` 注册，并返回 `3001 Control.InstanceIdConflict`。
+2. `nodeId` 表示稳定逻辑身份，GM 应拒绝同一时刻重复的活动 `nodeId` 注册，并返回 `3001 Control.NodeIdConflict`。
 3. `registrationId` 只对一次成功注册及其所属 TCP 连接生命周期有效；连接重建或 GM 要求重注册时，必须重新申请新的 `registrationId`。
 4. 默认心跳间隔为 `5000ms`，默认超时阈值为 `15000ms`；GM 可以在响应中覆盖，但必须保证 `heartbeatIntervalMs < heartbeatTimeoutMs`。
 5. 心跳引用未知租约时返回 `3003 Control.RegistrationNotFound`；引用已过期租约时返回 `3004 Control.RegistrationExpired`。

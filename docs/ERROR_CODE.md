@@ -46,7 +46,7 @@
 | `1100-1199` | 序列化 / 分发 | 编解码失败、消息体损坏、未知 `msgId` | `M1-07`, `M2-10` |
 | `2000-2099` | 连接与链路 | 连接断开、握手失败、KCP/TCP 链路不可用 | `M2-07`, `M2-08`, `M4-01` |
 | `2100-2199` | 会话与鉴权 | 会话不存在、玩家未绑定、路由未建立、会话已失效、鉴权失败与客户端超时 | `M1-12`, `M4-03`, `M4-04`, `M4-15` |
-| `3000-3099` | 注册与心跳 | 进程未注册、重复注册、心跳超时、实例不可用 | `M1-09`, `M3-04`, `M3-05` |
+| `3000-3099` | 注册与心跳 | 进程未注册、重复注册、心跳超时、节点不可用 | `M1-09`, `M3-04`, `M3-05` |
 | `3100-3199` | 路由与转发 | 无路由、路由失效、租约不匹配、内部 RPC 超时、转发失败 | `M1-10`, `M1-12`, `M4-06`, `M4-13` |
 | `4000-4099` | 托管运行时 | `nethost` 初始化、CLR 加载、导出入口绑定失败 | `M1-15`, `M5-01`, `M5-02` |
 | `5000-5099` | 配置与日志 | 配置缺失、配置非法、日志输出初始化失败 | `M1-16`, `M2-01`, `M2-02` |
@@ -65,7 +65,7 @@
 | errorCode | CanonicalName | Domain | Status | Owner | Description |
 | --- | --- | --- | --- | --- | --- |
 | `3000` | `Control.ProcessTypeInvalid` | `control` | `Active` | `gm` | `processType` 非法或当前阶段不支持该进程类型 |
-| `3001` | `Control.InstanceIdConflict` | `control` | `Active` | `gm` | `instanceId` 已被活动注册占用，当前连接不能重复注册 |
+| `3001` | `Control.NodeIdConflict` | `control` | `Active` | `gm` | `nodeId` 已被活动注册占用，当前连接不能重复注册 |
 | `3002` | `Control.ServiceEndpointInvalid` | `control` | `Active` | `gm` | 注册消息缺少可发布服务地址，或端口配置非法 |
 | `3003` | `Control.RegistrationNotFound` | `control` | `Active` | `gm` | 心跳引用未知 `registrationId`，当前连接需要重新注册 |
 | `3004` | `Control.RegistrationExpired` | `control` | `Active` | `gm` | 心跳对应的注册租约已失效，发送方必须重新注册 |
