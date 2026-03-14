@@ -64,12 +64,12 @@ struct PacketHeader {
 1. 客户端与 Gate 通过 UDP 进行 KCP 会话建立。
 2. KCP 会话与客户端账号/角色绑定，Gate 维护会话生命周期。
 3. Gate 侧 KCP 配置项、默认值与调优边界见 `docs/KCP_CONFIG.md`。
-4. KCP 算法参数与应用层心跳/断线策略分离定义；KCP 负责传输层重传与拥塞相关行为，业务超时策略由后续会话条目另行约定。
+4. KCP 算法参数与应用层心跳、断线清理和路由策略分离定义；KCP 负责传输层重传与拥塞相关行为，会话与路由数据模型见 `docs/SESSION_ROUTING.md`。
 
 **会话与路由**
-1. Gate 维护 `sessionId → playerId → gameInstance` 的路由关系。
-2. 路由策略可先采用“固定绑定”策略，后续可扩展为一致性哈希或分区表。
-3. GM 维护 Game 实例的注册表与负载信息，供 Gate 选择路由。
+1. Gate 维护 `sessionId -> SessionRecord` 主表，以及按 `playerId`、`gameInstanceId` 回查的反向索引，核心字段语义见 `docs/SESSION_ROUTING.md`。
+2. 当前阶段默认采用“同一会话生命周期内固定绑定到一个 Game”的路由模型；如发生 Game 重启、租约失效或内部连接中断，会话进入 `RouteLost`，不做静默迁移。
+3. GM 维护 Game 实例注册表、租约与负载信息，供 Gate 生成本地 `GameDirectoryEntry` 路由目录并选择目标 Game。
 
 **心跳与健康检查（建议默认值）**
 1. Gate/Game 对 GM 心跳间隔建议 5 秒，超时建议 15 秒。

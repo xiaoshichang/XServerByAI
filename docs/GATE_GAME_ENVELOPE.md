@@ -7,7 +7,7 @@
 2. `Relay.ForwardToGame` 的请求方向为 `Gate -> Game`；成功或失败响应方向为 `Game -> Gate`，响应复用同一 `msgId` 并设置 `PacketHeader.flags.Response`。
 3. `Relay.PushToClient` 的方向为 `Game -> Gate`，当前为单向消息，不定义显式协议级确认。
 4. `PacketHeader.flags.Error` 在本链路中只表达“中继层失败”，不直接等价于客户端业务层失败。
-5. 会话与路由模型的完整定义留给后续 `M1-12`；本文件只约定为中继封装保留并传递最小标识字段。
+5. 会话与路由模型的字段语义、状态机与失效规则见 `docs/SESSION_ROUTING.md`；本文件只约定中继封装如何保留并传递最小会话标识字段。
 
 **共享编码约定**
 1. 所有内部整数沿用内部协议统一约定，使用网络字节序（大端）编码。
