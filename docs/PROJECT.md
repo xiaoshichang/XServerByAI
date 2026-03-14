@@ -49,9 +49,9 @@ struct PacketHeader {
   uint32_t seq;     // 请求序号
 }
 ```
-3. 允许 msgId 进行分段管理，例如 1-999 系统消息，1000+ 业务消息。
+3. `msgId` 采用集中分段管理；控制面、Gate↔Game 中转、客户端接入与业务实体消息使用独立号段，响应默认复用原请求 `msgId` 并通过 `flags` 标识。
 4. 采用“长度前缀 + 包头 + 包体”的 framing，避免粘包/拆包问题。
-5. 包头与常量细则见 `docs/PACKET_HEADER.md`；后续扩展字段如 `crc`、`traceId`、`routeId` 等需在兼容性约束下另行定义。
+5. 包头与常量细则见 `docs/PACKET_HEADER.md`，`msgId` 分段与命名细则见 `docs/MSG_ID.md`；后续扩展字段如 `crc`、`traceId`、`routeId` 等需在兼容性约束下另行定义。
 
 **Gate ↔ Game 通信模型**
 1. Gate 维护到多个 Game 的连接池。
