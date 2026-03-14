@@ -36,7 +36,7 @@
 3. Gate 启动后向 GM 注册，拉取可用 Game 列表或订阅变更。
 4. 客户端连接 Gate，完成鉴权后建立会话，Gate 将会话绑定到目标 Game。
 
-**进程间二进制协议（草案）**
+**进程间二进制协议**
 1. 统一包头，网络字节序（大端）传输，消息体为自研二进制结构。
 2. 包头建议格式（固定长度）：
 ```
@@ -51,7 +51,7 @@ struct PacketHeader {
 ```
 3. 允许 msgId 进行分段管理，例如 1-999 系统消息，1000+ 业务消息。
 4. 采用“长度前缀 + 包头 + 包体”的 framing，避免粘包/拆包问题。
-5. 允许后续扩展字段，如 `crc`、`traceId`、`routeId` 等。
+5. 包头与常量细则见 `docs/PACKET_HEADER.md`；后续扩展字段如 `crc`、`traceId`、`routeId` 等需在兼容性约束下另行定义。
 
 **Gate ↔ Game 通信模型**
 1. Gate 维护到多个 Game 的连接池。
@@ -91,11 +91,10 @@ struct PacketHeader {
 **目录结构**
 1. `src/native/` C++ 核心与三类进程入口。
 2. `src/managed/` C# 业务逻辑与公共接口。
-3. `proto/` 协议定义与文档。
-4. `configs/` 运行配置。
-5. `cmake/` CMake 公共脚本与工具链配置。
-6. `docs/` 文档与规范。
-7. 目录、命名与命名空间细则统一见 `docs/CONVENTIONS.md`。
+3. `configs/` 运行配置。
+4. `cmake/` CMake 公共脚本与工具链配置。
+5. `docs/` 文档与规范，包含协议说明。
+6. 目录、命名与命名空间细则统一见 `docs/CONVENTIONS.md`。
 
 **后续建议里程碑**
 1. 先实现 GM + Game 的最小握手与心跳。
