@@ -44,7 +44,7 @@ dotnet new list
 
 **创建解决方案**
 ```powershell
-dotnet new sln -n XServerByAI.Managed
+dotnet new sln -n XServerByAI.Managed -f sln
 ```
 
 **创建类库项目**
@@ -332,7 +332,7 @@ dotnet tool update --global dotnet-ef
 如果后续要为 `src/managed/` 补齐 .NET 解决方案与项目，可以参考以下命令顺序：
 
 ```powershell
-dotnet new sln -n XServerByAI.Managed
+dotnet new sln -n XServerByAI.Managed -f sln
 dotnet new classlib -n Common -o .\src\managed\Common
 dotnet new classlib -n GameLogic -o .\src\managed\GameLogic
 dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Common\Common.csproj

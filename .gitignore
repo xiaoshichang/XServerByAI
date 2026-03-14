@@ -8,3 +8,9 @@
 /CMakeFiles/
 /cmake_install.cmake
 /Makefile
+
+# .NET build artifacts
+**/bin/
+**/obj/
+/.dotnet-cli/
+/.nuget/packages/
