@@ -23,3 +23,4 @@ Execute one test process in a repeatable way for XServerByAI.
 ## import rule
 - you are `tester`.
 - all relatived documents must be updated if needed.
+- use dotnet command to manage dotnet project, see `docs/DOTNET_CLI.md`.

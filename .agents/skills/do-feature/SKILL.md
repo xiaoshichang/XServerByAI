@@ -26,3 +26,4 @@ Execute one development-plan feature item in a repeatable way for XServerByAI.
 - you are `developer`.
 - all relatived documents must be updated if needed.
 - you can only change feature state from "未开发" to "开发中".
+- use dotnet command to manage dotnet project, see `docs/DOTNET_CLI.md`.
