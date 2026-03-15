@@ -83,9 +83,9 @@ struct PacketHeader {
 **分布式实体架构**
 1. C# 业务层采用 `ServerEntity` / `ServerStubEntity` 两级模型，完整语义与职责边界见 `docs/DISTRIBUTED_ENTITY.md`。
 2. Gate 只负责客户端连接、会话与转发，不持有业务实体状态；GM 只负责控制面与路由目录；业务实体统一由 Game 节点承载与调度。
-3. `ServerEntity` 需进一步区分可迁移与不可迁移：`PlayerEntity` 可迁移，`RoomEntity` 不可迁移；`ServerStubEntity` 的承载 Game 在服务器启动时确定，之后保持不变。
+3. `ServerEntity` 需进一步区分可迁移与不可迁移：`PlayerEntity` 可迁移，`SpaceEntity` 不可迁移；`ServerStubEntity` 的承载 Game 在服务器启动时确定，之后保持不变。
 4. 实体间 RPC 默认分为两种寻址方式：静态 `Mailbox` 用于不可迁移实体，动态 `Proxy` 用于可迁移实体；`Proxy` 调用需要先转发到 Gate，再解析当前所在 Game。
-5. 当前默认业务链路为 `session -> PlayerEntity Proxy -> RoomEntity Mailbox / other server entity / ServerStubEntity Mailbox`；实体路由建立在 Gate 会话与 `playerId` 绑定之上，而不是直接绑定到底层连接句柄。
+5. 当前默认业务链路为 `session -> PlayerEntity Proxy -> SpaceEntity Mailbox / other server entity / ServerStubEntity Mailbox`；实体路由建立在 Gate 会话与 `playerId` 绑定之上，而不是直接绑定到底层连接句柄。
 6. 同一个逻辑实体在任意时刻只允许由一个 Game 节点持有活动实例；当前阶段不定义 active-active 多写、不定义跨 Game 直接业务通信。
 
 **心跳与健康检查（建议默认值）**

@@ -51,7 +51,7 @@
 **C# 命名空间规则**
 1. 所有 managed 项目使用 `XServer.Managed` 作为根命名空间前缀。
 2. 项目默认命名空间与程序集名保持一致，例如 `XServer.Managed.Foundation`、`XServer.Managed.GameLogic`。
-3. 子目录与子命名空间保持一一映射，例如 `src/managed/GameLogic/Room/RoomService.cs` 对应 `XServer.Managed.GameLogic.Room`。
+3. 子目录与子命名空间保持一一映射，例如 `src/managed/GameLogic/Space/SpaceService.cs` 对应 `XServer.Managed.GameLogic.Space`。
 4. C# 类型名使用 `PascalCase`，接口使用 `I` 前缀，私有字段使用 `_camelCase`。
 5. 不要在一个项目内混用多个根命名空间；跨项目共享能力应通过项目引用而不是复制命名空间实现。
 

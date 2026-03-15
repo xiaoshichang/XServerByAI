@@ -5,7 +5,7 @@
 
 **分布式实体架构要点**
 1. `ServerEntity`  
-负责属性维护、状态同步与持久化的实体基类，例如玩家实体、房间、NPC 等；可进一步划分为可迁移与不可迁移两类。
+负责属性维护、状态同步与持久化的实体基类，例如玩家实体、场景（`Space`）、NPC 等；可进一步划分为可迁移与不可迁移两类。
 2. `ServerStubEntity`  
 继承自 `ServerEntity`，用于集群内全局服务（例如匹配、聊天、排行榜等）；其承载 Game 在启动时确定，运行期不迁移。
 
@@ -97,8 +97,8 @@
 5. M5-05 实现 `ServerStubEntity` 基类（全局服务语义）。Deps: M5-04 | 状态: 未开发  
 6. M5-06 实现实体注册表与查找索引。Deps: M5-04 | 状态: 未开发  
 7. M5-07 实现实体消息分发（msgId → entity）。Deps: M2-10, M5-06 | 状态: 未开发  
-8. M5-08 实现实体路由：session → player proxy → room mailbox。Deps: M1-12, M4-04 | 状态: 未开发
-9. M5-09 实现房间实体模型（RoomEntity/PlayerEntity）。Deps: M5-04, M5-08 | 状态: 未开发  
+8. M5-08 实现实体路由：session → player proxy → space mailbox。Deps: M1-12, M4-04 | 状态: 未开发
+9. M5-09 实现场景实体模型（SpaceEntity/PlayerEntity）。Deps: M5-04, M5-08 | 状态: 未开发
 10. M5-10 实现实体 Tick 接口与驱动（C++ 调用）。Deps: M5-02, M5-04 | 状态: 未开发  
 11. M5-11 实现状态变更脏标记与同步钩子。Deps: M5-04 | 状态: 未开发  
 12. M5-12 实现持久化接口（异步保存/加载）。Deps: M5-04 | 状态: 未开发  

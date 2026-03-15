@@ -48,7 +48,7 @@
 | `connectionCount` | `uint32` | 当前网络连接数或内部长连接数；未知时填 `0` |
 | `sessionCount` | `uint32` | 当前会话数；对不适用的进程填 `0` |
 | `entityCount` | `uint32` | 当前实体数；对不适用的进程填 `0` |
-| `roomCount` | `uint32` | 当前房间数；对不适用的进程填 `0` |
+| `spaceCount` | `uint32` | 当前场景数；对不适用的进程填 `0` |
 | `loadScore` | `uint32` | 归一化负载分值，范围建议 `0-10000`，未知时填 `0` |
 
 该结构作为 M3-14 之前的最小负载快照，占位时允许全 `0` 上报。
@@ -69,7 +69,7 @@
 | `startedAtUnixMs` | `uint64` | 该进程本次启动时间，用于区分同一 `NodeID` 的重启 |
 | `serviceEndpoint` | `Endpoint` | 该进程对外发布的服务入口，不能为空 |
 | `buildVersion` | `string` | 可读构建版本或 Git 描述字符串，用于兼容性排查 |
-| `capabilityTags` | `string[]` | 能力标签列表，例如 `room-basic`、`chat-disabled`；没有时传空数组 |
+| `capabilityTags` | `string[]` | 能力标签列表，例如 `space-basic`、`chat-disabled`；没有时传空数组 |
 | `load` | `LoadSnapshot` | 初始负载快照；未知时允许全 `0` |
 
 注册成功响应体：

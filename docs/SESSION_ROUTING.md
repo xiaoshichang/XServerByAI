@@ -4,7 +4,7 @@
 
 **适用范围**
 1. 当前覆盖 Gate 本地维护的客户端会话记录、会话到 Game 的绑定关系，以及供 Gate 选择目标 Game 的目录条目。
-2. 当前模型服务于 `KCP session -> Gate logical session -> transport route target -> C# entity route hint` 这一链路，不直接承载鉴权协议细节或房间/实体业务状态；具体实体分类、迁移属性与路由终点语义由 `docs/DISTRIBUTED_ENTITY.md` 统一定义。
+2. 当前模型服务于 `KCP session -> Gate logical session -> transport route target -> C# entity route hint` 这一链路，不直接承载鉴权协议细节或场景/实体业务状态；具体实体分类、迁移属性与路由终点语义由 `docs/DISTRIBUTED_ENTITY.md` 统一定义。
 3. 当前阶段不定义跨 Gate 的共享会话、不定义会话迁移、不定义 Game 间动态负载迁移；这些能力如需引入，应在兼容本模型的前提下扩展。
 4. 当前默认每个服务器组固定 `1` 个 GM，管理同组内 `N` 个 Gate 节点与 `M` 个 Game 节点，其中 `N >= 1`、`M >= 1`；Gate 与 Game 采用全连接拓扑，Game↔Game 与 Gate↔Gate 不直接连接。
 
@@ -74,7 +74,7 @@
 
 `SessionRecord` 是 Gate 内部的权威会话模型。任何会话级清理、路由判断、玩家绑定或后续实体路由扩展，都应以该记录为单一事实来源，而不是散落在连接对象、定时器或业务层中的附加字段。
 
-其中 `routeTarget` 表达的是 Gate 会话当前命中的传输层目标 Game，而不是所有业务实体的最终 owner。对于 `PlayerEntity` 这类可迁移实体，Gate 可以在 `sessionId` / `playerId` 语义之上额外维护 `Proxy` 解析信息；对于 `RoomEntity`、`ServerStubEntity` 这类不可迁移实体，则应交由 `Mailbox` 的静态寻址语义处理。
+其中 `routeTarget` 表达的是 Gate 会话当前命中的传输层目标 Game，而不是所有业务实体的最终 owner。对于 `PlayerEntity` 这类可迁移实体，Gate 可以在 `sessionId` / `playerId` 语义之上额外维护 `Proxy` 解析信息；对于 `SpaceEntity`、`ServerStubEntity` 这类不可迁移实体，则应交由 `Mailbox` 的静态寻址语义处理。
 
 **共享结构：GameDirectoryEntry**
 
@@ -122,4 +122,4 @@
 3. `M4-10` 的断线清理与 Game 通知应优先依赖 `gameNodeId -> sessionId[]` 反向索引，确保单个 Game 节点失效时可以批量定位受影响会话。
 4. `M4-11` 的固定绑定策略只应定义“如何选择候选 Game 节点”，而不应改变 `RouteTarget` 与 `RouteState` 的基础语义。
 5. `M4-12` 的负载感知分配可以读取 `GameDirectoryEntry.load`，但不能在没有新模型扩展的情况下把已绑定会话就地迁移到其他 Game 节点。
-6. `M5-08` 的实体路由应建立在 `sessionId -> playerId` 这条链路之上，再扩展到 `PlayerEntity Proxy -> RoomEntity Mailbox / ServerStubEntity Mailbox`；不得绕过会话模型直接把业务实体绑到裸连接句柄。实体终点的分类、单活 ownership、迁移属性与执行模型约束见 `docs/DISTRIBUTED_ENTITY.md`。
+6. `M5-08` 的实体路由应建立在 `sessionId -> playerId` 这条链路之上，再扩展到 `PlayerEntity Proxy -> SpaceEntity Mailbox / ServerStubEntity Mailbox`；不得绕过会话模型直接把业务实体绑到裸连接句柄。实体终点的分类、单活 ownership、迁移属性与执行模型约束见 `docs/DISTRIBUTED_ENTITY.md`。
