@@ -62,6 +62,8 @@
 
 其中 `10000-34999` 业务错误码的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Room` 等状态型失败属于 `ServerEntity` 领域，匹配、聊天等 `Stub / 全局服务` 失败属于 `ServerStubEntity` 领域，避免用基础设施错误码承载实体业务语义。
 
+`Mailbox` / `Proxy` 的寻址结果也应服从这一分层：实体内部业务拒绝、状态冲突或领域校验失败进入对应业务号段；而 `Proxy` 无法解析当前 owner、Gate 二次寻址失败或路由元数据失效，则应优先归入 `3000-3999` 的控制面 / 路由错误，而不是误登记为玩家或房间业务错误。
+
 **已登记控制面错误码**
 
 | errorCode | CanonicalName | Domain | Status | Owner | Description |

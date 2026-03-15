@@ -46,6 +46,8 @@
 
 其中 `10000-34999` 业务号段的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Room` 等状态型业务消息落在 `ServerEntity` 语义下，`Stub / 全局服务` 号段保留给 `ServerStubEntity` 语义，避免把传输层中继消息与实体业务消息混放。
 
+`Mailbox` 与 `Proxy` 只影响实体的寻址与转发路径，不改变业务 `msgId` 的责任域归属：面向 `PlayerEntity Proxy` 的调用仍登记在 Player 号段，面向 `RoomEntity Mailbox` 的调用仍登记在 Room 号段。若后续需要为 `Proxy` 定位、Gate 二次寻址或转发附加元数据分配消息，应落入 `2000-3999` 内部中转号段，而不是占用业务号段。
+
 **已登记控制面消息**
 
 | msgId | CanonicalName | Direction | Owner | Status | Description |

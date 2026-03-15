@@ -77,14 +77,16 @@ struct PacketHeader {
 
 **会话与路由**
 1. Gate 维护 `sessionId -> SessionRecord` 主表，以及按 `playerId`、`gameNodeId` 回查的反向索引，核心字段语义见 `docs/SESSION_ROUTING.md`。
-2. 当前阶段默认采用“同一会话生命周期内固定绑定到一个 Game 节点”的路由模型；如发生 Game 节点重启、租约失效或内部连接中断，会话进入 `RouteLost`，不做静默迁移。
+2. 当前阶段默认采用“Gate 会话到入口 Game 的传输路由固定绑定”模型；如发生 Game 节点重启、租约失效或内部连接中断，会话进入 `RouteLost`，不做静默迁移。可迁移业务实体的当前 owner 则通过 Gate 上的 `Proxy` 目录动态解析。
 3. GM 维护 Game 节点注册表、租约与负载信息，供 Gate 生成本地 `GameDirectoryEntry` 路由目录并选择目标 Game 节点。
 
 **分布式实体架构**
 1. C# 业务层采用 `ServerEntity` / `ServerStubEntity` 两级模型，完整语义与职责边界见 `docs/DISTRIBUTED_ENTITY.md`。
 2. Gate 只负责客户端连接、会话与转发，不持有业务实体状态；GM 只负责控制面与路由目录；业务实体统一由 Game 节点承载与调度。
-3. 当前默认路由链路为 `session -> player entity -> room entity / other server entity / stub service`；实体路由建立在 Gate 会话与 `playerId` 绑定之上，而不是直接绑定到底层连接句柄。
-4. 同一个逻辑实体在任意时刻只允许由一个 Game 节点持有活动实例；当前阶段不定义 active-active 多写、不定义跨 Game 直接业务通信。
+3. `ServerEntity` 需进一步区分可迁移与不可迁移：`PlayerEntity` 可迁移，`RoomEntity` 不可迁移；`ServerStubEntity` 的承载 Game 在服务器启动时确定，之后保持不变。
+4. 实体间 RPC 默认分为两种寻址方式：静态 `Mailbox` 用于不可迁移实体，动态 `Proxy` 用于可迁移实体；`Proxy` 调用需要先转发到 Gate，再解析当前所在 Game。
+5. 当前默认业务链路为 `session -> PlayerEntity Proxy -> RoomEntity Mailbox / other server entity / ServerStubEntity Mailbox`；实体路由建立在 Gate 会话与 `playerId` 绑定之上，而不是直接绑定到底层连接句柄。
+6. 同一个逻辑实体在任意时刻只允许由一个 Game 节点持有活动实例；当前阶段不定义 active-active 多写、不定义跨 Game 直接业务通信。
 
 **心跳与健康检查（建议默认值）**
 1. Gate/Game 对 GM 心跳间隔建议 5 秒，超时建议 15 秒。
