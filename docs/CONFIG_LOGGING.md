@@ -38,8 +38,8 @@ logs/
 | `serverGroup` | Yes | `GM` / `Gate` / `Game` | 服务器组身份与环境标签，例如 `id`、`environment` |
 | `logging` | Yes | `GM` / `Gate` / `Game` | 公共日志默认值 |
 | `gm` | Yes | `GM` | `gm` 选择器对应的单例配置块 |
-| `gate` | Optional | `Gate` | 以 `gate0`、`gate1` 等选择器为子键的 Gate 实例集合 |
-| `game` | Optional | `Game` | 以 `game0`、`game1` 等选择器为子键的 Game 实例集合 |
+| `gate` | Yes | `Gate` | 以 `gate0`、`gate1` 等选择器为子键的 Gate 实例集合 |
+| `game` | Yes | `Game` | 以 `game0`、`game1` 等选择器为子键的 Game 实例集合 |
 
 选择规则：
 1. `selector = gm` 时，加载顶层 `gm` 配置块。
