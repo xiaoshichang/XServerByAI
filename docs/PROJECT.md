@@ -94,10 +94,11 @@ struct PacketHeader {
 3. 所有心跳与状态变更均通过内部协议完成，避免外部依赖。
 
 **C++ ↔ C#（nethost）互操作**
-1. C++ 通过 `nethost`/`hostfxr` 加载 .NET 运行时与指定程序集。
-2. C# 提供导出入口（推荐使用 `UnmanagedCallersOnly`），C++ 获取函数指针调用。
-3. C++ 调用 C# 的入口函数例如 `Init`、`OnMessage`、`OnTick`，C# 仅处理业务状态。
-4. 互操作数据结构尽量使用 blittable 类型，避免复杂对象跨边界。
+1. 当前阶段仅 `Game` 进程宿主 CLR；根程序集固定为 `XServer.Managed.GameLogic`，详细 ABI 约定见 `docs/MANAGED_INTEROP.md`。
+2. C++ 通过 `nethost`/`hostfxr` 与 `load_assembly_and_get_function_pointer` 加载 .NET 运行时并解析托管导出入口。
+3. C# 导出类型固定为 `XServer.Managed.GameLogic.Interop.GameNativeExports`，入口名固定为 `GameNativeGetAbiVersion`、`GameNativeInit`、`GameNativeOnMessage`、`GameNativeOnTick`。
+4. 所有导出入口统一使用 `cdecl` + `UnmanagedCallersOnly`，并在首次业务调用前做 ABI 版本校验。
+5. 互操作数据结构必须保持 blittable；输入缓冲区只在调用期间借用，托管异常不得跨边界传播到 native 侧。
 
 **线程与调度模型（建议）**
 1. 每个进程采用主线程事件循环，网络 IO 与定时器以异步驱动。
