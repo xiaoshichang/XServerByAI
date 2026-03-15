@@ -45,7 +45,7 @@
 | `configPathUtf8` | `pointer` | 当前 `Game` 配置文件路径的 UTF-8 缓冲区首地址；未知时可为 `null` |
 | `configPathLength` | `uint32` | `configPathUtf8` 的字节长度；为空时为 `0` |
 
-`ManagedInitArgs` 的目标是给 managed 入口提供“当前是哪个 `Game` 节点、使用哪个 ABI、配置文件位置在哪里”这组最小上下文。当前不把日志回调、分配器、网络句柄或线程句柄混入初始化结构。
+`ManagedInitArgs` 的目标是给 managed 入口提供“当前是哪个 `Game` 节点、使用哪个 ABI、配置文件位置在哪里”这组最小上下文。当前不把日志回调、分配器、网络句柄或线程句柄混入初始化结构；`configPathUtf8` 指向的单文件配置布局与键名规范复用 `docs/CONFIG_LOGGING.md`。
 
 **共享结构：ManagedMessageView**
 

@@ -25,6 +25,11 @@
 3. `Game` 进程  
 每个服务器组部署 `M` 个（`M >= 1`），负责核心游戏逻辑与状态管理。
 
+**统一 Node 入口**
+1. native 统一使用单个可执行文件 `xserver-node` 作为 `GM` / `Gate` / `Game` 的启动入口。
+2. 启动命令形式固定为 `xserver-node <configPath> <selector>`，例如 `xserver-node config.json gm`、`xserver-node config.json gate0`、`xserver-node config.json game0`。
+3. `selector` 仅用于从单个配置文件中选择实例块；协议层与注册表中的稳定逻辑身份仍继续使用 `GM`、`Gate0`、`Game0` 这类标识。
+
 **NodeID 约定**
 1. Gate 与 Game 的稳定逻辑身份统一称为 `NodeID`。
 2. `NodeID` 使用区分大小写的格式 `<ProcessType><index>`，例如 `Gate0`、`Gate1`、`Game0`、`Game1`。
@@ -106,16 +111,19 @@ struct PacketHeader {
 3. Game 内部逻辑采用固定 Tick（例如 20ms 或 50ms），Tick 频率可配置。
 
 **配置与日志（建议）**
-1. 配置文件建议使用 `configs/*.json` 或 `configs/*.yaml`。
-2. 日志按进程分文件输出，建议支持滚动与等级过滤。
+1. 进程配置统一使用单个 UTF-8 JSON 载体；同一服务器组的 `GM` / `Gate` / `Game` 实例都放在一个配置文件中，实例选择规则见 `docs/CONFIG_LOGGING.md`。
+2. Gate / Game 的启动选择器使用 `gate0`、`game0` 这类小写形式，而稳定 `NodeID` 仍为 `Gate0`、`Game0`；例如 KCP 子块字段需复用 `docs/KCP_CONFIG.md` 中定义的 `gate.<selector>.kcp` 逻辑键名。
+3. `Game` 实例块必须显式提供内部服务地址，例如 `game.game0.service.listenEndpoint`，用于注册到 GM 并供 Gate 建立内部 TCP 连接。
+4. 日志默认输出到 `logs/` 根目录下的平铺文件，例如 `GM-2026-03-15.log`、`Gate0-2026-03-15.log`；统一等级、字段、滚动与错误码呈现规则见 `docs/CONFIG_LOGGING.md`。
 
 **目录结构**
-1. `src/native/` C++ 核心与三类进程入口。
+1. `src/native/` C++ 核心、统一 `xserver-node` 入口与三类进程实现。
 2. `src/managed/` C# 业务逻辑与公共接口。
 3. `configs/` 运行配置。
-4. `cmake/` CMake 公共脚本与工具链配置。
-5. `docs/` 文档与规范，包含协议说明。
-6. 目录、命名与命名空间细则统一见 `docs/CONVENTIONS.md`。
+4. `logs/` 运行期日志输出目录（默认不纳入版本控制）。
+5. `cmake/` CMake 公共脚本与工具链配置。
+6. `docs/` 文档与规范，包含协议说明。
+7. 目录、命名与命名空间细则统一见 `docs/CONVENTIONS.md`。
 
 **后续建议里程碑**
 1. 先实现 GM + Game 的最小握手与心跳。

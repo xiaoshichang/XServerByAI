@@ -12,7 +12,8 @@
 2. `configs/`：放置 GM、Gate、Game 等进程的运行配置文件。
 3. `docs/`：放置长期维护文档与里程碑设计说明。
 4. `src/`：放置所有源码、项目文件与与源码强关联的构建描述。
-5. 顶层新增目录必须满足“无法归入现有目录”的前提，并同步更新 `docs/PROJECT.md` 与本规范。
+5. `logs/` 属于运行期生成目录，默认用于日志输出，不应提交到仓库。
+6. 顶层新增目录必须满足“无法归入现有目录”的前提，并同步更新 `docs/PROJECT.md` 与本规范。
 
 **源码目录约定**
 1. `src/native/` 仅放置 C++ 运行时、网络、宿主与进程入口相关代码。
@@ -22,10 +23,10 @@
 
 **Native 目录与命名规则**
 1. `src/native` 下的库模块目录使用全小写名称，必要时使用 `lower_snake_case`，例如 `core`、`net`、`ipc`、`host`。
-2. `src/native` 下的进程入口目录直接使用进程名小写形式，例如 `gm`、`gate`、`game`。
-3. 每个 native 子目录都应有独立的 `CMakeLists.txt`，目标名默认与目录名保持一致。
-4. 进程入口文件统一采用 `<process>_main.cpp` 命名，例如 `gm_main.cpp`。
-5. 占位或模块聚合实现文件可使用与目录同名的文件，例如 `core.cpp`、`net.cpp`。
+2. 统一节点入口固定放在 `src/native/node/`，生成单个 `xserver-node` 可执行文件。
+3. `src/native/gm`、`src/native/gate`、`src/native/game` 可用于承载进程专属实现代码，但不再各自生成独立可执行目标。
+4. 每个 native 子目录都应有独立的 `CMakeLists.txt`；可执行目标的文件名与输出名可以按职责命名，不强制与目录同名。
+5. 统一节点入口文件采用 `node_main.cpp` 命名；占位或模块聚合实现文件可使用与目录同名的文件，例如 `core.cpp`、`net.cpp`。
 6. 当模块进入类型化实现阶段，类或结构体主文件应优先采用 `PascalCase` 文件名，并与主类型同名。
 
 **Managed 目录与命名规则**
@@ -40,6 +41,12 @@
 1. 里程碑设计说明使用 `<FeatureId>.md` 命名，例如 `M1-05.md`。
 2. 长期维护的规范或说明文档使用全大写英文命名，必要时可用下划线分词，例如 `PROJECT.md`、`DEVELOPMENT_PLAN.md`、`DOTNET_CLI.md`。
 3. 新增长期维护文档时，应优先复用已有主题文档；只有内容边界清晰时才新增新文档。
+
+**配置文件命名规则**
+1. 正式运行配置统一使用单个 UTF-8 JSON 文件与 `.json` 扩展名，不并行维护 YAML 正式版本。
+2. 配置文件名由部署方决定，推荐放在 `configs/` 下，例如 `configs/config.json` 或 `configs/local-dev.json`。
+3. `gm`、`gate0`、`game0` 这类实例选择器存在于配置文件内部，作为顶层 `gm` 块或 `gate` / `game` 子键，不再把实例拆成多个文件。
+4. `logs/` 为运行期输出目录，不得作为配置模板或手工维护资源目录使用；日志文件命名与滚动细则见 `docs/CONFIG_LOGGING.md`。
 
 **C++ 命名空间规则**
 1. 所有项目内 C++ 代码以 `xs` 作为根命名空间。

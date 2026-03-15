@@ -5,7 +5,7 @@
 **适用范围**
 1. 当前只覆盖 Gate ↔ Client 链路上的 KCP 参数，不覆盖 GM/Gate/Game 的内部 TCP 链路。
 2. 当前只定义与 KCP 算法和分段行为直接相关的参数，不把应用层心跳、鉴权超时、断线踢出等策略混入本规范。
-3. 未来配置文件格式由后续配置规范条目统一约定；本文件先固定逻辑配置项名称与默认值。
+3. 具体配置载体、统一启动入口与公共键名约定复用 `docs/CONFIG_LOGGING.md`；本文件固定所选 Gate 实例块中 `kcp` 子块的字段名称与默认值。
 
 **默认档位目标**
 1. 面向基于 `space` 的实时交互场景，优先控制输入回显、状态同步与短消息广播的时延；在房间类型游戏中可将 `space` 理解为房间。
@@ -14,21 +14,29 @@
 
 **逻辑配置块示例**
 
-```yaml
-kcp:
-  mtu: 1200
-  sndwnd: 128
-  rcvwnd: 128
-  nodelay: true
-  intervalMs: 10
-  fastResend: 2
-  noCongestionWindow: false
-  minRtoMs: 30
-  deadLinkCount: 20
-  streamMode: false
+```json
+{
+  "gate": {
+    "gate0": {
+      "nodeId": "Gate0",
+      "kcp": {
+        "mtu": 1200,
+        "sndwnd": 128,
+        "rcvwnd": 128,
+        "nodelay": true,
+        "intervalMs": 10,
+        "fastResend": 2,
+        "noCongestionWindow": false,
+        "minRtoMs": 30,
+        "deadLinkCount": 20,
+        "streamMode": false
+      }
+    }
+  }
+}
 ```
 
-上例只是逻辑结构示意，不约束最终配置文件必须使用 YAML；后续 JSON/YAML 载体由配置规范统一决定。
+上例展示的是 `docs/CONFIG_LOGGING.md` 约定下的 JSON 嵌套位置；后续如果 Gate 增加新的网络子块，也应继续挂在对应 Gate 实例块下，而不是重命名现有 `kcp` 字段。
 
 **配置项定义**
 
