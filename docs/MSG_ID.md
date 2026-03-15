@@ -44,6 +44,8 @@
 
 其中会话与路由相关消息在落具体结构时，应复用 `docs/SESSION_ROUTING.md` 中的 `sessionId`、`playerId`、`gameNodeId`、`gameRegistrationId` 与 `routeEpoch` 语义，避免为同一条路由关系创造多套字段命名。
 
+其中 `10000-34999` 业务号段的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Room` 等状态型业务消息落在 `ServerEntity` 语义下，`Stub / 全局服务` 号段保留给 `ServerStubEntity` 语义，避免把传输层中继消息与实体业务消息混放。
+
 **已登记控制面消息**
 
 | msgId | CanonicalName | Direction | Owner | Status | Description |

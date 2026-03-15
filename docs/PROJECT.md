@@ -80,6 +80,12 @@ struct PacketHeader {
 2. 当前阶段默认采用“同一会话生命周期内固定绑定到一个 Game 节点”的路由模型；如发生 Game 节点重启、租约失效或内部连接中断，会话进入 `RouteLost`，不做静默迁移。
 3. GM 维护 Game 节点注册表、租约与负载信息，供 Gate 生成本地 `GameDirectoryEntry` 路由目录并选择目标 Game 节点。
 
+**分布式实体架构**
+1. C# 业务层采用 `ServerEntity` / `ServerStubEntity` 两级模型，完整语义与职责边界见 `docs/DISTRIBUTED_ENTITY.md`。
+2. Gate 只负责客户端连接、会话与转发，不持有业务实体状态；GM 只负责控制面与路由目录；业务实体统一由 Game 节点承载与调度。
+3. 当前默认路由链路为 `session -> player entity -> room entity / other server entity / stub service`；实体路由建立在 Gate 会话与 `playerId` 绑定之上，而不是直接绑定到底层连接句柄。
+4. 同一个逻辑实体在任意时刻只允许由一个 Game 节点持有活动实例；当前阶段不定义 active-active 多写、不定义跨 Game 直接业务通信。
+
 **心跳与健康检查（建议默认值）**
 1. Gate/Game 对 GM 心跳间隔建议 5 秒，超时建议 15 秒。
 2. GM 在超时后标记实例不可用，并通知 Gate 更新路由表。

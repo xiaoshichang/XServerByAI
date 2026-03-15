@@ -60,6 +60,8 @@
 
 其中会话与路由相关失败在分配具体错误码时，应复用 `docs/SESSION_ROUTING.md` 对 `sessionId`、`routeState` 与 `gameRegistrationId` 的语义约束，避免把“稳定逻辑身份未变但活跃租约已切换”的场景误编码为普通参数错误。
 
+其中 `10000-34999` 业务错误码的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Room` 等状态型失败属于 `ServerEntity` 领域，匹配、聊天等 `Stub / 全局服务` 失败属于 `ServerStubEntity` 领域，避免用基础设施错误码承载实体业务语义。
+
 **已登记控制面错误码**
 
 | errorCode | CanonicalName | Domain | Status | Owner | Description |

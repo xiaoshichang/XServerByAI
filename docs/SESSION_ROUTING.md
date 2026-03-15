@@ -1,10 +1,10 @@
 # SESSION_ROUTING
 
-本文档定义 XServerByAI 当前阶段 Gate 侧客户端会话、Gate 的路由绑定以及 GM 提供的 Game 节点路由目录的数据模型。后续 `M4-04`、`M4-10`、`M4-11`、`M4-12` 与 `M5-08` 在实现会话表、断线清理、固定绑定路由、负载感知分配与实体路由时，应以本文件作为字段语义与状态约束的基线。
+本文档定义 XServerByAI 当前阶段 Gate 侧客户端会话、Gate 的路由绑定以及 GM 提供的 Game 节点路由目录的数据模型。后续 `M4-04`、`M4-10`、`M4-11`、`M4-12` 与 `M5-08` 在实现会话表、断线清理、固定绑定路由、负载感知分配与实体路由时，应以本文件作为字段语义与状态约束的基线；实体侧的 ownership、分类与职责边界见 `docs/DISTRIBUTED_ENTITY.md`。
 
 **适用范围**
 1. 当前覆盖 Gate 本地维护的客户端会话记录、会话到 Game 的绑定关系，以及供 Gate 选择目标 Game 的目录条目。
-2. 当前模型服务于 `KCP session -> Gate logical session -> Game route target -> C# entity route hint` 这一链路，不直接承载鉴权协议细节或房间/实体业务状态。
+2. 当前模型服务于 `KCP session -> Gate logical session -> Game route target -> C# entity route hint` 这一链路，不直接承载鉴权协议细节或房间/实体业务状态；具体实体分类与路由终点语义由 `docs/DISTRIBUTED_ENTITY.md` 统一定义。
 3. 当前阶段不定义跨 Gate 的共享会话、不定义会话迁移、不定义 Game 间动态负载迁移；这些能力如需引入，应在兼容本模型的前提下扩展。
 4. 当前默认每个服务器组固定 `1` 个 GM，管理同组内 `N` 个 Gate 节点与 `M` 个 Game 节点，其中 `N >= 1`、`M >= 1`；Gate 与 Game 采用全连接拓扑，Game↔Game 与 Gate↔Gate 不直接连接。
 
@@ -119,4 +119,4 @@
 3. `M4-10` 的断线清理与 Game 通知应优先依赖 `gameNodeId -> sessionId[]` 反向索引，确保单个 Game 节点失效时可以批量定位受影响会话。
 4. `M4-11` 的固定绑定策略只应定义“如何选择候选 Game 节点”，而不应改变 `RouteTarget` 与 `RouteState` 的基础语义。
 5. `M4-12` 的负载感知分配可以读取 `GameDirectoryEntry.load`，但不能在没有新模型扩展的情况下把已绑定会话就地迁移到其他 Game 节点。
-6. `M5-08` 的实体路由应建立在 `sessionId -> playerId` 这条链路之上，再扩展到房间或实体级目标；不得绕过会话模型直接把业务实体绑到裸连接句柄。
+6. `M5-08` 的实体路由应建立在 `sessionId -> playerId` 这条链路之上，再扩展到房间或实体级目标；不得绕过会话模型直接把业务实体绑到裸连接句柄。实体终点的分类、单活 ownership 与执行模型约束见 `docs/DISTRIBUTED_ENTITY.md`。
