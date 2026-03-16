@@ -24,8 +24,11 @@ static_assert(
     std::is_same_v<decltype(xs::core::SteadyNow()), xs::core::SteadyTimePoint>,
     "SteadyNow must return a steady-clock time point.");
 static_assert(
-    std::is_constructible_v<xs::core::SteadyTimer, asio::io_context&>,
-    "SteadyTimer must remain constructible from asio::io_context.");
+    std::is_constructible_v<xs::core::TimerManager, asio::io_context&>,
+    "TimerManager must remain constructible from asio::io_context.");
+static_assert(
+    std::is_same_v<decltype(xs::core::IsTimerID(xs::core::TimerCreateResult{})), bool>,
+    "Timer result helpers must remain available.");
 
 namespace xs::core {
 }

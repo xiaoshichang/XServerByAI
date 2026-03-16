@@ -4,41 +4,54 @@
 
 #include <asio/io_context.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
-#include <string>
+#include <string_view>
 
 namespace xs::core {
 
+using TimerID = std::int64_t;
+using TimerCreateResult = std::int64_t;
 using TimerCallback = std::function<void()>;
 
-class SteadyTimer final {
+enum class TimerErrorCode : TimerCreateResult {
+    None = 0,
+    InvalidTimerID = -1,
+    TimerNotFound = -2,
+    CallbackEmpty = -3,
+    IntervalMustBePositive = -4,
+    TimerIdExhausted = -5,
+    Unknown = -6,
+};
+
+[[nodiscard]] bool IsTimerID(TimerCreateResult value) noexcept;
+[[nodiscard]] TimerErrorCode TimerErrorFromCreateResult(TimerCreateResult value) noexcept;
+[[nodiscard]] std::string_view TimerErrorMessage(TimerErrorCode error_code) noexcept;
+
+class TimerManager final {
 public:
-    explicit SteadyTimer(asio::io_context& io_context);
-    ~SteadyTimer();
+    explicit TimerManager(asio::io_context& io_context);
+    ~TimerManager();
 
-    SteadyTimer(const SteadyTimer&) = delete;
-    SteadyTimer& operator=(const SteadyTimer&) = delete;
-    SteadyTimer(SteadyTimer&&) = delete;
-    SteadyTimer& operator=(SteadyTimer&&) = delete;
+    TimerManager(const TimerManager&) = delete;
+    TimerManager& operator=(const TimerManager&) = delete;
+    TimerManager(TimerManager&&) = delete;
+    TimerManager& operator=(TimerManager&&) = delete;
 
-    [[nodiscard]] bool StartOnce(
-        SteadyDuration delay,
-        TimerCallback callback,
-        std::string* error_message = nullptr);
-    [[nodiscard]] bool StartRepeating(
-        SteadyDuration interval,
-        TimerCallback callback,
-        std::string* error_message = nullptr);
-
-    void Cancel() noexcept;
-    [[nodiscard]] bool IsActive() const noexcept;
-    [[nodiscard]] bool IsRepeating() const noexcept;
-    [[nodiscard]] SteadyDuration interval() const noexcept;
+    [[nodiscard]] TimerCreateResult CreateOnce(SteadyDuration delay, TimerCallback callback);
+    [[nodiscard]] TimerCreateResult CreateRepeating(SteadyDuration interval, TimerCallback callback);
+    [[nodiscard]] TimerErrorCode ResetOnce(TimerID timer_id, SteadyDuration delay, TimerCallback callback);
+    [[nodiscard]] TimerErrorCode ResetRepeating(TimerID timer_id, SteadyDuration interval, TimerCallback callback);
+    [[nodiscard]] TimerErrorCode Cancel(TimerID timer_id) noexcept;
+    void CancelAll() noexcept;
+    [[nodiscard]] bool Contains(TimerID timer_id) const noexcept;
+    [[nodiscard]] std::size_t size() const noexcept;
 
 private:
-    class State;
-    std::shared_ptr<State> state_;
+    class Impl;
+    std::shared_ptr<Impl> impl_;
 };
 
 } // namespace xs::core
