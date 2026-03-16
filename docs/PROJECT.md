@@ -1,4 +1,4 @@
-# 项目说明（初版）
+﻿# 项目说明（初版）
 
 本文档描述当前多进程游戏服务器框架的目标、整体架构、关键技术边界与长期约定。当前阶段仍以“工程骨架 + 规范固化”为主，不包含完整业务玩法实现。
 
@@ -10,14 +10,14 @@
 
 **非目标**
 1. 当前阶段不引入独立分布式注册中心、跨机房复制或跨地域多活部署能力。
-2. 不引入第三方 RPC 框架或序列化框架；当前仅接入基础设施级依赖 `spdlog`、`zeromq/libzmq` 与 standalone `asio`（不携带其他 Boost 组件）。
+2. 不引入第三方 RPC 框架；节点间二进制协议仍由项目自定义实现。当前仅接入基础设施级依赖 `spdlog`、`zeromq/libzmq`、standalone `asio` 与 header-only `nlohmann/json`（不携带其他 Boost 组件），其中 `nlohmann/json` 仅用于 JSON 序列化/反序列化与配置载体读写。
 3. 不在本阶段定义完整的业务玩法、场景迁移或多活写入模型。
 
 **运行环境**
 1. 兼容 Windows 与 Linux。
 2. C++ 构建使用 CMake。
 3. C# 构建使用 `dotnet`（.NET 运行时由 `nethost` 加载）。
-4. 基础第三方依赖以 vendored 源码形式统一放在 `3rd/`，当前基线为 `spdlog`、`zeromq/libzmq` 与 standalone `asio`。
+4. 基础第三方依赖以 vendored 源码形式统一放在 `3rd/`，当前基线为 `spdlog`、`zeromq/libzmq`、standalone `asio` 与 header-only `nlohmann/json`。
 
 **进程角色**
 1. `GM` 进程  
@@ -108,7 +108,8 @@
 2. Gate / Game 的启动选择器使用 `gate0`、`game0` 这类小写形式，而稳定 `NodeID` 仍为 `Gate0`、`Game0`；例如 KCP 子块字段复用 `gate.<selector>.kcp` 逻辑键名。
 3. `Game` 实例块必须显式提供内部服务地址，例如 `game.game0.service.listenEndpoint`，用于注册到 GM 并供 Gate 通过 ZeroMQ over TCP 建立节点间连接。
 4. native 日志模块当前基线为 `spdlog`；配置键名、等级与文件组织规则仍统一以 `docs/CONFIG_LOGGING.md` 为准。
-5. 日志默认输出到 `logs/` 根目录下的平铺文件，例如 `GM-2026-03-15.log`、`Gate0-2026-03-15.log`；统一等级、字段、滚动与错误码呈现规则见 `docs/CONFIG_LOGGING.md`。
+5. native 侧 JSON 序列化/反序列化与配置文件读写当前基线为 vendored header-only `nlohmann/json`；仅用于单文件 JSON 配置与后续结构化数据读写，不替代节点间二进制协议。
+6. 日志默认输出到 `logs/` 根目录下的平铺文件，例如 `GM-2026-03-15.log`、`Gate0-2026-03-15.log`；统一等级、字段、滚动与错误码呈现规则见 `docs/CONFIG_LOGGING.md`。
 
 **目录结构**
 1. `src/native/` C++ 核心、统一 `xserver-node` 入口与三类进程实现。

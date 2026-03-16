@@ -25,6 +25,10 @@ set(ENABLE_CPACK OFF CACHE BOOL "" FORCE)
 set(ENABLE_CLANG OFF CACHE BOOL "" FORCE)
 add_subdirectory(zeromq)
 
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+add_subdirectory(nlohmann_json)
+
 set(XS_ASIO_ROOT "${CMAKE_CURRENT_LIST_DIR}/asio-1.36.0")
 if (NOT EXISTS "${XS_ASIO_ROOT}/include/asio.hpp")
     message(FATAL_ERROR "Standalone Asio headers were not found under ${XS_ASIO_ROOT}.")
@@ -37,6 +41,10 @@ add_library(xs::thirdparty::spdlog ALIAS xs_thirdparty_spdlog)
 add_library(xs_thirdparty_zeromq INTERFACE)
 target_link_libraries(xs_thirdparty_zeromq INTERFACE libzmq-static)
 add_library(xs::thirdparty::zeromq ALIAS xs_thirdparty_zeromq)
+
+add_library(xs_thirdparty_nlohmann_json INTERFACE)
+target_link_libraries(xs_thirdparty_nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
+add_library(xs::thirdparty::nlohmann_json ALIAS xs_thirdparty_nlohmann_json)
 
 add_library(xs_thirdparty_asio INTERFACE)
 target_include_directories(xs_thirdparty_asio INTERFACE "${XS_ASIO_ROOT}/include")

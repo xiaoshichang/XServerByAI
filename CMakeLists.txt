@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.31.5)
+cmake_minimum_required(VERSION 3.31.5)
 
 project(XServerByAI LANGUAGES CXX)
 
@@ -13,3 +13,8 @@ option(XS_BUILD_TOOLS "Build tools" OFF)
 
 add_subdirectory(3rd)
 add_subdirectory(src/native)
+
+if (XS_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
