@@ -99,10 +99,10 @@
 5. 互操作数据结构必须保持 blittable；输入缓冲区只在调用期间借用，托管异常不得跨边界传播到 native 侧。
 
 **线程与调度模型（建议）**
-1. 每个进程采用主线程事件循环，网络 IO 与定时器以异步方式驱动。
-2. 可选轻量工作线程池处理耗时任务，保证 IO 线程低延迟。
-3. Game 内部逻辑采用固定 Tick（例如 `20ms` 或 `50ms`），Tick 频率可配置。
-
+1. 每个进程采用以 standalone `asio::io_context` 为核心的主线程事件循环，网络 IO 与定时器以异步方式驱动。
+2. 定时器与超时能力统一基于 standalone `asio::steady_timer`，项目侧只补充业务所需的封装、生命周期与取消语义。
+3. 可选轻量工作线程池应优先基于 standalone `asio` executor / `io_context::run()` 组织，必要时使用 `strand` 保证串行化，而不是额外自研调度器。
+4. Game 内部逻辑采用固定 Tick（例如 `20ms` 或 `50ms`），Tick 频率可配置。
 **配置与日志（建议）**
 1. 进程配置统一使用单个 UTF-8 JSON 载体；同一服务器组可以共享一份逻辑配置，开发期默认将 `GM` / `Gate` / `Game` 实例都放在一个配置文件中，实例选择规则见 `docs/CONFIG_LOGGING.md`。
 2. Gate / Game 的启动选择器使用 `gate0`、`game0` 这类小写形式，而稳定 `NodeID` 仍为 `Gate0`、`Game0`；例如 KCP 子块字段复用 `gate.<selector>.kcp` 逻辑键名。
