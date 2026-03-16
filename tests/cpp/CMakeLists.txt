@@ -5,3 +5,11 @@ add_executable(xs_core_json_tests
 target_link_libraries(xs_core_json_tests PRIVATE core)
 
 add_test(NAME xs_core_json_tests COMMAND xs_core_json_tests)
+
+add_executable(xs_core_time_tests
+    time_tests.cpp
+)
+
+target_link_libraries(xs_core_time_tests PRIVATE core)
+
+add_test(NAME xs_core_time_tests COMMAND xs_core_time_tests)
