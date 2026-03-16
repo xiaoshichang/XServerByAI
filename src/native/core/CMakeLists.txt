@@ -1,5 +1,7 @@
 add_library(core STATIC
     core.cpp
+    Logging.cpp
+    Logging.h
 )
 
 target_include_directories(core PUBLIC ${CMAKE_CURRENT_LIST_DIR})
