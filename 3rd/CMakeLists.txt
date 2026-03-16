@@ -1,4 +1,6 @@
-# Vendored third-party dependencies are built from local source only.
+# Vendored third-party dependencies are built or exposed from local source only.
+
+find_package(Threads REQUIRED)
 
 set(SPDLOG_BUILD_ALL OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
@@ -23,6 +25,11 @@ set(ENABLE_CPACK OFF CACHE BOOL "" FORCE)
 set(ENABLE_CLANG OFF CACHE BOOL "" FORCE)
 add_subdirectory(zeromq)
 
+set(XS_ASIO_ROOT "${CMAKE_CURRENT_LIST_DIR}/asio-1.36.0")
+if (NOT EXISTS "${XS_ASIO_ROOT}/include/asio.hpp")
+    message(FATAL_ERROR "Standalone Asio headers were not found under ${XS_ASIO_ROOT}.")
+endif()
+
 add_library(xs_thirdparty_spdlog INTERFACE)
 target_link_libraries(xs_thirdparty_spdlog INTERFACE spdlog::spdlog)
 add_library(xs::thirdparty::spdlog ALIAS xs_thirdparty_spdlog)
@@ -30,3 +37,13 @@ add_library(xs::thirdparty::spdlog ALIAS xs_thirdparty_spdlog)
 add_library(xs_thirdparty_zeromq INTERFACE)
 target_link_libraries(xs_thirdparty_zeromq INTERFACE libzmq-static)
 add_library(xs::thirdparty::zeromq ALIAS xs_thirdparty_zeromq)
+
+add_library(xs_thirdparty_asio INTERFACE)
+target_include_directories(xs_thirdparty_asio INTERFACE "${XS_ASIO_ROOT}/include")
+target_compile_definitions(xs_thirdparty_asio INTERFACE ASIO_STANDALONE=1)
+target_link_libraries(xs_thirdparty_asio INTERFACE Threads::Threads)
+if (WIN32)
+    target_compile_definitions(xs_thirdparty_asio INTERFACE _WIN32_WINNT=0x0A00 WINVER=0x0A00)
+    target_link_libraries(xs_thirdparty_asio INTERFACE ws2_32 mswsock)
+endif()
+add_library(xs::thirdparty::asio ALIAS xs_thirdparty_asio)

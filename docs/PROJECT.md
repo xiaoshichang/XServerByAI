@@ -10,14 +10,14 @@
 
 **非目标**
 1. 当前阶段不引入独立分布式注册中心、跨机房复制或跨地域多活部署能力。
-2. 不引入第三方 RPC 框架或序列化框架；当前仅接入基础设施级依赖 `spdlog` 与 `zeromq/libzmq`。
+2. 不引入第三方 RPC 框架或序列化框架；当前仅接入基础设施级依赖 `spdlog`、`zeromq/libzmq` 与 standalone `asio`（不携带其他 Boost 组件）。
 3. 不在本阶段定义完整的业务玩法、场景迁移或多活写入模型。
 
 **运行环境**
 1. 兼容 Windows 与 Linux。
 2. C++ 构建使用 CMake。
 3. C# 构建使用 `dotnet`（.NET 运行时由 `nethost` 加载）。
-4. 基础第三方依赖以 vendored 源码形式统一放在 `3rd/`，当前基线为 `spdlog` 与 `zeromq/libzmq`。
+4. 基础第三方依赖以 vendored 源码形式统一放在 `3rd/`，当前基线为 `spdlog`、`zeromq/libzmq` 与 standalone `asio`。
 
 **进程角色**
 1. `GM` 进程  
