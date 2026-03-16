@@ -1,0 +1,32 @@
+# Vendored third-party dependencies are built from local source only.
+
+set(SPDLOG_BUILD_ALL OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_EXAMPLE_HO OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_TESTS_HO OFF CACHE BOOL "" FORCE)
+set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
+set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(spdlog)
+
+set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ZMQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ENABLE_DRAFTS OFF CACHE BOOL "" FORCE)
+set(ENABLE_WS OFF CACHE BOOL "" FORCE)
+set(WITH_DOC OFF CACHE BOOL "" FORCE)
+set(WITH_DOCS OFF CACHE BOOL "" FORCE)
+set(WITH_PERF_TOOL OFF CACHE BOOL "" FORCE)
+set(ENABLE_CPACK OFF CACHE BOOL "" FORCE)
+set(ENABLE_CLANG OFF CACHE BOOL "" FORCE)
+add_subdirectory(zeromq)
+
+add_library(xs_thirdparty_spdlog INTERFACE)
+target_link_libraries(xs_thirdparty_spdlog INTERFACE spdlog::spdlog)
+add_library(xs::thirdparty::spdlog ALIAS xs_thirdparty_spdlog)
+
+add_library(xs_thirdparty_zeromq INTERFACE)
+target_link_libraries(xs_thirdparty_zeromq INTERFACE libzmq-static)
+add_library(xs::thirdparty::zeromq ALIAS xs_thirdparty_zeromq)

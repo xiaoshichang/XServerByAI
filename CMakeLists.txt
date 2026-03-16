@@ -11,5 +11,5 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 option(XS_BUILD_TESTS "Build tests" OFF)
 option(XS_BUILD_TOOLS "Build tools" OFF)
 
-# Placeholder for future targets and subdirectories.
+add_subdirectory(3rd)
 add_subdirectory(src/native)
