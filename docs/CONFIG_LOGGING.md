@@ -47,6 +47,7 @@ logs/
 3. `selector = game0` 时，加载 `game.game0` 配置块。
 4. Gate / Game 实例块都必须包含 `nodeId` 字段，且与选择器的规范 `NodeID` 一致，例如 `gate0 -> Gate0`。
 5. Gate / Game 实例块都必须提供 `service.listenEndpoint`；其中 `Game` 的该地址会在注册时映射到 `docs/PROCESS_CONTROL.md` 中的 `serviceEndpoint`，供 Gate 建立 ZeroMQ over TCP 内部连接。
+6. `gm` 配置块必须提供 `control.listenEndpoint`，作为 GM 内部控制面的监听地址。
 
 **命名与解析规则**
 1. 配置键统一使用 `lowerCamelCase`。
@@ -56,6 +57,8 @@ logs/
 5. 顶层 `logging` 作为公共默认块；若选中实例内存在 `logging` 子块，则按键覆盖公共 `logging` 字段。
 6. 数组字段整体替换，不做按索引局部 merge。
 7. 未知顶层配置块与未知 `logging` 字段默认视为配置错误，避免静默吞掉拼写错误。
+8. 已建模对象同样执行未知字段校验，例如 `serverGroup`、`gm.control`、`gate.*.service`、`gate.*.kcp` 与 `game.*.managed`。
+9. `game.*.managed.assemblyName` 为可选字段；缺失时默认回退为 `XServer.Managed.GameLogic`。
 
 **最小配置示例**
 

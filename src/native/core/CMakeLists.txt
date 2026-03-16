@@ -1,4 +1,6 @@
 add_library(core STATIC
+    Config.cpp
+    Config.h
     core.cpp
     Json.cpp
     Json.h
