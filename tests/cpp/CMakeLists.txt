@@ -29,3 +29,11 @@ add_executable(xs_net_serialization_tests
 target_link_libraries(xs_net_serialization_tests PRIVATE net)
 
 add_test(NAME xs_net_serialization_tests COMMAND xs_net_serialization_tests)
+
+add_executable(xs_ipc_active_connector_tests
+    ipc_active_connector_tests.cpp
+)
+
+target_link_libraries(xs_ipc_active_connector_tests PRIVATE ipc)
+
+add_test(NAME xs_ipc_active_connector_tests COMMAND xs_ipc_active_connector_tests)
