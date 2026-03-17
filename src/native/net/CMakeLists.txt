@@ -3,6 +3,8 @@ add_library(net STATIC
     BinarySerialization.h
     ByteOrder.h
     net.cpp
+    PacketCodec.cpp
+    PacketCodec.h
     PacketHeader.h
 )
 
