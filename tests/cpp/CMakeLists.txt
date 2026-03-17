@@ -37,6 +37,7 @@ add_executable(xs_main_event_loop_tests
 target_link_libraries(xs_main_event_loop_tests PRIVATE core)
 
 add_test(NAME xs_main_event_loop_tests COMMAND xs_main_event_loop_tests)
+
 add_executable(xs_ipc_active_connector_tests
     ipc_active_connector_tests.cpp
 )
@@ -44,3 +45,11 @@ add_executable(xs_ipc_active_connector_tests
 target_link_libraries(xs_ipc_active_connector_tests PRIVATE ipc)
 
 add_test(NAME xs_ipc_active_connector_tests COMMAND xs_ipc_active_connector_tests)
+
+add_executable(xs_ipc_passive_listener_tests
+    ipc_passive_listener_tests.cpp
+)
+
+target_link_libraries(xs_ipc_passive_listener_tests PRIVATE ipc)
+
+add_test(NAME xs_ipc_passive_listener_tests COMMAND xs_ipc_passive_listener_tests)

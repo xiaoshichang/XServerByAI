@@ -4,6 +4,8 @@ add_library(ipc STATIC
     ZmqActiveConnector.h
     ZmqContext.cpp
     ZmqContext.h
+    ZmqPassiveListener.cpp
+    ZmqPassiveListener.h
 )
 
 target_include_directories(ipc PUBLIC ${CMAKE_CURRENT_LIST_DIR})

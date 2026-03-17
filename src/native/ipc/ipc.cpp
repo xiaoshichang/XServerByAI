@@ -1,5 +1,6 @@
 #include "ZmqActiveConnector.h"
 #include "ZmqContext.h"
+#include "ZmqPassiveListener.h"
 
 #include <asio/io_context.hpp>
 
@@ -12,6 +13,9 @@ static_assert(std::is_default_constructible_v<xs::ipc::ZmqContextOptions>, "ZmqC
 static_assert(
     std::is_default_constructible_v<xs::ipc::ZmqActiveConnectorOptions>,
     "ZmqActiveConnectorOptions must remain default constructible.");
+static_assert(
+    std::is_default_constructible_v<xs::ipc::ZmqPassiveListenerOptions>,
+    "ZmqPassiveListenerOptions must remain default constructible.");
 static_assert(std::is_constructible_v<xs::ipc::ZmqContext, xs::ipc::ZmqContextOptions>, "ZmqContext must remain options-based.");
 static_assert(
     std::is_constructible_v<xs::ipc::ZmqActiveConnector,
@@ -19,3 +23,9 @@ static_assert(
                             xs::ipc::ZmqContext&,
                             xs::ipc::ZmqActiveConnectorOptions>,
     "ZmqActiveConnector must remain constructible from io_context, context and options.");
+static_assert(
+    std::is_constructible_v<xs::ipc::ZmqPassiveListener,
+                            asio::io_context&,
+                            xs::ipc::ZmqContext&,
+                            xs::ipc::ZmqPassiveListenerOptions>,
+    "ZmqPassiveListener must remain constructible from io_context, context and options.");
