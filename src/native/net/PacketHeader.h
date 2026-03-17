@@ -3,16 +3,19 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace xs::net {
+namespace xs::net
+{
 
-enum class PacketFlag : std::uint16_t {
+enum class PacketFlag : std::uint16_t
+{
     None = 0,
     Response = 1u << 0,
     Compressed = 1u << 1,
     Error = 1u << 2,
 };
 
-struct PacketHeader {
+struct PacketHeader
+{
     std::uint32_t magic;
     std::uint16_t version;
     std::uint16_t flags;
@@ -32,4 +35,4 @@ inline constexpr std::uint32_t kPacketSeqNone = 0u;
 
 static_assert(sizeof(PacketHeader) == kPacketHeaderSize, "PacketHeader wire size must remain 20 bytes");
 
-}  // namespace xs::net
+} // namespace xs::net

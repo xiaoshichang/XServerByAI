@@ -6,9 +6,11 @@
 #include <iostream>
 #include <string>
 
-namespace {
+namespace
+{
 
-struct TestConfig {
+struct TestConfig
+{
     std::string name;
     int port{};
     bool enabled{};
@@ -18,13 +20,16 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TestConfig, name, port, enabled)
 
 int g_failures = 0;
 
-void Check(bool condition, const char* expression, const char* message = nullptr) {
-    if (condition) {
+void Check(bool condition, const char* expression, const char* message = nullptr)
+{
+    if (condition)
+    {
         return;
     }
 
     std::cerr << "Check failed: " << expression;
-    if (message != nullptr) {
+    if (message != nullptr)
+    {
         std::cerr << " (" << message << ")";
     }
     std::cerr << '\n';
@@ -34,7 +39,8 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 #define XS_CHECK(expr) Check((expr), #expr)
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
 
-std::filesystem::path PrepareTestDirectory(std::string_view name) {
+std::filesystem::path PrepareTestDirectory(std::string_view name)
+{
     const std::filesystem::path path = std::filesystem::current_path() / "test-output" / std::string(name);
     std::error_code error_code;
     std::filesystem::remove_all(path, error_code);
@@ -42,19 +48,22 @@ std::filesystem::path PrepareTestDirectory(std::string_view name) {
     return path;
 }
 
-void CleanupTestDirectory(const std::filesystem::path& path) {
+void CleanupTestDirectory(const std::filesystem::path& path)
+{
     std::error_code error_code;
     std::filesystem::remove_all(path, error_code);
 }
 
-bool WriteJsonFile(const std::filesystem::path& path, const xs::core::Json& value) {
+bool WriteJsonFile(const std::filesystem::path& path, const xs::core::Json& value)
+{
     std::string error_message;
     const bool success = xs::core::SaveJsonFile(path, value, &error_message);
     XS_CHECK_MSG(success, error_message.c_str());
     return success;
 }
 
-xs::core::Json MakeValidClusterConfigJson() {
+xs::core::Json MakeValidClusterConfigJson()
+{
     return xs::core::Json{
         {"serverGroup", {{"id", "local-dev"}, {"environment", "dev"}}},
         {"logging",
@@ -81,7 +90,8 @@ xs::core::Json MakeValidClusterConfigJson() {
     };
 }
 
-void TestTryParseJsonSuccess() {
+void TestTryParseJsonSuccess()
+{
     xs::core::Json value;
     std::string error_message{"not-cleared"};
 
@@ -94,7 +104,8 @@ void TestTryParseJsonSuccess() {
     XS_CHECK(value.at("index") == 3);
 }
 
-void TestTryParseJsonFailure() {
+void TestTryParseJsonFailure()
+{
     xs::core::Json value;
     std::string error_message;
 
@@ -105,7 +116,8 @@ void TestTryParseJsonFailure() {
     XS_CHECK_MSG(error_message.find("Failed to parse JSON:") != std::string::npos, error_message.c_str());
 }
 
-void TestDeserializeTypedConfig() {
+void TestDeserializeTypedConfig()
+{
     TestConfig config{};
     std::string error_message;
 
@@ -121,7 +133,8 @@ void TestDeserializeTypedConfig() {
     XS_CHECK(config.enabled);
 }
 
-void TestSaveAndLoadJsonFileRoundTrip() {
+void TestSaveAndLoadJsonFileRoundTrip()
+{
     const std::filesystem::path base_path = PrepareTestDirectory("json-runtime-tests");
     const std::filesystem::path file_path = base_path / "config.json";
 
@@ -146,7 +159,8 @@ void TestSaveAndLoadJsonFileRoundTrip() {
     CleanupTestDirectory(base_path);
 }
 
-void TestSaveJsonFileRejectsInvalidIndent() {
+void TestSaveJsonFileRejectsInvalidIndent()
+{
     const std::filesystem::path file_path =
         std::filesystem::current_path() / "test-output" / "json-runtime-tests-invalid" / "config.json";
 
@@ -164,7 +178,8 @@ void TestSaveJsonFileRejectsInvalidIndent() {
         error_message.c_str());
 }
 
-void TestParseNodeSelector() {
+void TestParseNodeSelector()
+{
     const auto gate_selector = xs::core::ParseNodeSelector("gate12");
     XS_CHECK(gate_selector.has_value());
     XS_CHECK(gate_selector->kind == xs::core::NodeSelectorKind::Gate);
@@ -173,11 +188,13 @@ void TestParseNodeSelector() {
     XS_CHECK(!xs::core::ParseNodeSelector("bad-selector").has_value());
 }
 
-void TestLoadNodeConfigForGm() {
+void TestLoadNodeConfigForGm()
+{
     const std::filesystem::path base_path = PrepareTestDirectory("config-gm");
     const std::filesystem::path file_path = base_path / "config.json";
     const xs::core::Json config_json = MakeValidClusterConfigJson();
-    if (!WriteJsonFile(file_path, config_json)) {
+    if (!WriteJsonFile(file_path, config_json))
+    {
         CleanupTestDirectory(base_path);
         return;
     }
@@ -202,11 +219,13 @@ void TestLoadNodeConfigForGm() {
     CleanupTestDirectory(base_path);
 }
 
-void TestLoadNodeConfigForGate() {
+void TestLoadNodeConfigForGate()
+{
     const std::filesystem::path base_path = PrepareTestDirectory("config-gate");
     const std::filesystem::path file_path = base_path / "config.json";
     xs::core::Json config_json = MakeValidClusterConfigJson();
-    if (!WriteJsonFile(file_path, config_json)) {
+    if (!WriteJsonFile(file_path, config_json))
+    {
         CleanupTestDirectory(base_path);
         return;
     }
@@ -232,11 +251,13 @@ void TestLoadNodeConfigForGate() {
     CleanupTestDirectory(base_path);
 }
 
-void TestLoadNodeConfigForGame() {
+void TestLoadNodeConfigForGame()
+{
     const std::filesystem::path base_path = PrepareTestDirectory("config-game");
     const std::filesystem::path file_path = base_path / "config.json";
     const xs::core::Json config_json = MakeValidClusterConfigJson();
-    if (!WriteJsonFile(file_path, config_json)) {
+    if (!WriteJsonFile(file_path, config_json))
+    {
         CleanupTestDirectory(base_path);
         return;
     }
@@ -260,12 +281,14 @@ void TestLoadNodeConfigForGame() {
     CleanupTestDirectory(base_path);
 }
 
-void TestLoadNodeConfigRejectsUnknownTopLevelField() {
+void TestLoadNodeConfigRejectsUnknownTopLevelField()
+{
     const std::filesystem::path base_path = PrepareTestDirectory("config-unknown-top-level");
     const std::filesystem::path file_path = base_path / "config.json";
     xs::core::Json config_json = MakeValidClusterConfigJson();
     config_json["unexpected"] = xs::core::Json::object();
-    if (!WriteJsonFile(file_path, config_json)) {
+    if (!WriteJsonFile(file_path, config_json))
+    {
         CleanupTestDirectory(base_path);
         return;
     }
@@ -280,12 +303,14 @@ void TestLoadNodeConfigRejectsUnknownTopLevelField() {
     CleanupTestDirectory(base_path);
 }
 
-void TestLoadNodeConfigRejectsUnknownLoggingField() {
+void TestLoadNodeConfigRejectsUnknownLoggingField()
+{
     const std::filesystem::path base_path = PrepareTestDirectory("config-unknown-logging");
     const std::filesystem::path file_path = base_path / "config.json";
     xs::core::Json config_json = MakeValidClusterConfigJson();
     config_json["logging"]["unexpectedField"] = 1;
-    if (!WriteJsonFile(file_path, config_json)) {
+    if (!WriteJsonFile(file_path, config_json))
+    {
         CleanupTestDirectory(base_path);
         return;
     }
@@ -300,12 +325,14 @@ void TestLoadNodeConfigRejectsUnknownLoggingField() {
     CleanupTestDirectory(base_path);
 }
 
-void TestLoadNodeConfigRejectsMismatchedNodeId() {
+void TestLoadNodeConfigRejectsMismatchedNodeId()
+{
     const std::filesystem::path base_path = PrepareTestDirectory("config-mismatched-node-id");
     const std::filesystem::path file_path = base_path / "config.json";
     xs::core::Json config_json = MakeValidClusterConfigJson();
     config_json["gate"]["gate0"]["nodeId"] = "Gate7";
-    if (!WriteJsonFile(file_path, config_json)) {
+    if (!WriteJsonFile(file_path, config_json))
+    {
         CleanupTestDirectory(base_path);
         return;
     }
@@ -322,7 +349,8 @@ void TestLoadNodeConfigRejectsMismatchedNodeId() {
 
 } // namespace
 
-int main() {
+int main()
+{
     TestTryParseJsonSuccess();
     TestTryParseJsonFailure();
     TestDeserializeTypedConfig();
@@ -336,7 +364,8 @@ int main() {
     TestLoadNodeConfigRejectsUnknownLoggingField();
     TestLoadNodeConfigRejectsMismatchedNodeId();
 
-    if (g_failures != 0) {
+    if (g_failures != 0)
+    {
         std::cerr << g_failures << " JSON runtime test(s) failed.\n";
         return EXIT_FAILURE;
     }

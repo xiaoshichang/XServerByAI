@@ -24,12 +24,15 @@
 #include <unistd.h>
 #endif
 
-namespace xs::core {
-namespace {
+namespace xs::core
+{
+namespace
+{
 
 using Clock = std::chrono::system_clock;
 
-struct UtcDate {
+struct UtcDate
+{
     int year{};
     int month{};
     int day{};
@@ -37,7 +40,8 @@ struct UtcDate {
     friend bool operator==(const UtcDate&, const UtcDate&) = default;
 };
 
-std::tm ToUtcTm(const Clock::time_point& time_point) {
+std::tm ToUtcTm(const Clock::time_point& time_point)
+{
     const std::time_t raw_time = Clock::to_time_t(time_point);
     std::tm utc_tm{};
 
@@ -50,7 +54,8 @@ std::tm ToUtcTm(const Clock::time_point& time_point) {
     return utc_tm;
 }
 
-UtcDate ToUtcDate(const Clock::time_point& time_point) {
+UtcDate ToUtcDate(const Clock::time_point& time_point)
+{
     const std::tm utc_tm = ToUtcTm(time_point);
     return UtcDate{
         utc_tm.tm_year + 1900,
@@ -59,7 +64,8 @@ UtcDate ToUtcDate(const Clock::time_point& time_point) {
     };
 }
 
-std::string FormatUtcTimestamp(const Clock::time_point& time_point) {
+std::string FormatUtcTimestamp(const Clock::time_point& time_point)
+{
     const std::tm utc_tm = ToUtcTm(time_point);
     const auto total_milliseconds =
         std::chrono::duration_cast<std::chrono::milliseconds>(time_point.time_since_epoch()).count();
@@ -76,7 +82,8 @@ std::string FormatUtcTimestamp(const Clock::time_point& time_point) {
     return stream.str();
 }
 
-std::string FormatDate(const UtcDate& date) {
+std::string FormatDate(const UtcDate& date)
+{
     std::ostringstream stream;
     stream << std::setfill('0') << std::setw(4) << date.year << '-'
            << std::setw(2) << date.month << '-'
@@ -84,7 +91,8 @@ std::string FormatDate(const UtcDate& date) {
     return stream.str();
 }
 
-std::uint32_t GetCurrentProcessIdValue() noexcept {
+std::uint32_t GetCurrentProcessIdValue() noexcept
+{
 #if defined(_WIN32)
     return static_cast<std::uint32_t>(::GetCurrentProcessId());
 #else
@@ -92,8 +100,10 @@ std::uint32_t GetCurrentProcessIdValue() noexcept {
 #endif
 }
 
-spdlog::level::level_enum ToSpdlogLevel(LogLevel value) noexcept {
-    switch (value) {
+spdlog::level::level_enum ToSpdlogLevel(LogLevel value) noexcept
+{
+    switch (value)
+    {
     case LogLevel::Trace:
         return spdlog::level::trace;
     case LogLevel::Debug:
@@ -111,16 +121,20 @@ spdlog::level::level_enum ToSpdlogLevel(LogLevel value) noexcept {
     return spdlog::level::info;
 }
 
-bool IsImmediateFlushLevel(LogLevel value) noexcept {
+bool IsImmediateFlushLevel(LogLevel value) noexcept
+{
     return value == LogLevel::Error || value == LogLevel::Fatal;
 }
 
-std::string EscapeQuoted(std::string_view value) {
+std::string EscapeQuoted(std::string_view value)
+{
     std::string escaped;
     escaped.reserve(value.size());
 
-    for (const char ch : value) {
-        switch (ch) {
+    for (const char ch : value)
+    {
+        switch (ch)
+        {
         case '\\':
             escaped += "\\\\";
             break;
@@ -145,8 +159,10 @@ std::string EscapeQuoted(std::string_view value) {
     return escaped;
 }
 
-bool NeedsQuotedContextValue(std::string_view value) noexcept {
-    if (value.empty()) {
+bool NeedsQuotedContextValue(std::string_view value) noexcept
+{
+    if (value.empty())
+    {
         return true;
     }
 
@@ -155,8 +171,10 @@ bool NeedsQuotedContextValue(std::string_view value) noexcept {
     });
 }
 
-std::string FormatContextValue(std::string_view value) {
-    if (!NeedsQuotedContextValue(value)) {
+std::string FormatContextValue(std::string_view value)
+{
+    if (!NeedsQuotedContextValue(value))
+    {
         return std::string(value);
     }
 
@@ -172,16 +190,20 @@ std::string BuildLogLine(
     std::string_view message,
     std::span<const LogContextField> context,
     std::optional<std::int32_t> error_code,
-    std::string_view error_name) {
-    if (instance_id.empty()) {
+    std::string_view error_name)
+{
+    if (instance_id.empty())
+    {
         throw std::invalid_argument("Logger instance_id must not be empty.");
     }
 
-    if (category.empty()) {
+    if (category.empty())
+    {
         throw std::invalid_argument("Log category must not be empty.");
     }
 
-    if (error_code.has_value() != !error_name.empty()) {
+    if (error_code.has_value() != !error_name.empty())
+    {
         throw std::invalid_argument("errorCode and errorName must be provided together.");
     }
 
@@ -202,15 +224,18 @@ std::string BuildLogLine(
     line += EscapeQuoted(message);
     line += '"';
 
-    if (error_code.has_value()) {
+    if (error_code.has_value())
+    {
         line += " errorCode=";
         line += std::to_string(*error_code);
         line += " errorName=";
         line += error_name;
     }
 
-    for (const LogContextField& field : context) {
-        if (field.key.empty()) {
+    for (const LogContextField& field : context)
+    {
+        if (field.key.empty())
+        {
             throw std::invalid_argument("Log context key must not be empty.");
         }
 
@@ -223,14 +248,16 @@ std::string BuildLogLine(
     return line;
 }
 
-std::string BuildOpenFileError(const std::filesystem::path& path) {
+std::string BuildOpenFileError(const std::filesystem::path& path)
+{
     std::ostringstream stream;
     stream << "Failed to open log file: " << path.string();
     return stream.str();
 }
 
-class DailySizeFileSink final : public spdlog::sinks::base_sink<std::mutex> {
-public:
+class DailySizeFileSink final : public spdlog::sinks::base_sink<std::mutex>
+{
+  public:
     DailySizeFileSink(
         std::filesystem::path root_dir,
         std::string instance_id,
@@ -241,62 +268,75 @@ public:
           instance_id_(std::move(instance_id)),
           rotate_daily_(rotate_daily),
           max_file_size_bytes_(static_cast<std::uintmax_t>(max_file_size_mb) * 1024ULL * 1024ULL),
-          max_retained_files_(max_retained_files) {
-        if (instance_id_.empty()) {
+          max_retained_files_(max_retained_files)
+    {
+        if (instance_id_.empty())
+        {
             throw std::invalid_argument("Logger instance_id must not be empty.");
         }
 
-        if (max_file_size_bytes_ == 0U) {
+        if (max_file_size_bytes_ == 0U)
+        {
             throw std::invalid_argument("max_file_size_mb must be greater than zero.");
         }
     }
 
-protected:
-    void sink_it_(const spdlog::details::log_msg& msg) override {
+  protected:
+    void sink_it_(const spdlog::details::log_msg& msg) override
+    {
         const std::uintmax_t next_write_size = static_cast<std::uintmax_t>(msg.payload.size()) + 1U;
         EnsureWritableFile(Clock::now(), next_write_size);
 
         file_.write(msg.payload.data(), static_cast<std::streamsize>(msg.payload.size()));
         file_.put('\n');
 
-        if (!file_) {
+        if (!file_)
+        {
             throw std::runtime_error(BuildOpenFileError(current_path_));
         }
 
         current_size_ += next_write_size;
     }
 
-    void flush_() override {
-        if (file_.is_open()) {
+    void flush_() override
+    {
+        if (file_.is_open())
+        {
             file_.flush();
         }
     }
 
-private:
-    struct FileCandidate {
+  private:
+    struct FileCandidate
+    {
         std::size_t suffix{};
         std::filesystem::path path;
         std::uintmax_t size{};
     };
 
-    struct RetainedFile {
+    struct RetainedFile
+    {
         std::filesystem::path path;
         std::filesystem::file_time_type last_write_time;
     };
 
-    void EnsureRootDirectory() {
+    void EnsureRootDirectory()
+    {
         std::error_code error;
         std::filesystem::create_directories(root_dir_, error);
-        if (error) {
+        if (error)
+        {
             std::ostringstream stream;
             stream << "Failed to create log directory: " << root_dir_.string() << " (" << error.message() << ')';
             throw std::runtime_error(stream.str());
         }
     }
 
-    [[nodiscard]] std::filesystem::path BuildFilePath(const UtcDate& date, std::size_t suffix) const {
+    [[nodiscard]] std::filesystem::path BuildFilePath(const UtcDate& date, std::size_t suffix) const
+    {
         const std::string base_name = instance_id_ + "-" + FormatDate(date);
-        if (suffix == 0U) {
+        if (suffix == 0U)
+        {
             return root_dir_ / (base_name + ".log");
         }
 
@@ -305,25 +345,31 @@ private:
 
     [[nodiscard]] std::optional<std::size_t> TryParseSuffix(
         std::string_view file_name,
-        std::string_view base_name) const noexcept {
+        std::string_view base_name) const noexcept
+    {
         const std::string primary_name = std::string(base_name) + ".log";
-        if (file_name == primary_name) {
+        if (file_name == primary_name)
+        {
             return 0U;
         }
 
         const std::string prefix = std::string(base_name) + ".";
-        if (!file_name.starts_with(prefix) || !file_name.ends_with(".log")) {
+        if (!file_name.starts_with(prefix) || !file_name.ends_with(".log"))
+        {
             return std::nullopt;
         }
 
         const std::string_view digits = file_name.substr(prefix.size(), file_name.size() - prefix.size() - 4U);
-        if (digits.empty()) {
+        if (digits.empty())
+        {
             return std::nullopt;
         }
 
         std::size_t suffix = 0U;
-        for (const char ch : digits) {
-            if (!std::isdigit(static_cast<unsigned char>(ch))) {
+        for (const char ch : digits)
+        {
+            if (!std::isdigit(static_cast<unsigned char>(ch)))
+            {
                 return std::nullopt;
             }
 
@@ -333,41 +379,49 @@ private:
         return suffix;
     }
 
-    [[nodiscard]] std::vector<FileCandidate> ScanDailyFiles(const UtcDate& date) const {
+    [[nodiscard]] std::vector<FileCandidate> ScanDailyFiles(const UtcDate& date) const
+    {
         std::vector<FileCandidate> files;
 
         std::error_code error;
-        if (!std::filesystem::exists(root_dir_, error) || error) {
+        if (!std::filesystem::exists(root_dir_, error) || error)
+        {
             return files;
         }
 
         const std::string base_name = instance_id_ + "-" + FormatDate(date);
         std::filesystem::directory_iterator iterator(root_dir_, error);
         std::filesystem::directory_iterator end;
-        if (error) {
+        if (error)
+        {
             return files;
         }
 
-        for (; iterator != end; iterator.increment(error)) {
-            if (error) {
+        for (; iterator != end; iterator.increment(error))
+        {
+            if (error)
+            {
                 break;
             }
 
             const auto& entry = *iterator;
-            if (!entry.is_regular_file(error)) {
+            if (!entry.is_regular_file(error))
+            {
                 error.clear();
                 continue;
             }
 
             const std::string file_name = entry.path().filename().string();
             const auto suffix = TryParseSuffix(file_name, base_name);
-            if (!suffix.has_value()) {
+            if (!suffix.has_value())
+            {
                 continue;
             }
 
             std::uintmax_t file_size = 0U;
             file_size = entry.file_size(error);
-            if (error) {
+            if (error)
+            {
                 error.clear();
                 file_size = 0U;
             }
@@ -388,27 +442,33 @@ private:
     [[nodiscard]] std::pair<std::size_t, std::uintmax_t> SelectWritableFile(
         const UtcDate& date,
         std::uintmax_t next_write_size,
-        bool force_new_file) const {
+        bool force_new_file) const
+    {
         const std::vector<FileCandidate> files = ScanDailyFiles(date);
-        if (files.empty()) {
+        if (files.empty())
+        {
             return {0U, 0U};
         }
 
         const FileCandidate& newest = files.back();
-        if (force_new_file) {
+        if (force_new_file)
+        {
             return {newest.suffix + 1U, 0U};
         }
 
-        if (newest.size + next_write_size <= max_file_size_bytes_) {
+        if (newest.size + next_write_size <= max_file_size_bytes_)
+        {
             return {newest.suffix, newest.size};
         }
 
         return {newest.suffix + 1U, 0U};
     }
 
-    void CleanupRetainedFiles() {
+    void CleanupRetainedFiles()
+    {
         std::error_code error;
-        if (!std::filesystem::exists(root_dir_, error) || error) {
+        if (!std::filesystem::exists(root_dir_, error) || error)
+        {
             return;
         }
 
@@ -416,32 +476,39 @@ private:
         const std::string prefix = instance_id_ + "-";
         std::filesystem::directory_iterator iterator(root_dir_, error);
         std::filesystem::directory_iterator end;
-        if (error) {
+        if (error)
+        {
             return;
         }
 
-        for (; iterator != end; iterator.increment(error)) {
-            if (error) {
+        for (; iterator != end; iterator.increment(error))
+        {
+            if (error)
+            {
                 break;
             }
 
             const auto& entry = *iterator;
-            if (!entry.is_regular_file(error)) {
+            if (!entry.is_regular_file(error))
+            {
                 error.clear();
                 continue;
             }
 
             const std::string file_name = entry.path().filename().string();
-            if (!file_name.starts_with(prefix) || !file_name.ends_with(".log")) {
+            if (!file_name.starts_with(prefix) || !file_name.ends_with(".log"))
+            {
                 continue;
             }
 
-            if (entry.path() == current_path_) {
+            if (entry.path() == current_path_)
+            {
                 continue;
             }
 
             const auto last_write_time = entry.last_write_time(error);
-            if (error) {
+            if (error)
+            {
                 error.clear();
                 continue;
             }
@@ -452,7 +519,8 @@ private:
             });
         }
 
-        if (files.size() + 1U <= max_retained_files_) {
+        if (files.size() + 1U <= max_retained_files_)
+        {
             return;
         }
 
@@ -461,23 +529,27 @@ private:
         });
 
         const std::size_t removable_count = (files.size() + 1U) - max_retained_files_;
-        for (std::size_t index = 0; index < removable_count && index < files.size(); ++index) {
+        for (std::size_t index = 0; index < removable_count && index < files.size(); ++index)
+        {
             std::filesystem::remove(files[index].path, error);
             error.clear();
         }
     }
 
-    void OpenFile(const UtcDate& date, std::size_t suffix, std::uintmax_t existing_size) {
+    void OpenFile(const UtcDate& date, std::size_t suffix, std::uintmax_t existing_size)
+    {
         EnsureRootDirectory();
 
-        if (file_.is_open()) {
+        if (file_.is_open())
+        {
             file_.flush();
             file_.close();
         }
 
         current_path_ = BuildFilePath(date, suffix);
         file_.open(current_path_, std::ios::binary | std::ios::app);
-        if (!file_.is_open()) {
+        if (!file_.is_open())
+        {
             throw std::runtime_error(BuildOpenFileError(current_path_));
         }
 
@@ -485,10 +557,12 @@ private:
         current_suffix_ = suffix;
         current_size_ = existing_size;
 
-        if (current_size_ == 0U) {
+        if (current_size_ == 0U)
+        {
             std::error_code error;
             const auto file_size = std::filesystem::file_size(current_path_, error);
-            if (!error) {
+            if (!error)
+            {
                 current_size_ = file_size;
             }
         }
@@ -496,13 +570,15 @@ private:
         CleanupRetainedFiles();
     }
 
-    void EnsureWritableFile(const Clock::time_point& now, std::uintmax_t next_write_size) {
+    void EnsureWritableFile(const Clock::time_point& now, std::uintmax_t next_write_size)
+    {
         const UtcDate target_date = (!rotate_daily_ && current_date_.has_value()) ? *current_date_ : ToUtcDate(now);
         const bool has_open_file = file_.is_open();
         const bool date_changed = !current_date_.has_value() || target_date != *current_date_;
         const bool size_exceeded = has_open_file && (current_size_ + next_write_size > max_file_size_bytes_);
 
-        if (!has_open_file || date_changed || size_exceeded) {
+        if (!has_open_file || date_changed || size_exceeded)
+        {
             const bool force_new_file = has_open_file && !date_changed && size_exceeded;
             const auto [suffix, existing_size] = SelectWritableFile(target_date, next_write_size, force_new_file);
             OpenFile(target_date, suffix, existing_size);
@@ -523,16 +599,20 @@ private:
 
 } // namespace
 
-class Logger::Impl {
-public:
+class Logger::Impl
+{
+  public:
     explicit Impl(LoggerOptions options)
-        : options_(std::move(options)), process_id_(GetCurrentProcessIdValue()) {
+        : options_(std::move(options)), process_id_(GetCurrentProcessIdValue())
+    {
         std::string error_message;
-        if (!ValidateLoggingConfig(options_.config, &error_message)) {
+        if (!ValidateLoggingConfig(options_.config, &error_message))
+        {
             throw std::invalid_argument(error_message);
         }
 
-        if (options_.instance_id.empty()) {
+        if (options_.instance_id.empty())
+        {
             throw std::invalid_argument("Logger instance_id must not be empty.");
         }
 
@@ -549,9 +629,11 @@ public:
 
         const auto flush_interval = std::chrono::milliseconds(options_.config.flush_interval_ms);
         flush_thread_ = std::jthread([this, flush_interval](std::stop_token stop_token) {
-            while (!stop_token.stop_requested()) {
+            while (!stop_token.stop_requested())
+            {
                 std::this_thread::sleep_for(flush_interval);
-                if (stop_token.stop_requested()) {
+                if (stop_token.stop_requested())
+                {
                     break;
                 }
 
@@ -560,12 +642,15 @@ public:
         });
     }
 
-    ~Impl() {
-        if (flush_thread_.joinable()) {
+    ~Impl()
+    {
+        if (flush_thread_.joinable())
+        {
             flush_thread_.request_stop();
         }
 
-        if (logger_) {
+        if (logger_)
+        {
             logger_->flush();
         }
     }
@@ -576,7 +661,8 @@ public:
         std::string_view message,
         std::span<const LogContextField> context,
         std::optional<std::int32_t> error_code,
-        std::string_view error_name) const {
+        std::string_view error_name) const
+    {
         const std::string line = BuildLogLine(
             options_.process_type,
             options_.instance_id,
@@ -589,20 +675,23 @@ public:
             error_name);
 
         logger_->log(ToSpdlogLevel(level), "{}", line);
-        if (IsImmediateFlushLevel(level)) {
+        if (IsImmediateFlushLevel(level))
+        {
             logger_->flush();
         }
     }
 
-    void Flush() const {
+    void Flush() const
+    {
         logger_->flush();
     }
 
-    [[nodiscard]] const LoggerOptions& options() const noexcept {
+    [[nodiscard]] const LoggerOptions& options() const noexcept
+    {
         return options_;
     }
 
-private:
+  private:
     LoggerOptions options_;
     std::uint32_t process_id_{};
     std::shared_ptr<spdlog::logger> logger_;
@@ -610,7 +699,9 @@ private:
 };
 
 Logger::Logger(LoggerOptions options)
-    : impl_(std::make_unique<Impl>(std::move(options))) {}
+    : impl_(std::make_unique<Impl>(std::move(options)))
+{
+}
 
 Logger::~Logger() = default;
 
@@ -620,48 +711,60 @@ void Logger::Log(
     std::string_view message,
     std::span<const LogContextField> context,
     std::optional<std::int32_t> error_code,
-    std::string_view error_name) const {
+    std::string_view error_name) const
+{
     impl_->Log(level, category, message, context, error_code, error_name);
 }
 
-void Logger::Flush() const {
+void Logger::Flush() const
+{
     impl_->Flush();
 }
 
-const LoggerOptions& Logger::options() const noexcept {
+const LoggerOptions& Logger::options() const noexcept
+{
     return impl_->options();
 }
 
-std::optional<LogLevel> ParseLogLevel(std::string_view value) noexcept {
-    if (value == "Trace") {
+std::optional<LogLevel> ParseLogLevel(std::string_view value) noexcept
+{
+    if (value == "Trace")
+    {
         return LogLevel::Trace;
     }
 
-    if (value == "Debug") {
+    if (value == "Debug")
+    {
         return LogLevel::Debug;
     }
 
-    if (value == "Info") {
+    if (value == "Info")
+    {
         return LogLevel::Info;
     }
 
-    if (value == "Warn") {
+    if (value == "Warn")
+    {
         return LogLevel::Warn;
     }
 
-    if (value == "Error") {
+    if (value == "Error")
+    {
         return LogLevel::Error;
     }
 
-    if (value == "Fatal") {
+    if (value == "Fatal")
+    {
         return LogLevel::Fatal;
     }
 
     return std::nullopt;
 }
 
-std::string_view LogLevelName(LogLevel value) noexcept {
-    switch (value) {
+std::string_view LogLevelName(LogLevel value) noexcept
+{
+    switch (value)
+    {
     case LogLevel::Trace:
         return "Trace";
     case LogLevel::Debug:
@@ -679,8 +782,10 @@ std::string_view LogLevelName(LogLevel value) noexcept {
     return "Info";
 }
 
-std::string_view ProcessTypeName(ProcessType value) noexcept {
-    switch (value) {
+std::string_view ProcessTypeName(ProcessType value) noexcept
+{
+    switch (value)
+    {
     case ProcessType::Gm:
         return "GM";
     case ProcessType::Gate:
@@ -692,29 +797,35 @@ std::string_view ProcessTypeName(ProcessType value) noexcept {
     return "GM";
 }
 
-bool ValidateLoggingConfig(const LoggingConfig& config, std::string* error_message) {
+bool ValidateLoggingConfig(const LoggingConfig& config, std::string* error_message)
+{
     auto set_error = [error_message](std::string_view message) {
-        if (error_message != nullptr) {
+        if (error_message != nullptr)
+        {
             *error_message = std::string(message);
         }
     };
 
-    if (config.root_dir.empty()) {
+    if (config.root_dir.empty())
+    {
         set_error("logging.rootDir must not be empty.");
         return false;
     }
 
-    if (config.flush_interval_ms == 0U) {
+    if (config.flush_interval_ms == 0U)
+    {
         set_error("logging.flushIntervalMs must be greater than zero.");
         return false;
     }
 
-    if (config.max_file_size_mb == 0U) {
+    if (config.max_file_size_mb == 0U)
+    {
         set_error("logging.maxFileSizeMB must be greater than zero.");
         return false;
     }
 
-    if (config.max_retained_files == 0U) {
+    if (config.max_retained_files == 0U)
+    {
         set_error("logging.maxRetainedFiles must be greater than zero.");
         return false;
     }

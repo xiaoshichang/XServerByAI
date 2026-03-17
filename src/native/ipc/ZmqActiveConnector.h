@@ -14,9 +14,11 @@
 #include <string_view>
 #include <vector>
 
-namespace xs::ipc {
+namespace xs::ipc
+{
 
-enum class ZmqConnectionState : std::uint8_t {
+enum class ZmqConnectionState : std::uint8_t
+{
     Stopped = 0,
     Connecting = 1,
     Connected = 2,
@@ -28,7 +30,8 @@ enum class ZmqConnectionState : std::uint8_t {
 using ZmqMessageHandler = std::function<void(std::vector<std::byte>)>;
 using ZmqStateHandler = std::function<void(ZmqConnectionState)>;
 
-struct ZmqActiveConnectorOptions {
+struct ZmqActiveConnectorOptions
+{
     std::string remote_endpoint{};
     std::string routing_id{};
     std::chrono::milliseconds poll_interval{std::chrono::milliseconds(1)};
@@ -39,8 +42,9 @@ struct ZmqActiveConnectorOptions {
     int handshake_interval_ms{3000};
 };
 
-class ZmqActiveConnector final {
-public:
+class ZmqActiveConnector final
+{
+  public:
     ZmqActiveConnector(asio::io_context& io_context, ZmqContext& context, ZmqActiveConnectorOptions options = {});
     ~ZmqActiveConnector();
 
@@ -61,7 +65,7 @@ public:
     [[nodiscard]] const ZmqActiveConnectorOptions& options() const noexcept;
     [[nodiscard]] std::string_view last_error_message() const noexcept;
 
-private:
+  private:
     class Impl;
     std::shared_ptr<Impl> impl_;
 };

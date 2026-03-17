@@ -7,7 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
-namespace xs::core {
+namespace xs::core
+{
 
 using Json = nlohmann::json;
 using OrderedJson = nlohmann::ordered_json;
@@ -22,27 +23,36 @@ using OrderedJson = nlohmann::ordered_json;
     char indent_char = ' ');
 
 template <typename T>
-[[nodiscard]] Json SerializeJson(const T& value) {
+[[nodiscard]] Json SerializeJson(const T& value)
+{
     return Json(value);
 }
 
 template <typename T>
-[[nodiscard]] bool TryDeserializeJson(const Json& source, T* output, std::string* error_message = nullptr) {
-    if (output == nullptr) {
-        if (error_message != nullptr) {
+[[nodiscard]] bool TryDeserializeJson(const Json& source, T* output, std::string* error_message = nullptr)
+{
+    if (output == nullptr)
+    {
+        if (error_message != nullptr)
+        {
             *error_message = "JSON destination object must not be null.";
         }
         return false;
     }
 
-    try {
+    try
+    {
         source.get_to(*output);
-        if (error_message != nullptr) {
+        if (error_message != nullptr)
+        {
             error_message->clear();
         }
         return true;
-    } catch (const std::exception& exception) {
-        if (error_message != nullptr) {
+    }
+    catch (const std::exception& exception)
+    {
+        if (error_message != nullptr)
+        {
             *error_message = std::string{"Failed to deserialize JSON: "} + exception.what();
         }
         return false;
@@ -50,9 +60,11 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] bool TryParseJsonAs(std::string_view content, T* output, std::string* error_message = nullptr) {
+[[nodiscard]] bool TryParseJsonAs(std::string_view content, T* output, std::string* error_message = nullptr)
+{
     Json json_value;
-    if (!TryParseJson(content, &json_value, error_message)) {
+    if (!TryParseJson(content, &json_value, error_message))
+    {
         return false;
     }
 
@@ -63,9 +75,11 @@ template <typename T>
 [[nodiscard]] bool TryLoadJsonFileAs(
     const std::filesystem::path& path,
     T* output,
-    std::string* error_message = nullptr) {
+    std::string* error_message = nullptr)
+{
     Json json_value;
-    if (!TryLoadJsonFile(path, &json_value, error_message)) {
+    if (!TryLoadJsonFile(path, &json_value, error_message))
+    {
         return false;
     }
 
@@ -78,7 +92,8 @@ template <typename T>
     const T& value,
     std::string* error_message = nullptr,
     int indent = 2,
-    char indent_char = ' ') {
+    char indent_char = ' ')
+{
     return SaveJsonFile(path, SerializeJson(value), error_message, indent, indent_char);
 }
 

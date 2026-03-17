@@ -62,6 +62,13 @@
 4. 除进程入口 `main` 与必须暴露给外部工具链的符号外，不应向全局命名空间暴露项目类型。
 5. 新增更细粒度的命名空间时，继续使用小写或 `lower_snake_case`，避免混入 `PascalCase`。
 
+**代码块大括号风格**
+1. C++ 与 C# 代码统一采用 Allman 风格，代码块的左花括号 `{` 必须另起一行。
+2. 该约束仅适用于项目自有源码与测试代码，例如 `src/`、`tests/` 下的文件；`3rd/` 中 vendored 第三方代码不要求按此规则调整，也不应为此做样式改写。
+3. 该约束适用于命名空间、类、结构体、枚举、函数以及 `if` / `else` / `for` / `while` / `switch` / `try` / `catch` 等块级语句。
+4. C++ 指针与引用采用贴近类型的写法，统一写成 `T* value`、`T& value`、`T& operator=(const T&) = delete;`，不写成 `T *value`、`T &value` 或 `T &operator=(const T &) = delete;`。
+5. 新增代码与修改过的既有代码都应按此规则整理，避免在同一文件内混用同行大括号与另起一行两种写法，以及混用不同的指针/引用对齐风格。
+
 **C# 命名空间规则**
 1. 所有 managed 项目使用 `XServer.Managed` 作为根命名空间前缀。
 2. 项目默认命名空间与程序集名保持一致，例如 `XServer.Managed.Foundation`、`XServer.Managed.GameLogic`。

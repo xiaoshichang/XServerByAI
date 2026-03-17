@@ -16,50 +16,63 @@
 #include <pthread.h>
 #endif
 
-namespace xs::core {
-namespace {
+namespace xs::core
+{
+namespace
+{
 
-void ClearError(std::string* error_message) {
-    if (error_message != nullptr) {
+void ClearError(std::string* error_message)
+{
+    if (error_message != nullptr)
+    {
         error_message->clear();
     }
 }
 
-bool SetError(std::string message, std::string* error_message) {
-    if (error_message != nullptr) {
+bool SetError(std::string message, std::string* error_message)
+{
+    if (error_message != nullptr)
+    {
         *error_message = std::move(message);
     }
     return false;
 }
 
 #if defined(_WIN32)
-std::wstring Utf8ToWide(std::string_view value) {
-    if (value.empty()) {
+std::wstring Utf8ToWide(std::string_view value)
+{
+    if (value.empty())
+    {
         return {};
     }
 
     const int required_size = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (required_size <= 0) {
+    if (required_size <= 0)
+    {
         return {};
     }
 
     std::wstring wide(static_cast<std::size_t>(required_size), L'\0');
     const int converted_size =
         MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), wide.data(), required_size);
-    if (converted_size != required_size) {
+    if (converted_size != required_size)
+    {
         return {};
     }
 
     return wide;
 }
 
-std::string WideToUtf8(const wchar_t* value) {
-    if (value == nullptr || *value == L'\0') {
+std::string WideToUtf8(const wchar_t* value)
+{
+    if (value == nullptr || *value == L'\0')
+    {
         return {};
     }
 
     const int required_size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
-    if (required_size <= 1) {
+    if (required_size <= 1)
+    {
         return {};
     }
 
@@ -73,7 +86,8 @@ std::string WideToUtf8(const wchar_t* value) {
         required_size,
         nullptr,
         nullptr);
-    if (converted_size != required_size) {
+    if (converted_size != required_size)
+    {
         return {};
     }
 
@@ -82,7 +96,8 @@ std::string WideToUtf8(const wchar_t* value) {
 }
 #endif
 
-enum class ExecutorState {
+enum class ExecutorState
+{
     stopped,
     running,
     stopping,
@@ -90,18 +105,23 @@ enum class ExecutorState {
 
 } // namespace
 
-class CoreLoopExecutor::Impl final {
-public:
+class CoreLoopExecutor::Impl final
+{
+  public:
     explicit Impl(CoreLoopExecutorOptions options)
-        : options_(std::move(options)) {
+        : options_(std::move(options))
+    {
     }
 
-    bool Start(std::string* error_message) {
-        if (state_ != ExecutorState::stopped) {
+    bool Start(std::string* error_message)
+    {
+        if (state_ != ExecutorState::stopped)
+        {
             return SetError("Core loop executor is already running.", error_message);
         }
 
-        if (options_.thread_name.empty()) {
+        if (options_.thread_name.empty())
+        {
             return SetError("Core loop executor thread name must not be empty.", error_message);
         }
 
@@ -109,16 +129,20 @@ public:
         work_guard_.emplace(io_context_.get_executor());
         state_ = ExecutorState::running;
 
-        if (!SetCurrentThreadName(options_.thread_name, error_message)) {
+        if (!SetCurrentThreadName(options_.thread_name, error_message))
+        {
             work_guard_.reset();
             io_context_.stop();
             state_ = ExecutorState::stopped;
             return false;
         }
 
-        try {
+        try
+        {
             io_context_.run();
-        } catch (const std::exception& exception) {
+        }
+        catch (const std::exception& exception)
+        {
             work_guard_.reset();
             io_context_.stop();
             state_ = ExecutorState::stopped;
@@ -131,8 +155,10 @@ public:
         return true;
     }
 
-    void Stop() noexcept {
-        if (state_ == ExecutorState::stopped) {
+    void Stop() noexcept
+    {
+        if (state_ == ExecutorState::stopped)
+        {
             return;
         }
 
@@ -141,62 +167,74 @@ public:
         io_context_.stop();
     }
 
-    [[nodiscard]] bool IsRunning() const noexcept {
+    [[nodiscard]] bool IsRunning() const noexcept
+    {
         return state_ != ExecutorState::stopped;
     }
 
-    [[nodiscard]] const CoreLoopExecutorOptions& options() const noexcept {
+    [[nodiscard]] const CoreLoopExecutorOptions& options() const noexcept
+    {
         return options_;
     }
 
-    [[nodiscard]] asio::any_io_executor executor() noexcept {
+    [[nodiscard]] asio::any_io_executor executor() noexcept
+    {
         return io_context_.get_executor();
     }
 
-    [[nodiscard]] asio::io_context& context() noexcept {
+    [[nodiscard]] asio::io_context& context() noexcept
+    {
         return io_context_;
     }
 
-private:
+  private:
     CoreLoopExecutorOptions options_{};
     asio::io_context io_context_{1};
     std::optional<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_{};
     ExecutorState state_{ExecutorState::stopped};
 };
 
-bool SetCurrentThreadName(std::string_view name, std::string* error_message) {
-    if (name.empty()) {
+bool SetCurrentThreadName(std::string_view name, std::string* error_message)
+{
+    if (name.empty())
+    {
         return SetError("Thread name must not be empty.", error_message);
     }
 
 #if defined(_WIN32)
     const auto wide_name = Utf8ToWide(name);
-    if (wide_name.empty()) {
+    if (wide_name.empty())
+    {
         return SetError("Failed to convert thread name to UTF-16.", error_message);
     }
 
     const HRESULT result = SetThreadDescription(GetCurrentThread(), wide_name.c_str());
-    if (FAILED(result)) {
+    if (FAILED(result))
+    {
         return SetError("Failed to set current thread name.", error_message);
     }
 #elif defined(__APPLE__)
     std::string thread_name{name};
     constexpr std::size_t kMaxLength = 63;
-    if (thread_name.size() > kMaxLength) {
+    if (thread_name.size() > kMaxLength)
+    {
         thread_name.resize(kMaxLength);
     }
 
-    if (pthread_setname_np(thread_name.c_str()) != 0) {
+    if (pthread_setname_np(thread_name.c_str()) != 0)
+    {
         return SetError("Failed to set current thread name.", error_message);
     }
 #else
     std::string thread_name{name};
     constexpr std::size_t kMaxLength = 15;
-    if (thread_name.size() > kMaxLength) {
+    if (thread_name.size() > kMaxLength)
+    {
         thread_name.resize(kMaxLength);
     }
 
-    if (pthread_setname_np(pthread_self(), thread_name.c_str()) != 0) {
+    if (pthread_setname_np(pthread_self(), thread_name.c_str()) != 0)
+    {
         return SetError("Failed to set current thread name.", error_message);
     }
 #endif
@@ -205,10 +243,12 @@ bool SetCurrentThreadName(std::string_view name, std::string* error_message) {
     return true;
 }
 
-std::string CurrentThreadName() {
+std::string CurrentThreadName()
+{
 #if defined(_WIN32)
     PWSTR description = nullptr;
-    if (FAILED(GetThreadDescription(GetCurrentThread(), &description)) || description == nullptr) {
+    if (FAILED(GetThreadDescription(GetCurrentThread(), &description)) || description == nullptr)
+    {
         return {};
     }
 
@@ -217,14 +257,16 @@ std::string CurrentThreadName() {
     return thread_name;
 #elif defined(__APPLE__)
     char buffer[64]{};
-    if (pthread_getname_np(pthread_self(), buffer, sizeof(buffer)) != 0) {
+    if (pthread_getname_np(pthread_self(), buffer, sizeof(buffer)) != 0)
+    {
         return {};
     }
 
     return std::string(buffer);
 #else
     char buffer[16]{};
-    if (pthread_getname_np(pthread_self(), buffer, sizeof(buffer)) != 0) {
+    if (pthread_getname_np(pthread_self(), buffer, sizeof(buffer)) != 0)
+    {
         return {};
     }
 
@@ -233,36 +275,45 @@ std::string CurrentThreadName() {
 }
 
 CoreLoopExecutor::CoreLoopExecutor(CoreLoopExecutorOptions options)
-    : impl_(std::make_unique<Impl>(std::move(options))) {
+    : impl_(std::make_unique<Impl>(std::move(options)))
+{
 }
 
-CoreLoopExecutor::~CoreLoopExecutor() {
+CoreLoopExecutor::~CoreLoopExecutor()
+{
     Stop();
 }
 
-bool CoreLoopExecutor::Start(std::string* error_message) {
+bool CoreLoopExecutor::Start(std::string* error_message)
+{
     return impl_->Start(error_message);
 }
 
-void CoreLoopExecutor::Stop() noexcept {
-    if (impl_ != nullptr) {
+void CoreLoopExecutor::Stop() noexcept
+{
+    if (impl_ != nullptr)
+    {
         impl_->Stop();
     }
 }
 
-bool CoreLoopExecutor::IsRunning() const noexcept {
+bool CoreLoopExecutor::IsRunning() const noexcept
+{
     return impl_ != nullptr && impl_->IsRunning();
 }
 
-const CoreLoopExecutorOptions& CoreLoopExecutor::options() const noexcept {
+const CoreLoopExecutorOptions& CoreLoopExecutor::options() const noexcept
+{
     return impl_->options();
 }
 
-asio::any_io_executor CoreLoopExecutor::executor() noexcept {
+asio::any_io_executor CoreLoopExecutor::executor() noexcept
+{
     return impl_->executor();
 }
 
-asio::io_context& CoreLoopExecutor::context() noexcept {
+asio::io_context& CoreLoopExecutor::context() noexcept
+{
     return impl_->context();
 }
 

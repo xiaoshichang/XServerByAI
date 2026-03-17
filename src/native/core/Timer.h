@@ -10,13 +10,15 @@
 #include <memory>
 #include <string_view>
 
-namespace xs::core {
+namespace xs::core
+{
 
 using TimerID = std::int64_t;
 using TimerCreateResult = std::int64_t;
 using TimerCallback = std::function<void()>;
 
-enum class TimerErrorCode : TimerCreateResult {
+enum class TimerErrorCode : TimerCreateResult
+{
     None = 0,
     InvalidTimerID = -1,
     TimerNotFound = -2,
@@ -30,8 +32,9 @@ enum class TimerErrorCode : TimerCreateResult {
 [[nodiscard]] TimerErrorCode TimerErrorFromCreateResult(TimerCreateResult value) noexcept;
 [[nodiscard]] std::string_view TimerErrorMessage(TimerErrorCode error_code) noexcept;
 
-class TimerManager final {
-public:
+class TimerManager final
+{
+  public:
     explicit TimerManager(asio::io_context& io_context);
     ~TimerManager();
 
@@ -49,7 +52,7 @@ public:
     [[nodiscard]] bool Contains(TimerID timer_id) const noexcept;
     [[nodiscard]] std::size_t size() const noexcept;
 
-private:
+  private:
     class Impl;
     std::shared_ptr<Impl> impl_;
 };

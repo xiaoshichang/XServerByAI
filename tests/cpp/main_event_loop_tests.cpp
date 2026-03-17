@@ -10,17 +10,21 @@
 #include <thread>
 #include <utility>
 
-namespace {
+namespace
+{
 
 int g_failures = 0;
 
-void Check(bool condition, const char* expression, const char* message = nullptr) {
-    if (condition) {
+void Check(bool condition, const char* expression, const char* message = nullptr)
+{
+    if (condition)
+    {
         return;
     }
 
     std::cerr << "Check failed: " << expression;
-    if (message != nullptr) {
+    if (message != nullptr)
+    {
         std::cerr << " (" << message << ")";
     }
     std::cerr << '\n';
@@ -30,7 +34,8 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 #define XS_CHECK(expr) Check((expr), #expr)
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
 
-void TestMainEventLoopRunsHooksOnCurrentThread() {
+void TestMainEventLoopRunsHooksOnCurrentThread()
+{
     xs::core::MainEventLoop event_loop({.thread_name = "xs-main-loop1"});
     const auto caller_thread_id = std::this_thread::get_id();
     std::string start_thread_name;
@@ -40,7 +45,8 @@ void TestMainEventLoopRunsHooksOnCurrentThread() {
 
     xs::core::MainEventLoopHooks hooks;
     hooks.on_start = [&](xs::core::MainEventLoop& running_loop, std::string* error_message) {
-        if (error_message != nullptr) {
+        if (error_message != nullptr)
+        {
             error_message->clear();
         }
 
@@ -63,12 +69,14 @@ void TestMainEventLoopRunsHooksOnCurrentThread() {
     XS_CHECK(!event_loop.IsRunning());
 }
 
-void TestMainEventLoopRejectsInvalidTickConfiguration() {
+void TestMainEventLoopRejectsInvalidTickConfiguration()
+{
     xs::core::MainEventLoop zero_interval_loop({.thread_name = "xs-main-loop2"});
     std::string error_message{"not-cleared"};
 
     XS_CHECK(!zero_interval_loop.Run(
-        {.on_tick = [](xs::core::MainEventLoop&, const xs::core::MainEventLoopTickInfo&) {}},
+        {.on_tick = [](xs::core::MainEventLoop&, const xs::core::MainEventLoopTickInfo&) {
+        }},
         &error_message));
     XS_CHECK_MSG(
         error_message.find("requires a positive tick interval") != std::string::npos,
@@ -91,7 +99,8 @@ void TestMainEventLoopRejectsInvalidTickConfiguration() {
         error_message.c_str());
 }
 
-void TestMainEventLoopDrivesTicksAndPreScheduledTimers() {
+void TestMainEventLoopDrivesTicksAndPreScheduledTimers()
+{
     xs::core::MainEventLoop event_loop(
         {.thread_name = "xs-main-loop-tick", .tick_interval = std::chrono::milliseconds(2)});
     bool timer_fired = false;
@@ -111,7 +120,8 @@ void TestMainEventLoopDrivesTicksAndPreScheduledTimers() {
         last_tick_count = tick_info.tick_count;
         last_delta = tick_info.delta;
         ++tick_calls;
-        if (tick_calls == 3) {
+        if (tick_calls == 3)
+        {
             running_loop.RequestStop();
         }
     };
@@ -126,13 +136,15 @@ void TestMainEventLoopDrivesTicksAndPreScheduledTimers() {
     XS_CHECK(event_loop.timers().size() == 0);
 }
 
-void TestMainEventLoopPropagatesStartupFailure() {
+void TestMainEventLoopPropagatesStartupFailure()
+{
     xs::core::MainEventLoop event_loop({.thread_name = "xs-main-loop-fail"});
     bool stop_called = false;
 
     xs::core::MainEventLoopHooks hooks;
     hooks.on_start = [](xs::core::MainEventLoop&, std::string* error_message) {
-        if (error_message != nullptr) {
+        if (error_message != nullptr)
+        {
             *error_message = "startup failed";
         }
         return false;
@@ -148,7 +160,8 @@ void TestMainEventLoopPropagatesStartupFailure() {
     XS_CHECK(!event_loop.IsRunning());
 }
 
-void TestMainEventLoopPropagatesTickExceptions() {
+void TestMainEventLoopPropagatesTickExceptions()
+{
     xs::core::MainEventLoop event_loop(
         {.thread_name = "xs-main-loop-throw", .tick_interval = std::chrono::milliseconds(1)});
     bool stop_called = false;
@@ -170,14 +183,16 @@ void TestMainEventLoopPropagatesTickExceptions() {
 
 } // namespace
 
-int main() {
+int main()
+{
     TestMainEventLoopRunsHooksOnCurrentThread();
     TestMainEventLoopRejectsInvalidTickConfiguration();
     TestMainEventLoopDrivesTicksAndPreScheduledTimers();
     TestMainEventLoopPropagatesStartupFailure();
     TestMainEventLoopPropagatesTickExceptions();
 
-    if (g_failures != 0) {
+    if (g_failures != 0)
+    {
         std::cerr << g_failures << " main event loop test(s) failed.\n";
         return EXIT_FAILURE;
     }

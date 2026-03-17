@@ -22,6 +22,9 @@ static_assert(
 static_assert(std::is_default_constructible_v<asio::io_context>, "Asio io_context must remain available");
 static_assert(xs::net::kPacketMagic == 0x47535052u, "Packet magic must match the protocol spec");
 
-namespace xs::net {
-void placeholder() {}
+namespace xs::net
+{
+void placeholder()
+{
 }
+} // namespace xs::net

@@ -8,9 +8,11 @@
 #include <string>
 #include <string_view>
 
-namespace xs::net {
+namespace xs::net
+{
 
-enum class SerializationErrorCode : std::uint8_t {
+enum class SerializationErrorCode : std::uint8_t
+{
     None = 0,
     BufferTooSmall = 1,
     LengthOverflow = 2,
@@ -20,8 +22,9 @@ enum class SerializationErrorCode : std::uint8_t {
 
 [[nodiscard]] std::string_view SerializationErrorMessage(SerializationErrorCode error_code) noexcept;
 
-class BinaryWriter final {
-public:
+class BinaryWriter final
+{
+  public:
     explicit BinaryWriter(std::span<std::byte> buffer) noexcept;
 
     [[nodiscard]] bool WriteUInt8(std::uint8_t value) noexcept;
@@ -40,7 +43,7 @@ public:
     [[nodiscard]] SerializationErrorCode error() const noexcept;
     [[nodiscard]] std::span<const std::byte> written() const noexcept;
 
-private:
+  private:
     [[nodiscard]] bool SetError(SerializationErrorCode error_code) noexcept;
     [[nodiscard]] bool SetSuccess() noexcept;
     [[nodiscard]] bool CanWrite(std::size_t size) noexcept;
@@ -50,8 +53,9 @@ private:
     SerializationErrorCode error_{SerializationErrorCode::None};
 };
 
-class BinaryReader final {
-public:
+class BinaryReader final
+{
+  public:
     explicit BinaryReader(std::span<const std::byte> buffer) noexcept;
 
     [[nodiscard]] bool ReadUInt8(std::uint8_t* value) noexcept;
@@ -69,7 +73,7 @@ public:
     [[nodiscard]] std::size_t remaining() const noexcept;
     [[nodiscard]] SerializationErrorCode error() const noexcept;
 
-private:
+  private:
     [[nodiscard]] bool SetError(SerializationErrorCode error_code) noexcept;
     [[nodiscard]] bool SetSuccess() noexcept;
     [[nodiscard]] bool CanRead(std::size_t size) noexcept;

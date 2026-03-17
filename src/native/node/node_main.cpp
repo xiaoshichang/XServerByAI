@@ -3,30 +3,36 @@
 #include <iostream>
 #include <string_view>
 
-namespace {
+namespace
+{
 
-void PrintUsage() {
+void PrintUsage()
+{
     std::cerr << "Usage: xserver-node <configPath> <gm|gateN|gameN>\n";
 }
 
 } // namespace
 
-int main(int argc, char* argv[]) {
-    if (argc != 3) {
+int main(int argc, char* argv[])
+{
+    if (argc != 3)
+    {
         PrintUsage();
         return 1;
     }
 
     const std::string_view config_path = argv[1];
     const std::string_view selector = argv[2];
-    if (config_path.empty()) {
+    if (config_path.empty())
+    {
         PrintUsage();
         return 1;
     }
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    if (!xs::core::LoadNodeConfigFile(config_path, selector, &node_config, &error_message)) {
+    if (!xs::core::LoadNodeConfigFile(config_path, selector, &node_config, &error_message))
+    {
         std::cerr << error_message << '\n';
         return 1;
     }

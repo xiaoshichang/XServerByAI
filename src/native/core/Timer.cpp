@@ -9,15 +9,20 @@
 #include <unordered_map>
 #include <utility>
 
-namespace xs::core {
-namespace {
+namespace xs::core
+{
+namespace
+{
 
-[[nodiscard]] constexpr TimerCreateResult ToCreateResult(TimerErrorCode error_code) noexcept {
+[[nodiscard]] constexpr TimerCreateResult ToCreateResult(TimerErrorCode error_code) noexcept
+{
     return static_cast<TimerCreateResult>(error_code);
 }
 
-[[nodiscard]] bool IsKnownErrorCodeValue(TimerCreateResult value) noexcept {
-    switch (static_cast<TimerErrorCode>(value)) {
+[[nodiscard]] bool IsKnownErrorCodeValue(TimerCreateResult value) noexcept
+{
+    switch (static_cast<TimerErrorCode>(value))
+    {
     case TimerErrorCode::None:
     case TimerErrorCode::InvalidTimerID:
     case TimerErrorCode::TimerNotFound:
@@ -33,24 +38,30 @@ namespace {
 
 } // namespace
 
-bool IsTimerID(TimerCreateResult value) noexcept {
+bool IsTimerID(TimerCreateResult value) noexcept
+{
     return value > 0;
 }
 
-TimerErrorCode TimerErrorFromCreateResult(TimerCreateResult value) noexcept {
-    if (IsTimerID(value)) {
+TimerErrorCode TimerErrorFromCreateResult(TimerCreateResult value) noexcept
+{
+    if (IsTimerID(value))
+    {
         return TimerErrorCode::None;
     }
 
-    if (IsKnownErrorCodeValue(value)) {
+    if (IsKnownErrorCodeValue(value))
+    {
         return static_cast<TimerErrorCode>(value);
     }
 
     return TimerErrorCode::Unknown;
 }
 
-std::string_view TimerErrorMessage(TimerErrorCode error_code) noexcept {
-    switch (error_code) {
+std::string_view TimerErrorMessage(TimerErrorCode error_code) noexcept
+{
+    switch (error_code)
+    {
     case TimerErrorCode::None:
         return "Success.";
     case TimerErrorCode::InvalidTimerID:
@@ -70,43 +81,54 @@ std::string_view TimerErrorMessage(TimerErrorCode error_code) noexcept {
     return "Unknown timer error.";
 }
 
-class TimerManager::Impl final : public std::enable_shared_from_this<Impl> {
-public:
+class TimerManager::Impl final : public std::enable_shared_from_this<Impl>
+{
+  public:
     explicit Impl(asio::io_context& io_context)
-        : io_context_(io_context) {
+        : io_context_(io_context)
+    {
     }
 
-    [[nodiscard]] TimerCreateResult CreateOnce(SteadyDuration delay, TimerCallback callback) {
+    [[nodiscard]] TimerCreateResult CreateOnce(SteadyDuration delay, TimerCallback callback)
+    {
         return CreateTimer(ClampNonNegativeDuration(delay), SteadyDuration::zero(), false, std::move(callback));
     }
 
-    [[nodiscard]] TimerCreateResult CreateRepeating(SteadyDuration interval, TimerCallback callback) {
-        if (interval <= SteadyDuration::zero()) {
+    [[nodiscard]] TimerCreateResult CreateRepeating(SteadyDuration interval, TimerCallback callback)
+    {
+        if (interval <= SteadyDuration::zero())
+        {
             return ToCreateResult(TimerErrorCode::IntervalMustBePositive);
         }
 
         return CreateTimer(interval, interval, true, std::move(callback));
     }
 
-    [[nodiscard]] TimerErrorCode ResetOnce(TimerID timer_id, SteadyDuration delay, TimerCallback callback) {
+    [[nodiscard]] TimerErrorCode ResetOnce(TimerID timer_id, SteadyDuration delay, TimerCallback callback)
+    {
         return ResetTimer(timer_id, ClampNonNegativeDuration(delay), SteadyDuration::zero(), false, std::move(callback));
     }
 
-    [[nodiscard]] TimerErrorCode ResetRepeating(TimerID timer_id, SteadyDuration interval, TimerCallback callback) {
-        if (interval <= SteadyDuration::zero()) {
+    [[nodiscard]] TimerErrorCode ResetRepeating(TimerID timer_id, SteadyDuration interval, TimerCallback callback)
+    {
+        if (interval <= SteadyDuration::zero())
+        {
             return TimerErrorCode::IntervalMustBePositive;
         }
 
         return ResetTimer(timer_id, interval, interval, true, std::move(callback));
     }
 
-    [[nodiscard]] TimerErrorCode Cancel(TimerID timer_id) noexcept {
-        if (!IsTimerID(timer_id)) {
+    [[nodiscard]] TimerErrorCode Cancel(TimerID timer_id) noexcept
+    {
+        if (!IsTimerID(timer_id))
+        {
             return TimerErrorCode::InvalidTimerID;
         }
 
         const auto iterator = timers_.find(timer_id);
-        if (iterator == timers_.end()) {
+        if (iterator == timers_.end())
+        {
             return TimerErrorCode::TimerNotFound;
         }
 
@@ -115,28 +137,34 @@ public:
         return TimerErrorCode::None;
     }
 
-    void CancelAll() noexcept {
+    void CancelAll() noexcept
+    {
         auto timers = std::move(timers_);
         timers_.clear();
 
-        for (auto& [timer_id, timer] : timers) {
+        for (auto& [timer_id, timer] : timers)
+        {
             (void)timer_id;
             StopTimer(timer);
         }
     }
 
-    [[nodiscard]] bool Contains(TimerID timer_id) const noexcept {
+    [[nodiscard]] bool Contains(TimerID timer_id) const noexcept
+    {
         return timers_.find(timer_id) != timers_.end();
     }
 
-    [[nodiscard]] std::size_t size() const noexcept {
+    [[nodiscard]] std::size_t size() const noexcept
+    {
         return timers_.size();
     }
 
-private:
-    struct TimerEntry final {
+  private:
+    struct TimerEntry final
+    {
         explicit TimerEntry(asio::io_context& io_context)
-            : timer(io_context) {
+            : timer(io_context)
+        {
         }
 
         asio::steady_timer timer;
@@ -150,12 +178,15 @@ private:
         SteadyDuration first_delay,
         SteadyDuration interval,
         bool repeating,
-        TimerCallback callback) {
-        if (!callback) {
+        TimerCallback callback)
+    {
+        if (!callback)
+        {
             return ToCreateResult(TimerErrorCode::CallbackEmpty);
         }
 
-        if (next_timer_id_ <= 0 || next_timer_id_ == std::numeric_limits<TimerID>::max()) {
+        if (next_timer_id_ <= 0 || next_timer_id_ == std::numeric_limits<TimerID>::max())
+        {
             return ToCreateResult(TimerErrorCode::TimerIdExhausted);
         }
 
@@ -176,17 +207,21 @@ private:
         SteadyDuration first_delay,
         SteadyDuration interval,
         bool repeating,
-        TimerCallback callback) {
-        if (!IsTimerID(timer_id)) {
+        TimerCallback callback)
+    {
+        if (!IsTimerID(timer_id))
+        {
             return TimerErrorCode::InvalidTimerID;
         }
 
         const auto iterator = timers_.find(timer_id);
-        if (iterator == timers_.end()) {
+        if (iterator == timers_.end())
+        {
             return TimerErrorCode::TimerNotFound;
         }
 
-        if (!callback) {
+        if (!callback)
+        {
             return TimerErrorCode::CallbackEmpty;
         }
 
@@ -204,12 +239,14 @@ private:
         TimerID timer_id,
         const std::shared_ptr<TimerEntry>& timer,
         SteadyDuration delay,
-        std::uint64_t generation_snapshot) {
+        std::uint64_t generation_snapshot)
+    {
         const std::weak_ptr<Impl> weak_self = weak_from_this();
         timer->timer.expires_after(ClampNonNegativeDuration(delay));
         timer->timer.async_wait([weak_self, timer, timer_id, generation_snapshot](const std::error_code& error_code) {
             const auto self = weak_self.lock();
-            if (self == nullptr) {
+            if (self == nullptr)
+            {
                 return;
             }
 
@@ -221,17 +258,21 @@ private:
         TimerID timer_id,
         const std::shared_ptr<TimerEntry>& timer,
         std::uint64_t generation_snapshot,
-        const std::error_code& error_code) {
-        if (error_code == asio::error::operation_aborted) {
+        const std::error_code& error_code)
+    {
+        if (error_code == asio::error::operation_aborted)
+        {
             return;
         }
 
         auto iterator = timers_.find(timer_id);
-        if (iterator == timers_.end() || iterator->second.get() != timer.get() || timer->generation != generation_snapshot) {
+        if (iterator == timers_.end() || iterator->second.get() != timer.get() || timer->generation != generation_snapshot)
+        {
             return;
         }
 
-        if (error_code || !timer->callback) {
+        if (error_code || !timer->callback)
+        {
             timers_.erase(iterator);
             return;
         }
@@ -240,11 +281,13 @@ private:
         callback();
 
         iterator = timers_.find(timer_id);
-        if (iterator == timers_.end() || iterator->second.get() != timer.get() || timer->generation != generation_snapshot) {
+        if (iterator == timers_.end() || iterator->second.get() != timer.get() || timer->generation != generation_snapshot)
+        {
             return;
         }
 
-        if (!timer->repeating) {
+        if (!timer->repeating)
+        {
             timers_.erase(iterator);
             return;
         }
@@ -252,14 +295,19 @@ private:
         ArmTimer(timer_id, timer, timer->interval, generation_snapshot);
     }
 
-    static void StopTimerWait(const std::shared_ptr<TimerEntry>& timer) noexcept {
-        try {
+    static void StopTimerWait(const std::shared_ptr<TimerEntry>& timer) noexcept
+    {
+        try
+        {
             timer->timer.cancel();
-        } catch (...) {
+        }
+        catch (...)
+        {
         }
     }
 
-    static void StopTimer(const std::shared_ptr<TimerEntry>& timer) noexcept {
+    static void StopTimer(const std::shared_ptr<TimerEntry>& timer) noexcept
+    {
         ++timer->generation;
         timer->repeating = false;
         timer->interval = SteadyDuration::zero();
@@ -273,45 +321,56 @@ private:
 };
 
 TimerManager::TimerManager(asio::io_context& io_context)
-    : impl_(std::make_shared<Impl>(io_context)) {
+    : impl_(std::make_shared<Impl>(io_context))
+{
 }
 
-TimerManager::~TimerManager() {
+TimerManager::~TimerManager()
+{
     CancelAll();
     impl_.reset();
 }
 
-TimerCreateResult TimerManager::CreateOnce(SteadyDuration delay, TimerCallback callback) {
+TimerCreateResult TimerManager::CreateOnce(SteadyDuration delay, TimerCallback callback)
+{
     return impl_->CreateOnce(delay, std::move(callback));
 }
 
-TimerCreateResult TimerManager::CreateRepeating(SteadyDuration interval, TimerCallback callback) {
+TimerCreateResult TimerManager::CreateRepeating(SteadyDuration interval, TimerCallback callback)
+{
     return impl_->CreateRepeating(interval, std::move(callback));
 }
 
-TimerErrorCode TimerManager::ResetOnce(TimerID timer_id, SteadyDuration delay, TimerCallback callback) {
+TimerErrorCode TimerManager::ResetOnce(TimerID timer_id, SteadyDuration delay, TimerCallback callback)
+{
     return impl_->ResetOnce(timer_id, delay, std::move(callback));
 }
 
-TimerErrorCode TimerManager::ResetRepeating(TimerID timer_id, SteadyDuration interval, TimerCallback callback) {
+TimerErrorCode TimerManager::ResetRepeating(TimerID timer_id, SteadyDuration interval, TimerCallback callback)
+{
     return impl_->ResetRepeating(timer_id, interval, std::move(callback));
 }
 
-TimerErrorCode TimerManager::Cancel(TimerID timer_id) noexcept {
+TimerErrorCode TimerManager::Cancel(TimerID timer_id) noexcept
+{
     return impl_ != nullptr ? impl_->Cancel(timer_id) : TimerErrorCode::TimerNotFound;
 }
 
-void TimerManager::CancelAll() noexcept {
-    if (impl_ != nullptr) {
+void TimerManager::CancelAll() noexcept
+{
+    if (impl_ != nullptr)
+    {
         impl_->CancelAll();
     }
 }
 
-bool TimerManager::Contains(TimerID timer_id) const noexcept {
+bool TimerManager::Contains(TimerID timer_id) const noexcept
+{
     return impl_ != nullptr && impl_->Contains(timer_id);
 }
 
-std::size_t TimerManager::size() const noexcept {
+std::size_t TimerManager::size() const noexcept
+{
     return impl_ != nullptr ? impl_->size() : 0U;
 }
 

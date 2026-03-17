@@ -51,5 +51,6 @@ static_assert(
     std::is_constructible_v<xs::core::MainEventLoop, xs::core::MainEventLoopOptions>,
     "MainEventLoop must remain constructible from options.");
 
-namespace xs::core {
+namespace xs::core
+{
 }

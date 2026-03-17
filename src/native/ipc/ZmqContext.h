@@ -4,15 +4,18 @@
 #include <string>
 #include <string_view>
 
-namespace xs::ipc {
+namespace xs::ipc
+{
 
-struct ZmqContextOptions {
+struct ZmqContextOptions
+{
     int io_threads{1};
     int max_sockets{1023};
 };
 
-class ZmqContext final {
-public:
+class ZmqContext final
+{
+  public:
     explicit ZmqContext(ZmqContextOptions options = {});
     ~ZmqContext();
 
@@ -26,7 +29,7 @@ public:
     [[nodiscard]] std::string_view initialization_error() const noexcept;
     [[nodiscard]] void* native_handle() const noexcept;
 
-private:
+  private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

@@ -7,17 +7,20 @@
 #include <string>
 #include <string_view>
 
-namespace xs::core {
+namespace xs::core
+{
 
-struct CoreLoopExecutorOptions {
+struct CoreLoopExecutorOptions
+{
     std::string thread_name{"xs-core-loop"};
 };
 
 [[nodiscard]] bool SetCurrentThreadName(std::string_view name, std::string* error_message = nullptr);
 [[nodiscard]] std::string CurrentThreadName();
 
-class CoreLoopExecutor final {
-public:
+class CoreLoopExecutor final
+{
+  public:
     explicit CoreLoopExecutor(CoreLoopExecutorOptions options = {});
     ~CoreLoopExecutor();
 
@@ -36,7 +39,7 @@ public:
     [[nodiscard]] asio::any_io_executor executor() noexcept;
     [[nodiscard]] asio::io_context& context() noexcept;
 
-private:
+  private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

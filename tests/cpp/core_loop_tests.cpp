@@ -10,17 +10,21 @@
 #include <string>
 #include <thread>
 
-namespace {
+namespace
+{
 
 int g_failures = 0;
 
-void Check(bool condition, const char* expression, const char* message = nullptr) {
-    if (condition) {
+void Check(bool condition, const char* expression, const char* message = nullptr)
+{
+    if (condition)
+    {
         return;
     }
 
     std::cerr << "Check failed: " << expression;
-    if (message != nullptr) {
+    if (message != nullptr)
+    {
         std::cerr << " (" << message << ")";
     }
     std::cerr << '\n';
@@ -31,25 +35,30 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
 
 template <typename T>
-T WaitFutureValue(std::future<T>& future, const T& fallback, const char* name) {
+T WaitFutureValue(std::future<T>& future, const T& fallback, const char* name)
+{
     const auto status = future.wait_for(std::chrono::seconds(2));
     XS_CHECK_MSG(status == std::future_status::ready, name);
-    if (status != std::future_status::ready) {
+    if (status != std::future_status::ready)
+    {
         return fallback;
     }
 
     return future.get();
 }
 
-void WaitFuture(std::future<void>& future, const char* name) {
+void WaitFuture(std::future<void>& future, const char* name)
+{
     const auto status = future.wait_for(std::chrono::seconds(2));
     XS_CHECK_MSG(status == std::future_status::ready, name);
-    if (status == std::future_status::ready) {
+    if (status == std::future_status::ready)
+    {
         future.get();
     }
 }
 
-void TestCoreLoopExecutorRunsPostedWorkOnCurrentThread() {
+void TestCoreLoopExecutorRunsPostedWorkOnCurrentThread()
+{
     xs::core::CoreLoopExecutor executor({.thread_name = "xs-core-loop1"});
     std::promise<std::string> name_promise;
     std::future<std::string> name_future = name_promise.get_future();
@@ -71,7 +80,8 @@ void TestCoreLoopExecutorRunsPostedWorkOnCurrentThread() {
     XS_CHECK(WaitFutureValue(caller_thread_future, false, "core loop caller thread future"));
 }
 
-void TestCoreLoopExecutorRejectsEmptyName() {
+void TestCoreLoopExecutorRejectsEmptyName()
+{
     xs::core::CoreLoopExecutor executor({.thread_name = ""});
     std::string error_message{"not-cleared"};
 
@@ -82,7 +92,8 @@ void TestCoreLoopExecutorRejectsEmptyName() {
     XS_CHECK(!executor.IsRunning());
 }
 
-void TestCoreLoopExecutorRejectsDoubleStart() {
+void TestCoreLoopExecutorRejectsDoubleStart()
+{
     xs::core::CoreLoopExecutor executor({.thread_name = "xs-core-loop2"});
     std::promise<bool> nested_start_promise;
     std::future<bool> nested_start_future = nested_start_promise.get_future();
@@ -100,7 +111,8 @@ void TestCoreLoopExecutorRejectsDoubleStart() {
     XS_CHECK(WaitFutureValue(nested_start_future, false, "nested start future"));
 }
 
-void TestCoreLoopExecutorCanRestart() {
+void TestCoreLoopExecutorCanRestart()
+{
     xs::core::CoreLoopExecutor executor({.thread_name = "xs-core-loop-retry"});
     std::string error_message;
 
@@ -127,7 +139,8 @@ void TestCoreLoopExecutorCanRestart() {
     XS_CHECK(!executor.IsRunning());
 }
 
-void TestCoreLoopExecutorWorksWithTimerManager() {
+void TestCoreLoopExecutorWorksWithTimerManager()
+{
     xs::core::CoreLoopExecutor executor({.thread_name = "xs-core-loop-timer"});
     xs::core::TimerManager timer_manager(executor.context());
     std::promise<std::string> promise;
@@ -149,14 +162,16 @@ void TestCoreLoopExecutorWorksWithTimerManager() {
 
 } // namespace
 
-int main() {
+int main()
+{
     TestCoreLoopExecutorRunsPostedWorkOnCurrentThread();
     TestCoreLoopExecutorRejectsEmptyName();
     TestCoreLoopExecutorRejectsDoubleStart();
     TestCoreLoopExecutorCanRestart();
     TestCoreLoopExecutorWorksWithTimerManager();
 
-    if (g_failures != 0) {
+    if (g_failures != 0)
+    {
         std::cerr << g_failures << " core loop runtime test(s) failed.\n";
         return EXIT_FAILURE;
     }

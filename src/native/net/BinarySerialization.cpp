@@ -3,11 +3,14 @@
 #include <cstring>
 #include <limits>
 
-namespace xs::net {
-namespace {
+namespace xs::net
+{
+namespace
+{
 
 template <typename T>
-bool WriteIntegral(std::span<std::byte> buffer, std::size_t* offset, T value) noexcept {
+bool WriteIntegral(std::span<std::byte> buffer, std::size_t* offset, T value) noexcept
+{
     const auto network_value = HostToNetwork(value);
     std::memcpy(buffer.data() + *offset, &network_value, sizeof(network_value));
     *offset += sizeof(network_value);
@@ -15,7 +18,8 @@ bool WriteIntegral(std::span<std::byte> buffer, std::size_t* offset, T value) no
 }
 
 template <typename T>
-bool PeekIntegral(std::span<const std::byte> buffer, std::size_t offset, T* value) noexcept {
+bool PeekIntegral(std::span<const std::byte> buffer, std::size_t offset, T* value) noexcept
+{
     T network_value{};
     std::memcpy(&network_value, buffer.data() + offset, sizeof(network_value));
     *value = NetworkToHost(network_value);
@@ -23,14 +27,17 @@ bool PeekIntegral(std::span<const std::byte> buffer, std::size_t offset, T* valu
 }
 
 template <typename T>
-std::span<const std::byte> AsConstByteSpan(const T* data, std::size_t size) noexcept {
+std::span<const std::byte> AsConstByteSpan(const T* data, std::size_t size) noexcept
+{
     return std::as_bytes(std::span(data, size));
 }
 
 } // namespace
 
-std::string_view SerializationErrorMessage(SerializationErrorCode error_code) noexcept {
-    switch (error_code) {
+std::string_view SerializationErrorMessage(SerializationErrorCode error_code) noexcept
+{
+    switch (error_code)
+    {
     case SerializationErrorCode::None:
         return "Success.";
     case SerializationErrorCode::BufferTooSmall:
@@ -47,59 +54,74 @@ std::string_view SerializationErrorMessage(SerializationErrorCode error_code) no
 }
 
 BinaryWriter::BinaryWriter(std::span<std::byte> buffer) noexcept
-    : buffer_(buffer) {
+    : buffer_(buffer)
+{
 }
 
-bool BinaryWriter::WriteUInt8(std::uint8_t value) noexcept {
-    if (!CanWrite(sizeof(value))) {
+bool BinaryWriter::WriteUInt8(std::uint8_t value) noexcept
+{
+    if (!CanWrite(sizeof(value)))
+    {
         return false;
     }
 
     return WriteIntegral(buffer_, &offset_, value) && SetSuccess();
 }
 
-bool BinaryWriter::WriteUInt16(std::uint16_t value) noexcept {
-    if (!CanWrite(sizeof(value))) {
+bool BinaryWriter::WriteUInt16(std::uint16_t value) noexcept
+{
+    if (!CanWrite(sizeof(value)))
+    {
         return false;
     }
 
     return WriteIntegral(buffer_, &offset_, value) && SetSuccess();
 }
 
-bool BinaryWriter::WriteUInt32(std::uint32_t value) noexcept {
-    if (!CanWrite(sizeof(value))) {
+bool BinaryWriter::WriteUInt32(std::uint32_t value) noexcept
+{
+    if (!CanWrite(sizeof(value)))
+    {
         return false;
     }
 
     return WriteIntegral(buffer_, &offset_, value) && SetSuccess();
 }
 
-bool BinaryWriter::WriteUInt64(std::uint64_t value) noexcept {
-    if (!CanWrite(sizeof(value))) {
+bool BinaryWriter::WriteUInt64(std::uint64_t value) noexcept
+{
+    if (!CanWrite(sizeof(value)))
+    {
         return false;
     }
 
     return WriteIntegral(buffer_, &offset_, value) && SetSuccess();
 }
 
-bool BinaryWriter::WriteInt32(std::int32_t value) noexcept {
-    if (!CanWrite(sizeof(value))) {
+bool BinaryWriter::WriteInt32(std::int32_t value) noexcept
+{
+    if (!CanWrite(sizeof(value)))
+    {
         return false;
     }
 
     return WriteIntegral(buffer_, &offset_, value) && SetSuccess();
 }
 
-bool BinaryWriter::WriteBool(bool value) noexcept {
+bool BinaryWriter::WriteBool(bool value) noexcept
+{
     return WriteUInt8(value ? std::uint8_t{1} : std::uint8_t{0});
 }
 
-bool BinaryWriter::WriteBytes(std::span<const std::byte> value) noexcept {
-    if (!CanWrite(value.size())) {
+bool BinaryWriter::WriteBytes(std::span<const std::byte> value) noexcept
+{
+    if (!CanWrite(value.size()))
+    {
         return false;
     }
 
-    if (!value.empty()) {
+    if (!value.empty())
+    {
         std::memcpy(buffer_.data() + offset_, value.data(), value.size());
         offset_ += value.size();
     }
@@ -107,23 +129,28 @@ bool BinaryWriter::WriteBytes(std::span<const std::byte> value) noexcept {
     return SetSuccess();
 }
 
-bool BinaryWriter::WriteLengthPrefixedBytes16(std::span<const std::byte> value) noexcept {
-    if (value.size() > static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max())) {
+bool BinaryWriter::WriteLengthPrefixedBytes16(std::span<const std::byte> value) noexcept
+{
+    if (value.size() > static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()))
+    {
         return SetError(SerializationErrorCode::LengthOverflow);
     }
 
     constexpr std::size_t kPrefixSize = sizeof(std::uint16_t);
-    if (!CanWrite(kPrefixSize)) {
+    if (!CanWrite(kPrefixSize))
+    {
         return false;
     }
 
-    if (value.size() > remaining() - kPrefixSize) {
+    if (value.size() > remaining() - kPrefixSize)
+    {
         return SetError(SerializationErrorCode::BufferTooSmall);
     }
 
     const auto length = static_cast<std::uint16_t>(value.size());
     (void)WriteIntegral(buffer_, &offset_, length);
-    if (!value.empty()) {
+    if (!value.empty())
+    {
         std::memcpy(buffer_.data() + offset_, value.data(), value.size());
         offset_ += value.size();
     }
@@ -131,23 +158,28 @@ bool BinaryWriter::WriteLengthPrefixedBytes16(std::span<const std::byte> value) 
     return SetSuccess();
 }
 
-bool BinaryWriter::WriteLengthPrefixedBytes32(std::span<const std::byte> value) noexcept {
-    if (value.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max())) {
+bool BinaryWriter::WriteLengthPrefixedBytes32(std::span<const std::byte> value) noexcept
+{
+    if (value.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+    {
         return SetError(SerializationErrorCode::LengthOverflow);
     }
 
     constexpr std::size_t kPrefixSize = sizeof(std::uint32_t);
-    if (!CanWrite(kPrefixSize)) {
+    if (!CanWrite(kPrefixSize))
+    {
         return false;
     }
 
-    if (value.size() > remaining() - kPrefixSize) {
+    if (value.size() > remaining() - kPrefixSize)
+    {
         return SetError(SerializationErrorCode::BufferTooSmall);
     }
 
     const auto length = static_cast<std::uint32_t>(value.size());
     (void)WriteIntegral(buffer_, &offset_, length);
-    if (!value.empty()) {
+    if (!value.empty())
+    {
         std::memcpy(buffer_.data() + offset_, value.data(), value.size());
         offset_ += value.size();
     }
@@ -155,38 +187,47 @@ bool BinaryWriter::WriteLengthPrefixedBytes32(std::span<const std::byte> value) 
     return SetSuccess();
 }
 
-bool BinaryWriter::WriteString16(std::string_view value) noexcept {
+bool BinaryWriter::WriteString16(std::string_view value) noexcept
+{
     return WriteLengthPrefixedBytes16(AsConstByteSpan(value.data(), value.size()));
 }
 
-std::size_t BinaryWriter::offset() const noexcept {
+std::size_t BinaryWriter::offset() const noexcept
+{
     return offset_;
 }
 
-std::size_t BinaryWriter::remaining() const noexcept {
+std::size_t BinaryWriter::remaining() const noexcept
+{
     return buffer_.size() - offset_;
 }
 
-SerializationErrorCode BinaryWriter::error() const noexcept {
+SerializationErrorCode BinaryWriter::error() const noexcept
+{
     return error_;
 }
 
-std::span<const std::byte> BinaryWriter::written() const noexcept {
+std::span<const std::byte> BinaryWriter::written() const noexcept
+{
     return std::span<const std::byte>(buffer_.data(), offset_);
 }
 
-bool BinaryWriter::SetError(SerializationErrorCode error_code) noexcept {
+bool BinaryWriter::SetError(SerializationErrorCode error_code) noexcept
+{
     error_ = error_code;
     return false;
 }
 
-bool BinaryWriter::SetSuccess() noexcept {
+bool BinaryWriter::SetSuccess() noexcept
+{
     error_ = SerializationErrorCode::None;
     return true;
 }
 
-bool BinaryWriter::CanWrite(std::size_t size) noexcept {
-    if (size > remaining()) {
+bool BinaryWriter::CanWrite(std::size_t size) noexcept
+{
+    if (size > remaining())
+    {
         return SetError(SerializationErrorCode::BufferTooSmall);
     }
 
@@ -194,15 +235,19 @@ bool BinaryWriter::CanWrite(std::size_t size) noexcept {
 }
 
 BinaryReader::BinaryReader(std::span<const std::byte> buffer) noexcept
-    : buffer_(buffer) {
+    : buffer_(buffer)
+{
 }
 
-bool BinaryReader::ReadUInt8(std::uint8_t* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadUInt8(std::uint8_t* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
-    if (!CanRead(sizeof(*value))) {
+    if (!CanRead(sizeof(*value)))
+    {
         return false;
     }
 
@@ -211,12 +256,15 @@ bool BinaryReader::ReadUInt8(std::uint8_t* value) noexcept {
     return SetSuccess();
 }
 
-bool BinaryReader::ReadUInt16(std::uint16_t* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadUInt16(std::uint16_t* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
-    if (!CanRead(sizeof(*value))) {
+    if (!CanRead(sizeof(*value)))
+    {
         return false;
     }
 
@@ -225,12 +273,15 @@ bool BinaryReader::ReadUInt16(std::uint16_t* value) noexcept {
     return SetSuccess();
 }
 
-bool BinaryReader::ReadUInt32(std::uint32_t* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadUInt32(std::uint32_t* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
-    if (!CanRead(sizeof(*value))) {
+    if (!CanRead(sizeof(*value)))
+    {
         return false;
     }
 
@@ -239,12 +290,15 @@ bool BinaryReader::ReadUInt32(std::uint32_t* value) noexcept {
     return SetSuccess();
 }
 
-bool BinaryReader::ReadUInt64(std::uint64_t* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadUInt64(std::uint64_t* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
-    if (!CanRead(sizeof(*value))) {
+    if (!CanRead(sizeof(*value)))
+    {
         return false;
     }
 
@@ -253,12 +307,15 @@ bool BinaryReader::ReadUInt64(std::uint64_t* value) noexcept {
     return SetSuccess();
 }
 
-bool BinaryReader::ReadInt32(std::int32_t* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadInt32(std::int32_t* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
-    if (!CanRead(sizeof(*value))) {
+    if (!CanRead(sizeof(*value)))
+    {
         return false;
     }
 
@@ -267,17 +324,21 @@ bool BinaryReader::ReadInt32(std::int32_t* value) noexcept {
     return SetSuccess();
 }
 
-bool BinaryReader::ReadBool(bool* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadBool(bool* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
-    if (!CanRead(sizeof(std::uint8_t))) {
+    if (!CanRead(sizeof(std::uint8_t)))
+    {
         return false;
     }
 
     const auto raw_value = static_cast<std::uint8_t>(buffer_[offset_]);
-    if (raw_value > 1u) {
+    if (raw_value > 1u)
+    {
         return SetError(SerializationErrorCode::InvalidBoolValue);
     }
 
@@ -286,12 +347,15 @@ bool BinaryReader::ReadBool(bool* value) noexcept {
     return SetSuccess();
 }
 
-bool BinaryReader::ReadBytes(std::size_t size, std::span<const std::byte>* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadBytes(std::size_t size, std::span<const std::byte>* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
-    if (!CanRead(size)) {
+    if (!CanRead(size))
+    {
         return false;
     }
 
@@ -300,19 +364,23 @@ bool BinaryReader::ReadBytes(std::size_t size, std::span<const std::byte>* value
     return SetSuccess();
 }
 
-bool BinaryReader::ReadLengthPrefixedBytes16(std::span<const std::byte>* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadLengthPrefixedBytes16(std::span<const std::byte>* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
     std::uint16_t length = 0;
     constexpr std::size_t kPrefixSize = sizeof(length);
-    if (!CanRead(kPrefixSize)) {
+    if (!CanRead(kPrefixSize))
+    {
         return false;
     }
 
     (void)PeekIntegral(buffer_, offset_, &length);
-    if (static_cast<std::size_t>(length) > remaining() - kPrefixSize) {
+    if (static_cast<std::size_t>(length) > remaining() - kPrefixSize)
+    {
         return SetError(SerializationErrorCode::BufferTooSmall);
     }
 
@@ -322,19 +390,23 @@ bool BinaryReader::ReadLengthPrefixedBytes16(std::span<const std::byte>* value) 
     return SetSuccess();
 }
 
-bool BinaryReader::ReadLengthPrefixedBytes32(std::span<const std::byte>* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadLengthPrefixedBytes32(std::span<const std::byte>* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
     std::uint32_t length = 0;
     constexpr std::size_t kPrefixSize = sizeof(length);
-    if (!CanRead(kPrefixSize)) {
+    if (!CanRead(kPrefixSize))
+    {
         return false;
     }
 
     (void)PeekIntegral(buffer_, offset_, &length);
-    if (static_cast<std::size_t>(length) > remaining() - kPrefixSize) {
+    if (static_cast<std::size_t>(length) > remaining() - kPrefixSize)
+    {
         return SetError(SerializationErrorCode::BufferTooSmall);
     }
 
@@ -344,13 +416,16 @@ bool BinaryReader::ReadLengthPrefixedBytes32(std::span<const std::byte>* value) 
     return SetSuccess();
 }
 
-bool BinaryReader::ReadString16(std::string* value) noexcept {
-    if (value == nullptr) {
+bool BinaryReader::ReadString16(std::string* value) noexcept
+{
+    if (value == nullptr)
+    {
         return SetError(SerializationErrorCode::InvalidArgument);
     }
 
     std::span<const std::byte> bytes;
-    if (!ReadLengthPrefixedBytes16(&bytes)) {
+    if (!ReadLengthPrefixedBytes16(&bytes))
+    {
         return false;
     }
 
@@ -358,30 +433,37 @@ bool BinaryReader::ReadString16(std::string* value) noexcept {
     return SetSuccess();
 }
 
-std::size_t BinaryReader::offset() const noexcept {
+std::size_t BinaryReader::offset() const noexcept
+{
     return offset_;
 }
 
-std::size_t BinaryReader::remaining() const noexcept {
+std::size_t BinaryReader::remaining() const noexcept
+{
     return buffer_.size() - offset_;
 }
 
-SerializationErrorCode BinaryReader::error() const noexcept {
+SerializationErrorCode BinaryReader::error() const noexcept
+{
     return error_;
 }
 
-bool BinaryReader::SetError(SerializationErrorCode error_code) noexcept {
+bool BinaryReader::SetError(SerializationErrorCode error_code) noexcept
+{
     error_ = error_code;
     return false;
 }
 
-bool BinaryReader::SetSuccess() noexcept {
+bool BinaryReader::SetSuccess() noexcept
+{
     error_ = SerializationErrorCode::None;
     return true;
 }
 
-bool BinaryReader::CanRead(std::size_t size) noexcept {
-    if (size > remaining()) {
+bool BinaryReader::CanRead(std::size_t size) noexcept
+{
+    if (size > remaining())
+    {
         return SetError(SerializationErrorCode::BufferTooSmall);
     }
 

@@ -10,30 +10,36 @@
 #include <string>
 #include <string_view>
 
-namespace xs::core {
+namespace xs::core
+{
 
-enum class NodeSelectorKind : std::uint8_t {
+enum class NodeSelectorKind : std::uint8_t
+{
     Gm,
     Gate,
     Game,
 };
 
-struct NodeSelector {
+struct NodeSelector
+{
     NodeSelectorKind kind{NodeSelectorKind::Gm};
     std::string value{"gm"};
 };
 
-struct EndpointConfig {
+struct EndpointConfig
+{
     std::string host;
     std::uint16_t port{};
 };
 
-struct ServerGroupConfig {
+struct ServerGroupConfig
+{
     std::string id;
     std::string environment;
 };
 
-struct KcpConfig {
+struct KcpConfig
+{
     std::uint32_t mtu{1200};
     std::uint32_t sndwnd{128};
     std::uint32_t rcvwnd{128};
@@ -46,16 +52,19 @@ struct KcpConfig {
     bool stream_mode{false};
 };
 
-struct ManagedConfig {
+struct ManagedConfig
+{
     std::string assembly_name{"XServer.Managed.GameLogic"};
 };
 
-struct GmConfig {
+struct GmConfig
+{
     EndpointConfig control_listen_endpoint;
     LoggingConfig logging{};
 };
 
-struct GateConfig {
+struct GateConfig
+{
     std::string selector;
     std::string node_id;
     EndpointConfig service_listen_endpoint;
@@ -63,7 +72,8 @@ struct GateConfig {
     LoggingConfig logging{};
 };
 
-struct GameConfig {
+struct GameConfig
+{
     std::string selector;
     std::string node_id;
     EndpointConfig service_listen_endpoint;
@@ -71,7 +81,8 @@ struct GameConfig {
     LoggingConfig logging{};
 };
 
-struct ClusterConfig {
+struct ClusterConfig
+{
     ServerGroupConfig server_group;
     LoggingConfig logging_defaults{};
     GmConfig gm{};
@@ -79,7 +90,8 @@ struct ClusterConfig {
     std::map<std::string, GameConfig, std::less<>> games;
 };
 
-struct NodeConfig {
+struct NodeConfig
+{
     ProcessType process_type{ProcessType::Gm};
     std::string selector{"gm"};
     std::string instance_id{"GM"};

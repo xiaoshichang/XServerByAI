@@ -11,16 +11,19 @@
 #include <memory>
 #include <string>
 
-namespace xs::core {
+namespace xs::core
+{
 
 class MainEventLoop;
 
-struct MainEventLoopOptions {
+struct MainEventLoopOptions
+{
     std::string thread_name{"xs-main-loop"};
     SteadyDuration tick_interval{SteadyDuration::zero()};
 };
 
-struct MainEventLoopTickInfo {
+struct MainEventLoopTickInfo
+{
     SteadyTimePoint now{};
     SteadyDuration delta{SteadyDuration::zero()};
     std::uint64_t tick_count{0};
@@ -30,14 +33,16 @@ using MainEventLoopStartCallback = std::function<bool(MainEventLoop&, std::strin
 using MainEventLoopTickCallback = std::function<void(MainEventLoop&, const MainEventLoopTickInfo&)>;
 using MainEventLoopStopCallback = std::function<void(MainEventLoop&)>;
 
-struct MainEventLoopHooks {
+struct MainEventLoopHooks
+{
     MainEventLoopStartCallback on_start{};
     MainEventLoopTickCallback on_tick{};
     MainEventLoopStopCallback on_stop{};
 };
 
-class MainEventLoop final {
-public:
+class MainEventLoop final
+{
+  public:
     explicit MainEventLoop(MainEventLoopOptions options = {});
     ~MainEventLoop();
 
@@ -58,7 +63,7 @@ public:
     [[nodiscard]] TimerManager& timers() noexcept;
     [[nodiscard]] const TimerManager& timers() const noexcept;
 
-private:
+  private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

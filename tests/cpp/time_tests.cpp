@@ -8,17 +8,21 @@
 #include <memory>
 #include <string_view>
 
-namespace {
+namespace
+{
 
 int g_failures = 0;
 
-void Check(bool condition, const char* expression, const char* message = nullptr) {
-    if (condition) {
+void Check(bool condition, const char* expression, const char* message = nullptr)
+{
+    if (condition)
+    {
         return;
     }
 
     std::cerr << "Check failed: " << expression;
-    if (message != nullptr) {
+    if (message != nullptr)
+    {
         std::cerr << " (" << message << ")";
     }
     std::cerr << '\n';
@@ -28,12 +32,14 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 #define XS_CHECK(expr) Check((expr), #expr)
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
 
-xs::core::TimerID ExpectTimerCreated(xs::core::TimerCreateResult result) {
+xs::core::TimerID ExpectTimerCreated(xs::core::TimerCreateResult result)
+{
     XS_CHECK(xs::core::IsTimerID(result));
     return result;
 }
 
-void TestTimeUtilities() {
+void TestTimeUtilities()
+{
     XS_CHECK(xs::core::DurationToMilliseconds(std::chrono::seconds(2) + std::chrono::milliseconds(250)) == 2250);
     XS_CHECK(xs::core::ToUnixTimeMilliseconds(xs::core::SystemTimePoint{std::chrono::milliseconds(1234)}) == 1234);
 
@@ -45,7 +51,8 @@ void TestTimeUtilities() {
     XS_CHECK(xs::core::RemainingMilliseconds(base_time, deadline) == std::chrono::milliseconds(0));
 }
 
-void TestCreateOnceFiresExactlyOnce() {
+void TestCreateOnceFiresExactlyOnce()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
@@ -65,7 +72,8 @@ void TestCreateOnceFiresExactlyOnce() {
     XS_CHECK(timer_manager.size() == 0);
 }
 
-void TestCreateRepeatingCanSelfCancel() {
+void TestCreateRepeatingCanSelfCancel()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
@@ -73,7 +81,8 @@ void TestCreateRepeatingCanSelfCancel() {
     xs::core::TimerID timer_id = 0;
     timer_id = ExpectTimerCreated(timer_manager.CreateRepeating(std::chrono::milliseconds(1), [&]() {
         ++fire_count;
-        if (fire_count == 3) {
+        if (fire_count == 3)
+        {
             XS_CHECK(timer_manager.Cancel(timer_id) == xs::core::TimerErrorCode::None);
         }
     }));
@@ -88,7 +97,8 @@ void TestCreateRepeatingCanSelfCancel() {
     XS_CHECK(timer_manager.size() == 0);
 }
 
-void TestCancelSuppressesPendingCallback() {
+void TestCancelSuppressesPendingCallback()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
@@ -104,7 +114,8 @@ void TestCancelSuppressesPendingCallback() {
     XS_CHECK(!timer_manager.Contains(timer_id));
 }
 
-void TestResetReplacesPendingWait() {
+void TestResetReplacesPendingWait()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
@@ -126,7 +137,8 @@ void TestResetReplacesPendingWait() {
     XS_CHECK(!timer_manager.Contains(timer_id));
 }
 
-void TestDestroySuppressesPendingCallback() {
+void TestDestroySuppressesPendingCallback()
+{
     asio::io_context io_context;
     int fire_count = 0;
 
@@ -143,7 +155,8 @@ void TestDestroySuppressesPendingCallback() {
     XS_CHECK(fire_count == 0);
 }
 
-void TestCreateRejectsEmptyCallback() {
+void TestCreateRejectsEmptyCallback()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
@@ -155,11 +168,13 @@ void TestCreateRejectsEmptyCallback() {
     XS_CHECK(xs::core::TimerErrorMessage(error_code) == std::string_view("Timer callback must not be empty."));
 }
 
-void TestCreateRepeatingRejectsNonPositiveInterval() {
+void TestCreateRepeatingRejectsNonPositiveInterval()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
-    const auto create_result = timer_manager.CreateRepeating(std::chrono::milliseconds(0), []() {});
+    const auto create_result = timer_manager.CreateRepeating(std::chrono::milliseconds(0), []() {
+    });
     XS_CHECK(!xs::core::IsTimerID(create_result));
 
     const auto error_code = xs::core::TimerErrorFromCreateResult(create_result);
@@ -167,7 +182,8 @@ void TestCreateRepeatingRejectsNonPositiveInterval() {
     XS_CHECK(xs::core::TimerErrorMessage(error_code) == std::string_view("Repeating timer interval must be greater than zero."));
 }
 
-void TestCancelRejectsInvalidOrMissingTimerID() {
+void TestCancelRejectsInvalidOrMissingTimerID()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
@@ -177,19 +193,23 @@ void TestCancelRejectsInvalidOrMissingTimerID() {
         xs::core::TimerErrorMessage(xs::core::TimerErrorCode::TimerNotFound) == std::string_view("Timer ID was not found."));
 }
 
-void TestResetRejectsInvalidOrMissingTimerID() {
+void TestResetRejectsInvalidOrMissingTimerID()
+{
     asio::io_context io_context;
     xs::core::TimerManager timer_manager(io_context);
 
     XS_CHECK(
-        timer_manager.ResetOnce(0, std::chrono::milliseconds(1), []() {}) == xs::core::TimerErrorCode::InvalidTimerID);
+        timer_manager.ResetOnce(0, std::chrono::milliseconds(1), []() {
+        }) == xs::core::TimerErrorCode::InvalidTimerID);
     XS_CHECK(
-        timer_manager.ResetOnce(42, std::chrono::milliseconds(1), []() {}) == xs::core::TimerErrorCode::TimerNotFound);
+        timer_manager.ResetOnce(42, std::chrono::milliseconds(1), []() {
+        }) == xs::core::TimerErrorCode::TimerNotFound);
 }
 
 } // namespace
 
-int main() {
+int main()
+{
     TestTimeUtilities();
     TestCreateOnceFiresExactlyOnce();
     TestCreateRepeatingCanSelfCancel();
@@ -201,7 +221,8 @@ int main() {
     TestCancelRejectsInvalidOrMissingTimerID();
     TestResetRejectsInvalidOrMissingTimerID();
 
-    if (g_failures != 0) {
+    if (g_failures != 0)
+    {
         std::cerr << g_failures << " time runtime test(s) failed.\n";
         return EXIT_FAILURE;
     }

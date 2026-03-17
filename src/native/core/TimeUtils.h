@@ -3,7 +3,8 @@
 #include <chrono>
 #include <cstdint>
 
-namespace xs::core {
+namespace xs::core
+{
 
 using SteadyClock = std::chrono::steady_clock;
 using SteadyTimePoint = SteadyClock::time_point;
@@ -21,7 +22,8 @@ using Milliseconds = std::chrono::milliseconds;
 [[nodiscard]] std::int64_t ToUnixTimeMilliseconds(SystemTimePoint time_point) noexcept;
 
 template <typename Rep, typename Period>
-[[nodiscard]] constexpr std::int64_t DurationToMilliseconds(std::chrono::duration<Rep, Period> duration) noexcept {
+[[nodiscard]] constexpr std::int64_t DurationToMilliseconds(std::chrono::duration<Rep, Period> duration) noexcept
+{
     return std::chrono::duration_cast<Milliseconds>(duration).count();
 }
 

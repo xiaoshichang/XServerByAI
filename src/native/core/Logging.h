@@ -8,9 +8,11 @@
 #include <string_view>
 #include <vector>
 
-namespace xs::core {
+namespace xs::core
+{
 
-enum class LogLevel : std::uint8_t {
+enum class LogLevel : std::uint8_t
+{
     Trace,
     Debug,
     Info,
@@ -19,13 +21,15 @@ enum class LogLevel : std::uint8_t {
     Fatal,
 };
 
-enum class ProcessType : std::uint8_t {
+enum class ProcessType : std::uint8_t
+{
     Gm,
     Gate,
     Game,
 };
 
-struct LoggingConfig {
+struct LoggingConfig
+{
     std::string root_dir{"logs"};
     LogLevel min_level{LogLevel::Info};
     std::uint32_t flush_interval_ms{1000};
@@ -34,19 +38,22 @@ struct LoggingConfig {
     std::uint32_t max_retained_files{10};
 };
 
-struct LoggerOptions {
+struct LoggerOptions
+{
     ProcessType process_type{ProcessType::Gm};
     std::string instance_id{"GM"};
     LoggingConfig config{};
 };
 
-struct LogContextField {
+struct LogContextField
+{
     std::string key;
     std::string value;
 };
 
-class Logger final {
-public:
+class Logger final
+{
+  public:
     explicit Logger(LoggerOptions options);
     ~Logger();
 
@@ -66,7 +73,7 @@ public:
     void Flush() const;
     [[nodiscard]] const LoggerOptions& options() const noexcept;
 
-private:
+  private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
