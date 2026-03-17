@@ -26,9 +26,9 @@ public:
     CoreLoopExecutor(CoreLoopExecutor&&) = delete;
     CoreLoopExecutor& operator=(CoreLoopExecutor&&) = delete;
 
-    // Runs the io_context on the current thread until Stop() is requested.
+    // Owner-thread only. Runs the io_context on the current thread until Stop() is requested.
     [[nodiscard]] bool Start(std::string* error_message = nullptr);
-    // Requests the active Start() call to exit the event loop.
+    // Owner-thread only. Requests the active Start() call on the same thread to exit the event loop.
     void Stop() noexcept;
 
     [[nodiscard]] bool IsRunning() const noexcept;

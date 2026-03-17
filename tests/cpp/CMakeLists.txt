@@ -29,3 +29,11 @@ add_executable(xs_net_serialization_tests
 target_link_libraries(xs_net_serialization_tests PRIVATE net)
 
 add_test(NAME xs_net_serialization_tests COMMAND xs_net_serialization_tests)
+
+add_executable(xs_main_event_loop_tests
+    main_event_loop_tests.cpp
+)
+
+target_link_libraries(xs_main_event_loop_tests PRIVATE core)
+
+add_test(NAME xs_main_event_loop_tests COMMAND xs_main_event_loop_tests)
