@@ -13,3 +13,11 @@ add_executable(xs_core_time_tests
 target_link_libraries(xs_core_time_tests PRIVATE core)
 
 add_test(NAME xs_core_time_tests COMMAND xs_core_time_tests)
+
+add_executable(xs_core_loop_tests
+    core_loop_tests.cpp
+)
+
+target_link_libraries(xs_core_loop_tests PRIVATE core)
+
+add_test(NAME xs_core_loop_tests COMMAND xs_core_loop_tests)

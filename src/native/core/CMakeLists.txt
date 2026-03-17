@@ -2,6 +2,8 @@ add_library(core STATIC
     Config.cpp
     Config.h
     core.cpp
+    CoreLoopExecutor.cpp
+    CoreLoopExecutor.h
     Json.cpp
     Json.h
     Logging.cpp

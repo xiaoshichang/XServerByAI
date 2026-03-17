@@ -1,10 +1,12 @@
 #include "Config.h"
+#include "CoreLoopExecutor.h"
 #include "Json.h"
 #include "Logging.h"
 #include "TimeUtils.h"
 #include "Timer.h"
 
 #include <chrono>
+#include <string>
 #include <type_traits>
 
 static_assert(std::is_enum_v<xs::core::LogLevel>, "LogLevel must remain an enum.");
@@ -29,6 +31,15 @@ static_assert(
 static_assert(
     std::is_same_v<decltype(xs::core::IsTimerID(xs::core::TimerCreateResult{})), bool>,
     "Timer result helpers must remain available.");
+static_assert(
+    std::is_default_constructible_v<xs::core::CoreLoopExecutorOptions>,
+    "CoreLoopExecutorOptions must remain default constructible.");
+static_assert(
+    std::is_same_v<decltype(xs::core::CurrentThreadName()), std::string>,
+    "CurrentThreadName must remain available for diagnostics and tests.");
+static_assert(
+    std::is_constructible_v<xs::core::CoreLoopExecutor, xs::core::CoreLoopExecutorOptions>,
+    "CoreLoopExecutor must remain constructible from options.");
 
 namespace xs::core {
 }
