@@ -40,7 +40,7 @@
 3. M2-03 基于 standalone `asio::steady_timer` 实现基础时间工具与定时器封装。Deps: M1-13 | 状态: 已完成
 4. M2-04 基于 standalone `asio` 执行器实现基础运行线程封装（线程名、启动/停止）。Deps: M1-13 | 状态: 已完成
 5. M2-05 基于 standalone `asio::io_context` 实现事件循环骨架（主线程）。Deps: M1-13, M2-03, M2-04 | 状态: 未开发
-6. M2-06 实现网络字节序工具与序列化基础函数。Deps: M1-06 | 状态: 未开发
+6. M2-06 实现网络字节序工具与序列化基础函数。Deps: M1-06 | 状态: 开发中
 7. M2-07 基于 `zeromq` 封装节点间主动连接端（ZeroMQ over TCP）。Deps: M1-13, M2-06 | 状态: 未开发
 8. M2-08 基于 `zeromq` 封装节点间监听端（ZeroMQ over TCP）。Deps: M1-13, M2-06 | 状态: 未开发
 9. M2-09 实现统一消息封包与解析逻辑（复用 `PacketHeader`）。Deps: M1-13, M2-06 | 状态: 未开发

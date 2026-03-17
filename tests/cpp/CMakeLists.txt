@@ -21,3 +21,11 @@ add_executable(xs_core_loop_tests
 target_link_libraries(xs_core_loop_tests PRIVATE core)
 
 add_test(NAME xs_core_loop_tests COMMAND xs_core_loop_tests)
+
+add_executable(xs_net_serialization_tests
+    net_serialization_tests.cpp
+)
+
+target_link_libraries(xs_net_serialization_tests PRIVATE net)
+
+add_test(NAME xs_net_serialization_tests COMMAND xs_net_serialization_tests)

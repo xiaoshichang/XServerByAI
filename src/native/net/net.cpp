@@ -1,8 +1,11 @@
+#include "BinarySerialization.h"
+#include "ByteOrder.h"
 #include "PacketHeader.h"
 
 #include <asio/io_context.hpp>
 #include <asio/version.hpp>
 
+#include <span>
 #include <type_traits>
 
 #ifndef ASIO_STANDALONE
@@ -11,6 +14,11 @@
 
 static_assert(ASIO_VERSION == 103600, "Vendored Asio version must remain 1.36.0");
 static_assert(std::is_standard_layout_v<xs::net::PacketHeader>, "PacketHeader must remain standard layout");
+static_assert(std::is_constructible_v<xs::net::BinaryWriter, std::span<std::byte>>, "BinaryWriter must remain span-based.");
+static_assert(std::is_constructible_v<xs::net::BinaryReader, std::span<const std::byte>>, "BinaryReader must remain span-based.");
+static_assert(
+    xs::net::NetworkToHost(xs::net::HostToNetwork<std::uint64_t>(0x0102030405060708ull)) == 0x0102030405060708ull,
+    "Byte-order conversion must round-trip fixed-width integers.");
 static_assert(std::is_default_constructible_v<asio::io_context>, "Asio io_context must remain available");
 static_assert(xs::net::kPacketMagic == 0x47535052u, "Packet magic must match the protocol spec");
 

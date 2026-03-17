@@ -1,5 +1,9 @@
 add_library(net STATIC
+    BinarySerialization.cpp
+    BinarySerialization.h
+    ByteOrder.h
     net.cpp
+    PacketHeader.h
 )
 
 target_include_directories(net PUBLIC ${CMAKE_CURRENT_LIST_DIR})
