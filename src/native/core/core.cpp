@@ -2,6 +2,7 @@
 #include "CoreLoopExecutor.h"
 #include "Json.h"
 #include "Logging.h"
+#include "MainEventLoop.h"
 #include "TimeUtils.h"
 #include "Timer.h"
 
@@ -40,6 +41,15 @@ static_assert(
 static_assert(
     std::is_constructible_v<xs::core::CoreLoopExecutor, xs::core::CoreLoopExecutorOptions>,
     "CoreLoopExecutor must remain constructible from options.");
+static_assert(
+    std::is_default_constructible_v<xs::core::MainEventLoopOptions>,
+    "MainEventLoopOptions must remain default constructible.");
+static_assert(
+    std::is_default_constructible_v<xs::core::MainEventLoopTickInfo>,
+    "MainEventLoopTickInfo must remain default constructible.");
+static_assert(
+    std::is_constructible_v<xs::core::MainEventLoop, xs::core::MainEventLoopOptions>,
+    "MainEventLoop must remain constructible from options.");
 
 namespace xs::core {
 }

@@ -8,6 +8,8 @@ add_library(core STATIC
     Json.h
     Logging.cpp
     Logging.h
+    MainEventLoop.cpp
+    MainEventLoop.h
     TimeUtils.cpp
     TimeUtils.h
     Timer.cpp

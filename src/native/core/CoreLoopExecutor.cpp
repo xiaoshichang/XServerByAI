@@ -3,7 +3,6 @@
 #include <asio/executor_work_guard.hpp>
 
 #include <exception>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -98,24 +97,19 @@ public:
     }
 
     bool Start(std::string* error_message) {
-        {
-            std::scoped_lock lock(mutex_);
-
-            if (state_ != ExecutorState::stopped) {
-                return SetError("Core loop executor is already running.", error_message);
-            }
-
-            if (options_.thread_name.empty()) {
-                return SetError("Core loop executor thread name must not be empty.", error_message);
-            }
-
-            io_context_.restart();
-            work_guard_.emplace(io_context_.get_executor());
-            state_ = ExecutorState::running;
+        if (state_ != ExecutorState::stopped) {
+            return SetError("Core loop executor is already running.", error_message);
         }
 
+        if (options_.thread_name.empty()) {
+            return SetError("Core loop executor thread name must not be empty.", error_message);
+        }
+
+        io_context_.restart();
+        work_guard_.emplace(io_context_.get_executor());
+        state_ = ExecutorState::running;
+
         if (!SetCurrentThreadName(options_.thread_name, error_message)) {
-            std::scoped_lock lock(mutex_);
             work_guard_.reset();
             io_context_.stop();
             state_ = ExecutorState::stopped;
@@ -125,14 +119,12 @@ public:
         try {
             io_context_.run();
         } catch (const std::exception& exception) {
-            std::scoped_lock lock(mutex_);
             work_guard_.reset();
             io_context_.stop();
             state_ = ExecutorState::stopped;
             return SetError(std::string("Failed to run core loop executor: ") + exception.what(), error_message);
         }
 
-        std::scoped_lock lock(mutex_);
         work_guard_.reset();
         state_ = ExecutorState::stopped;
         ClearError(error_message);
@@ -140,7 +132,6 @@ public:
     }
 
     void Stop() noexcept {
-        std::scoped_lock lock(mutex_);
         if (state_ == ExecutorState::stopped) {
             return;
         }
@@ -151,7 +142,6 @@ public:
     }
 
     [[nodiscard]] bool IsRunning() const noexcept {
-        std::scoped_lock lock(mutex_);
         return state_ != ExecutorState::stopped;
     }
 
@@ -169,7 +159,6 @@ public:
 
 private:
     CoreLoopExecutorOptions options_{};
-    mutable std::mutex mutex_{};
     asio::io_context io_context_{1};
     std::optional<asio::executor_work_guard<asio::io_context::executor_type>> work_guard_{};
     ExecutorState state_{ExecutorState::stopped};
