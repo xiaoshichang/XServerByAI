@@ -14,9 +14,10 @@ Execute one development-plan feature item in a repeatable way for XServerByAI.
 1. Check dependencies in `docs/DEVELOPMENT_PLAN.md`. If any dependency is incomplete, report and stop. If the target item is already done, report and stop.
 2. Prepare a new branch named exactly the feature id (e.g., `M1-01`). If missing, create it. also change the state of this feature to developping in `docs/DEVELOPMENT_PLAN.md`.
 3. Write a feature design note in `docs/` named after the item (e.g., `docs/M1-01.md`). Break it into 3-10 subpoints based on complexity.
-4. Implement the feature following the design note and `docs/CONVENTIONS.md`. For project-owned C++ source files under `src/` and `tests/`, use Allman brace style so every opening brace `{` starts on a new line, and keep pointers and references attached to the type as `T* value` / `T& value`. Do not restyle vendored code under `3rd/` just to satisfy this rule.
-5. Summarize changes. If you are making a commit, include the `developer` role tag in the message.
-6. Check latest commit on the branch, to see what to do next. If it is feedback from `tester`, iterate the feature according to the feedback. 
+4. After writing the feature checklist, briefly explain each subpoint to the user in plain language and explicitly wait for confirmation before starting any implementation work. At this stage, stop after the explanation; do not edit source code, run feature implementation steps, or make an implementation commit until the user confirms.
+5. After the user confirms, implement the feature following the design note and `docs/CONVENTIONS.md`. For project-owned C++ source files under `src/` and `tests/`, use Allman brace style so every opening brace `{` starts on a new line, and keep pointers and references attached to the type as `T* value` / `T& value`. Do not restyle vendored code under `3rd/` just to satisfy this rule.
+6. Summarize changes. If you are making a commit, include the `developer` role tag in the message.
+7. Check latest commit on the branch, to see what to do next. If it is feedback from `tester`, iterate the feature according to the feedback.
 
 ## Examples
 - `do-feature M1-01`
@@ -26,5 +27,6 @@ Execute one development-plan feature item in a repeatable way for XServerByAI.
 - you are `developer`.
 - all relatived documents must be updated if needed.
 - you can only change feature state from "未开发" to "开发中".
+- after creating the feature checklist/design note, you must pause for user confirmation before implementation; if the user confirms in a later turn, continue from the existing branch and design note instead of recreating them.
 - use dotnet command to manage dotnet project, see `docs/DOTNET_CLI.md`.
 - follow `docs/CONVENTIONS.md`; for project-owned C++ code in `src/` and `tests/`, every opening brace `{` must be on a new line and pointers/references must be written as `T* value` / `T& value`; this rule must not trigger restyling in `3rd/`.
