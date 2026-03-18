@@ -73,8 +73,8 @@ void TestCoreLoopExecutorRunsPostedWorkOnCurrentThread()
     });
 
     std::string error_message;
-    const bool started = executor.Start(&error_message);
-    XS_CHECK_MSG(started, error_message.c_str());
+    const xs::core::CoreLoopErrorCode started = executor.Start(&error_message);
+    XS_CHECK_MSG(started == xs::core::CoreLoopErrorCode::None, error_message.c_str());
     XS_CHECK(!executor.IsRunning());
     XS_CHECK(WaitFutureValue(name_future, std::string{}, "core loop executor name future") == "xs-core-loop1");
     XS_CHECK(WaitFutureValue(caller_thread_future, false, "core loop caller thread future"));
@@ -85,9 +85,9 @@ void TestCoreLoopExecutorRejectsEmptyName()
     xs::core::CoreLoopExecutor executor({.thread_name = ""});
     std::string error_message{"not-cleared"};
 
-    const bool started = executor.Start(&error_message);
+    const xs::core::CoreLoopErrorCode started = executor.Start(&error_message);
 
-    XS_CHECK(!started);
+    XS_CHECK(started == xs::core::CoreLoopErrorCode::EmptyThreadName);
     XS_CHECK_MSG(error_message.find("must not be empty") != std::string::npos, error_message.c_str());
     XS_CHECK(!executor.IsRunning());
 }
@@ -100,14 +100,15 @@ void TestCoreLoopExecutorRejectsDoubleStart()
 
     asio::post(executor.executor(), [&executor, &nested_start_promise]() mutable {
         std::string nested_error_message;
-        const bool started_again = executor.Start(&nested_error_message);
+        const xs::core::CoreLoopErrorCode started_again = executor.Start(&nested_error_message);
         nested_start_promise.set_value(
-            !started_again && nested_error_message.find("already running") != std::string::npos);
+            started_again == xs::core::CoreLoopErrorCode::AlreadyRunning &&
+            nested_error_message.find("already running") != std::string::npos);
         executor.Stop();
     });
 
     std::string error_message;
-    XS_CHECK_MSG(executor.Start(&error_message), error_message.c_str());
+    XS_CHECK_MSG(executor.Start(&error_message) == xs::core::CoreLoopErrorCode::None, error_message.c_str());
     XS_CHECK(WaitFutureValue(nested_start_future, false, "nested start future"));
 }
 
@@ -123,7 +124,7 @@ void TestCoreLoopExecutorCanRestart()
         executor.Stop();
     });
 
-    XS_CHECK_MSG(executor.Start(&error_message), error_message.c_str());
+    XS_CHECK_MSG(executor.Start(&error_message) == xs::core::CoreLoopErrorCode::None, error_message.c_str());
     WaitFuture(first_future, "first executor run");
     XS_CHECK(!executor.IsRunning());
 
@@ -134,7 +135,7 @@ void TestCoreLoopExecutorCanRestart()
         executor.Stop();
     });
 
-    XS_CHECK_MSG(executor.Start(&error_message), error_message.c_str());
+    XS_CHECK_MSG(executor.Start(&error_message) == xs::core::CoreLoopErrorCode::None, error_message.c_str());
     XS_CHECK(WaitFutureValue(second_future, std::string{}, "second core loop run") == "xs-core-loop-retry");
     XS_CHECK(!executor.IsRunning());
 }
@@ -154,7 +155,7 @@ void TestCoreLoopExecutorWorksWithTimerManager()
     XS_CHECK(xs::core::IsTimerID(timer_id));
 
     std::string error_message;
-    XS_CHECK_MSG(executor.Start(&error_message), error_message.c_str());
+    XS_CHECK_MSG(executor.Start(&error_message) == xs::core::CoreLoopErrorCode::None, error_message.c_str());
     XS_CHECK(WaitFutureValue(future, std::string{}, "timer callback future") == "xs-core-loop-timer");
     XS_CHECK(!timer_manager.Contains(timer_id));
     XS_CHECK(!executor.IsRunning());

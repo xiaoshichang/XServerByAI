@@ -29,13 +29,13 @@ void ClearError(std::string* error_message)
     }
 }
 
-bool SetError(std::string message, std::string* error_message)
+CoreLoopErrorCode SetError(CoreLoopErrorCode code, std::string message, std::string* error_message)
 {
     if (error_message != nullptr)
     {
         *error_message = std::move(message);
     }
-    return false;
+    return code;
 }
 
 #if defined(_WIN32)
@@ -105,6 +105,29 @@ enum class ExecutorState
 
 } // namespace
 
+std::string_view CoreLoopErrorMessage(CoreLoopErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case CoreLoopErrorCode::None:
+        return "No error.";
+    case CoreLoopErrorCode::EmptyThreadName:
+        return "Thread name must not be empty.";
+    case CoreLoopErrorCode::AlreadyRunning:
+        return "Core loop executor is already running.";
+    case CoreLoopErrorCode::ThreadNameConversionFailed:
+        return "Failed to convert thread name to UTF-16.";
+    case CoreLoopErrorCode::ThreadNameSetFailed:
+        return "Failed to set current thread name.";
+    case CoreLoopErrorCode::RunFailed:
+        return "Failed to run core loop executor.";
+    case CoreLoopErrorCode::InvalidState:
+        return "Core loop executor is in an invalid state.";
+    }
+
+    return "Unknown core loop error.";
+}
+
 class CoreLoopExecutor::Impl final
 {
   public:
@@ -113,28 +136,35 @@ class CoreLoopExecutor::Impl final
     {
     }
 
-    bool Start(std::string* error_message)
+    CoreLoopErrorCode Start(std::string* error_message)
     {
         if (state_ != ExecutorState::stopped)
         {
-            return SetError("Core loop executor is already running.", error_message);
+            return SetError(
+                CoreLoopErrorCode::AlreadyRunning,
+                "Core loop executor is already running.",
+                error_message);
         }
 
         if (options_.thread_name.empty())
         {
-            return SetError("Core loop executor thread name must not be empty.", error_message);
+            return SetError(
+                CoreLoopErrorCode::EmptyThreadName,
+                "Core loop executor thread name must not be empty.",
+                error_message);
         }
 
         io_context_.restart();
         work_guard_.emplace(io_context_.get_executor());
         state_ = ExecutorState::running;
 
-        if (!SetCurrentThreadName(options_.thread_name, error_message))
+        const CoreLoopErrorCode thread_name_result = SetCurrentThreadName(options_.thread_name, error_message);
+        if (thread_name_result != CoreLoopErrorCode::None)
         {
             work_guard_.reset();
             io_context_.stop();
             state_ = ExecutorState::stopped;
-            return false;
+            return thread_name_result;
         }
 
         try
@@ -146,13 +176,16 @@ class CoreLoopExecutor::Impl final
             work_guard_.reset();
             io_context_.stop();
             state_ = ExecutorState::stopped;
-            return SetError(std::string("Failed to run core loop executor: ") + exception.what(), error_message);
+            return SetError(
+                CoreLoopErrorCode::RunFailed,
+                std::string("Failed to run core loop executor: ") + exception.what(),
+                error_message);
         }
 
         work_guard_.reset();
         state_ = ExecutorState::stopped;
         ClearError(error_message);
-        return true;
+        return CoreLoopErrorCode::None;
     }
 
     void Stop() noexcept
@@ -194,24 +227,27 @@ class CoreLoopExecutor::Impl final
     ExecutorState state_{ExecutorState::stopped};
 };
 
-bool SetCurrentThreadName(std::string_view name, std::string* error_message)
+CoreLoopErrorCode SetCurrentThreadName(std::string_view name, std::string* error_message)
 {
     if (name.empty())
     {
-        return SetError("Thread name must not be empty.", error_message);
+        return SetError(CoreLoopErrorCode::EmptyThreadName, "Thread name must not be empty.", error_message);
     }
 
 #if defined(_WIN32)
     const auto wide_name = Utf8ToWide(name);
     if (wide_name.empty())
     {
-        return SetError("Failed to convert thread name to UTF-16.", error_message);
+        return SetError(
+            CoreLoopErrorCode::ThreadNameConversionFailed,
+            "Failed to convert thread name to UTF-16.",
+            error_message);
     }
 
     const HRESULT result = SetThreadDescription(GetCurrentThread(), wide_name.c_str());
     if (FAILED(result))
     {
-        return SetError("Failed to set current thread name.", error_message);
+        return SetError(CoreLoopErrorCode::ThreadNameSetFailed, "Failed to set current thread name.", error_message);
     }
 #elif defined(__APPLE__)
     std::string thread_name{name};
@@ -223,7 +259,7 @@ bool SetCurrentThreadName(std::string_view name, std::string* error_message)
 
     if (pthread_setname_np(thread_name.c_str()) != 0)
     {
-        return SetError("Failed to set current thread name.", error_message);
+        return SetError(CoreLoopErrorCode::ThreadNameSetFailed, "Failed to set current thread name.", error_message);
     }
 #else
     std::string thread_name{name};
@@ -235,12 +271,12 @@ bool SetCurrentThreadName(std::string_view name, std::string* error_message)
 
     if (pthread_setname_np(pthread_self(), thread_name.c_str()) != 0)
     {
-        return SetError("Failed to set current thread name.", error_message);
+        return SetError(CoreLoopErrorCode::ThreadNameSetFailed, "Failed to set current thread name.", error_message);
     }
 #endif
 
     ClearError(error_message);
-    return true;
+    return CoreLoopErrorCode::None;
 }
 
 std::string CurrentThreadName()
@@ -284,8 +320,16 @@ CoreLoopExecutor::~CoreLoopExecutor()
     Stop();
 }
 
-bool CoreLoopExecutor::Start(std::string* error_message)
+CoreLoopErrorCode CoreLoopExecutor::Start(std::string* error_message)
 {
+    if (impl_ == nullptr)
+    {
+        return SetError(
+            CoreLoopErrorCode::InvalidState,
+            std::string(CoreLoopErrorMessage(CoreLoopErrorCode::InvalidState)),
+            error_message);
+    }
+
     return impl_->Start(error_message);
 }
 

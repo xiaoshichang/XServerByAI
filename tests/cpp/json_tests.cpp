@@ -57,9 +57,9 @@ void CleanupTestDirectory(const std::filesystem::path& path)
 bool WriteJsonFile(const std::filesystem::path& path, const xs::core::Json& value)
 {
     std::string error_message;
-    const bool success = xs::core::SaveJsonFile(path, value, &error_message);
-    XS_CHECK_MSG(success, error_message.c_str());
-    return success;
+    const xs::core::JsonErrorCode result = xs::core::SaveJsonFile(path, value, &error_message);
+    XS_CHECK_MSG(result == xs::core::JsonErrorCode::None, error_message.c_str());
+    return result == xs::core::JsonErrorCode::None;
 }
 
 xs::core::Json MakeValidClusterConfigJson()
@@ -95,9 +95,10 @@ void TestTryParseJsonSuccess()
     xs::core::Json value;
     std::string error_message{"not-cleared"};
 
-    const bool success = xs::core::TryParseJson(R"({"service":"gate","index":3})", &value, &error_message);
+    const xs::core::JsonErrorCode success =
+        xs::core::TryParseJson(R"({"service":"gate","index":3})", &value, &error_message);
 
-    XS_CHECK(success);
+    XS_CHECK(success == xs::core::JsonErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(value.is_object());
     XS_CHECK(value.at("service") == "gate");
@@ -109,9 +110,9 @@ void TestTryParseJsonFailure()
     xs::core::Json value;
     std::string error_message;
 
-    const bool success = xs::core::TryParseJson(R"({"service":)", &value, &error_message);
+    const xs::core::JsonErrorCode success = xs::core::TryParseJson(R"({"service":)", &value, &error_message);
 
-    XS_CHECK(!success);
+    XS_CHECK(success == xs::core::JsonErrorCode::ParseFailed);
     XS_CHECK(!error_message.empty());
     XS_CHECK_MSG(error_message.find("Failed to parse JSON:") != std::string::npos, error_message.c_str());
 }
@@ -121,12 +122,12 @@ void TestDeserializeTypedConfig()
     TestConfig config{};
     std::string error_message;
 
-    const bool success = xs::core::TryParseJsonAs(
+    const xs::core::JsonErrorCode success = xs::core::TryParseJsonAs(
         R"({"name":"game0","port":40100,"enabled":true})",
         &config,
         &error_message);
 
-    XS_CHECK(success);
+    XS_CHECK(success == xs::core::JsonErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(config.name == "game0");
     XS_CHECK(config.port == 40100);
@@ -140,17 +141,17 @@ void TestSaveAndLoadJsonFileRoundTrip()
 
     const TestConfig expected_config{"gate0", 33001, true};
     std::string save_error;
-    const bool save_success = xs::core::SaveJsonFileFrom(file_path, expected_config, &save_error);
+    const xs::core::JsonErrorCode save_success = xs::core::SaveJsonFileFrom(file_path, expected_config, &save_error);
 
-    XS_CHECK(save_success);
+    XS_CHECK(save_success == xs::core::JsonErrorCode::None);
     XS_CHECK(save_error.empty());
     XS_CHECK(std::filesystem::exists(file_path));
 
     TestConfig actual_config{};
     std::string load_error;
-    const bool load_success = xs::core::TryLoadJsonFileAs(file_path, &actual_config, &load_error);
+    const xs::core::JsonErrorCode load_success = xs::core::TryLoadJsonFileAs(file_path, &actual_config, &load_error);
 
-    XS_CHECK(load_success);
+    XS_CHECK(load_success == xs::core::JsonErrorCode::None);
     XS_CHECK(load_error.empty());
     XS_CHECK(actual_config.name == expected_config.name);
     XS_CHECK(actual_config.port == expected_config.port);
@@ -165,13 +166,13 @@ void TestSaveJsonFileRejectsInvalidIndent()
         std::filesystem::current_path() / "test-output" / "json-runtime-tests-invalid" / "config.json";
 
     std::string error_message;
-    const bool success = xs::core::SaveJsonFile(
+    const xs::core::JsonErrorCode success = xs::core::SaveJsonFile(
         file_path,
         xs::core::Json{{"name", "gm"}},
         &error_message,
         -2);
 
-    XS_CHECK(!success);
+    XS_CHECK(success == xs::core::JsonErrorCode::InvalidIndent);
     XS_CHECK(!error_message.empty());
     XS_CHECK_MSG(
         error_message.find("JSON indentation must be -1 or greater.") != std::string::npos,
@@ -201,9 +202,9 @@ void TestLoadNodeConfigForGm()
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    const bool success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
 
-    XS_CHECK_MSG(success, error_message.c_str());
+    XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
     XS_CHECK(node_config.process_type == xs::core::ProcessType::Gm);
     XS_CHECK(node_config.selector == "gm");
     XS_CHECK(node_config.instance_id == "GM");
@@ -232,9 +233,10 @@ void TestLoadNodeConfigForGate()
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    const bool success = xs::core::LoadNodeConfigFile(file_path, "gate0", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadNodeConfigFile(file_path, "gate0", &node_config, &error_message);
 
-    XS_CHECK_MSG(success, error_message.c_str());
+    XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
     XS_CHECK(node_config.process_type == xs::core::ProcessType::Gate);
     XS_CHECK(node_config.selector == "gate0");
     XS_CHECK(node_config.instance_id == "Gate0");
@@ -264,9 +266,10 @@ void TestLoadNodeConfigForGame()
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    const bool success = xs::core::LoadNodeConfigFile(file_path, "game0", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadNodeConfigFile(file_path, "game0", &node_config, &error_message);
 
-    XS_CHECK_MSG(success, error_message.c_str());
+    XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
     XS_CHECK(node_config.process_type == xs::core::ProcessType::Game);
     XS_CHECK(node_config.selector == "game0");
     XS_CHECK(node_config.instance_id == "Game0");
@@ -295,9 +298,9 @@ void TestLoadNodeConfigRejectsUnknownTopLevelField()
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    const bool success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
 
-    XS_CHECK(!success);
+    XS_CHECK(success == xs::core::ConfigErrorCode::UnknownField);
     XS_CHECK_MSG(error_message.find("unexpected") != std::string::npos, error_message.c_str());
 
     CleanupTestDirectory(base_path);
@@ -317,9 +320,9 @@ void TestLoadNodeConfigRejectsUnknownLoggingField()
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    const bool success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
 
-    XS_CHECK(!success);
+    XS_CHECK(success == xs::core::ConfigErrorCode::UnknownField);
     XS_CHECK_MSG(error_message.find("unexpectedField") != std::string::npos, error_message.c_str());
 
     CleanupTestDirectory(base_path);
@@ -339,9 +342,10 @@ void TestLoadNodeConfigRejectsMismatchedNodeId()
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    const bool success = xs::core::LoadNodeConfigFile(file_path, "gate0", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadNodeConfigFile(file_path, "gate0", &node_config, &error_message);
 
-    XS_CHECK(!success);
+    XS_CHECK(success == xs::core::ConfigErrorCode::InvalidNodeId);
     XS_CHECK_MSG(error_message.find("Gate0") != std::string::npos, error_message.c_str());
 
     CleanupTestDirectory(base_path);

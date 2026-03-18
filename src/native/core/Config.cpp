@@ -30,6 +30,112 @@ bool SetError(std::string message, std::string* error_message)
     return false;
 }
 
+ConfigErrorCode SetConfigError(ConfigErrorCode code, std::string message, std::string* error_message)
+{
+    if (error_message != nullptr)
+    {
+        if (message.empty())
+        {
+            *error_message = std::string(ConfigErrorMessage(code));
+        }
+        else
+        {
+            *error_message = std::move(message);
+        }
+    }
+    return code;
+}
+
+bool MessageMentionsLoggingPath(std::string_view message) noexcept
+{
+    return message.find("logging.") != std::string_view::npos;
+}
+
+ConfigErrorCode ClassifyConfigError(std::string_view message) noexcept
+{
+    if (message.find("must be an object.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::ExpectedObject;
+    }
+
+    if (message.starts_with("Unknown field '"))
+    {
+        return ConfigErrorCode::UnknownField;
+    }
+
+    if (message.starts_with("Missing required field '"))
+    {
+        return ConfigErrorCode::MissingRequiredField;
+    }
+
+    if (message.find(" has invalid selector '") != std::string_view::npos ||
+        message == "selector must be one of gm, gate<index>, or game<index>.")
+    {
+        return ConfigErrorCode::InvalidSelector;
+    }
+
+    if (message.starts_with("Missing gate instance for selector '") ||
+        message.starts_with("Missing game instance for selector '"))
+    {
+        return ConfigErrorCode::MissingInstance;
+    }
+
+    if (message.find(" must equal '") != std::string_view::npos)
+    {
+        return ConfigErrorCode::InvalidNodeId;
+    }
+
+    if (message.find("must contain at least one instance.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::EmptyCollection;
+    }
+
+    if (message.find("must be one of Trace, Debug, Info, Warn, Error, Fatal.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::InvalidLogLevel;
+    }
+
+    if (message.find("must be in the range 1-65535.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::InvalidEndpointPort;
+    }
+
+    if (MessageMentionsLoggingPath(message) &&
+        (message.find("must not be empty.") != std::string_view::npos ||
+         message.find("must be greater than zero.") != std::string_view::npos))
+    {
+        return ConfigErrorCode::LoggingConfigInvalid;
+    }
+
+    if (message.find("must be a string.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::InvalidString;
+    }
+
+    if (message.find("must not be empty.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::EmptyString;
+    }
+
+    if (message.find("must be a boolean.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::InvalidBoolean;
+    }
+
+    if (message.find("must be an unsigned integer.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::InvalidUnsignedInteger;
+    }
+
+    if (message.find("is out of range.") != std::string_view::npos ||
+        message.find("must be greater than zero.") != std::string_view::npos)
+    {
+        return ConfigErrorCode::ValueOutOfRange;
+    }
+
+    return ConfigErrorCode::Unknown;
+}
+
 std::string JoinPath(std::string_view parent, std::string_view child)
 {
     if (parent.empty())
@@ -212,23 +318,33 @@ bool ParseUnsignedInteger(const Json& value, std::string_view path, T* output, s
 
 bool ValidateLoggingConfigAtPath(const LoggingConfig& config, std::string_view path, std::string* error_message)
 {
-    std::string validation_error;
-    if (ValidateLoggingConfig(config, &validation_error))
+    const LoggingErrorCode validation_result = ValidateLoggingConfig(config, nullptr);
+    if (validation_result == LoggingErrorCode::None)
     {
         ClearError(error_message);
         return true;
     }
 
-    if (validation_error.rfind("logging.", 0) == 0)
+    std::ostringstream stream;
+    switch (validation_result)
     {
-        validation_error.replace(0, 8, std::string(path) + '.');
-    }
-    else
-    {
-        validation_error = std::string(path) + ": " + validation_error;
+    case LoggingErrorCode::EmptyRootDir:
+        stream << JoinPath(path, "rootDir") << " must not be empty.";
+        break;
+    case LoggingErrorCode::FlushIntervalMustBePositive:
+        stream << JoinPath(path, "flushIntervalMs") << " must be greater than zero.";
+        break;
+    case LoggingErrorCode::MaxFileSizeMustBePositive:
+        stream << JoinPath(path, "maxFileSizeMB") << " must be greater than zero.";
+        break;
+    case LoggingErrorCode::MaxRetainedFilesMustBePositive:
+        stream << JoinPath(path, "maxRetainedFiles") << " must be greater than zero.";
+        break;
+    case LoggingErrorCode::None:
+        break;
     }
 
-    return SetError(std::move(validation_error), error_message);
+    return SetError(stream.str(), error_message);
 }
 
 bool ParseLoggingBlock(
@@ -991,6 +1107,53 @@ bool ParseGameCollection(
 
 } // namespace
 
+std::string_view ConfigErrorMessage(ConfigErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case ConfigErrorCode::None:
+        return "No error.";
+    case ConfigErrorCode::InvalidArgument:
+        return "Invalid config API argument.";
+    case ConfigErrorCode::JsonLoadFailed:
+        return "Failed to load JSON configuration file.";
+    case ConfigErrorCode::ExpectedObject:
+        return "Configuration value must be an object.";
+    case ConfigErrorCode::UnknownField:
+        return "Configuration contains an unknown field.";
+    case ConfigErrorCode::MissingRequiredField:
+        return "Configuration is missing a required field.";
+    case ConfigErrorCode::InvalidString:
+        return "Configuration value must be a string.";
+    case ConfigErrorCode::EmptyString:
+        return "Configuration string value must not be empty.";
+    case ConfigErrorCode::InvalidBoolean:
+        return "Configuration value must be a boolean.";
+    case ConfigErrorCode::InvalidUnsignedInteger:
+        return "Configuration value must be an unsigned integer.";
+    case ConfigErrorCode::ValueOutOfRange:
+        return "Configuration value is out of range.";
+    case ConfigErrorCode::InvalidLogLevel:
+        return "Configuration log level is invalid.";
+    case ConfigErrorCode::InvalidEndpointPort:
+        return "Configuration endpoint port is invalid.";
+    case ConfigErrorCode::InvalidSelector:
+        return "Node selector is invalid.";
+    case ConfigErrorCode::MissingInstance:
+        return "Selected node instance is missing.";
+    case ConfigErrorCode::InvalidNodeId:
+        return "Node ID does not match selector.";
+    case ConfigErrorCode::EmptyCollection:
+        return "Configuration collection must not be empty.";
+    case ConfigErrorCode::LoggingConfigInvalid:
+        return "Logging configuration is invalid.";
+    case ConfigErrorCode::Unknown:
+        return "Unknown configuration error.";
+    }
+
+    return "Unknown configuration error.";
+}
+
 std::optional<NodeSelector> ParseNodeSelector(std::string_view selector) noexcept
 {
     if (selector == "gm")
@@ -1026,7 +1189,7 @@ std::string SelectorCanonicalNodeId(const NodeSelector& selector)
     return "GM";
 }
 
-bool LoadClusterConfigFile(
+ConfigErrorCode LoadClusterConfigFile(
     const std::filesystem::path& path,
     ClusterConfig* output,
     std::string* error_message)
@@ -1041,23 +1204,27 @@ bool LoadClusterConfigFile(
 
     if (output == nullptr)
     {
-        return SetError("Cluster config output must not be null.", error_message);
+        return SetConfigError(ConfigErrorCode::InvalidArgument, "Cluster config output must not be null.", error_message);
     }
 
     Json document;
-    if (!TryLoadJsonFile(path, &document, error_message))
+    std::string detail_error;
+    const JsonErrorCode load_result = TryLoadJsonFile(path, &document, &detail_error);
+    if (load_result != JsonErrorCode::None)
     {
-        return false;
+        return SetConfigError(ConfigErrorCode::JsonLoadFailed, std::move(detail_error), error_message);
     }
 
-    if (!ExpectObject(document, "root", error_message))
+    if (!ExpectObject(document, "root", &detail_error))
     {
-        return false;
+        const ConfigErrorCode classified_error = ClassifyConfigError(detail_error);
+        return SetConfigError(classified_error, std::move(detail_error), error_message);
     }
 
-    if (!RejectUnknownFields(document, kAllowedRootFields, "root", error_message))
+    if (!RejectUnknownFields(document, kAllowedRootFields, "root", &detail_error))
     {
-        return false;
+        const ConfigErrorCode classified_error = ClassifyConfigError(detail_error);
+        return SetConfigError(classified_error, std::move(detail_error), error_message);
     }
 
     const Json* server_group = nullptr;
@@ -1065,31 +1232,33 @@ bool LoadClusterConfigFile(
     const Json* gm = nullptr;
     const Json* gate = nullptr;
     const Json* game = nullptr;
-    if (!GetRequiredMember(document, "serverGroup", &server_group, "root", error_message) ||
-        !GetRequiredMember(document, "logging", &logging, "root", error_message) ||
-        !GetRequiredMember(document, "gm", &gm, "root", error_message) ||
-        !GetRequiredMember(document, "gate", &gate, "root", error_message) ||
-        !GetRequiredMember(document, "game", &game, "root", error_message))
+    if (!GetRequiredMember(document, "serverGroup", &server_group, "root", &detail_error) ||
+        !GetRequiredMember(document, "logging", &logging, "root", &detail_error) ||
+        !GetRequiredMember(document, "gm", &gm, "root", &detail_error) ||
+        !GetRequiredMember(document, "gate", &gate, "root", &detail_error) ||
+        !GetRequiredMember(document, "game", &game, "root", &detail_error))
     {
-        return false;
+        const ConfigErrorCode classified_error = ClassifyConfigError(detail_error);
+        return SetConfigError(classified_error, std::move(detail_error), error_message);
     }
 
     ClusterConfig cluster_config;
-    if (!ParseServerGroupConfig(*server_group, &cluster_config.server_group, "serverGroup", error_message) ||
-        !ParseLoggingBlock(*logging, LoggingConfig{}, &cluster_config.logging_defaults, "logging", error_message) ||
-        !ParseGmConfig(*gm, cluster_config.logging_defaults, &cluster_config.gm, "gm", error_message) ||
-        !ParseGateCollection(*gate, cluster_config.logging_defaults, &cluster_config.gates, "gate", error_message) ||
-        !ParseGameCollection(*game, cluster_config.logging_defaults, &cluster_config.games, "game", error_message))
+    if (!ParseServerGroupConfig(*server_group, &cluster_config.server_group, "serverGroup", &detail_error) ||
+        !ParseLoggingBlock(*logging, LoggingConfig{}, &cluster_config.logging_defaults, "logging", &detail_error) ||
+        !ParseGmConfig(*gm, cluster_config.logging_defaults, &cluster_config.gm, "gm", &detail_error) ||
+        !ParseGateCollection(*gate, cluster_config.logging_defaults, &cluster_config.gates, "gate", &detail_error) ||
+        !ParseGameCollection(*game, cluster_config.logging_defaults, &cluster_config.games, "game", &detail_error))
     {
-        return false;
+        const ConfigErrorCode classified_error = ClassifyConfigError(detail_error);
+        return SetConfigError(classified_error, std::move(detail_error), error_message);
     }
 
     *output = std::move(cluster_config);
     ClearError(error_message);
-    return true;
+    return ConfigErrorCode::None;
 }
 
-bool SelectNodeConfig(
+ConfigErrorCode SelectNodeConfig(
     const ClusterConfig& cluster_config,
     std::string_view selector,
     NodeConfig* output,
@@ -1097,13 +1266,16 @@ bool SelectNodeConfig(
 {
     if (output == nullptr)
     {
-        return SetError("Node config output must not be null.", error_message);
+        return SetConfigError(ConfigErrorCode::InvalidArgument, "Node config output must not be null.", error_message);
     }
 
     const auto parsed_selector = ParseNodeSelector(selector);
     if (!parsed_selector.has_value())
     {
-        return SetError("selector must be one of gm, gate<index>, or game<index>.", error_message);
+        return SetConfigError(
+            ConfigErrorCode::InvalidSelector,
+            "selector must be one of gm, gate<index>, or game<index>.",
+            error_message);
     }
 
     NodeConfig node_config;
@@ -1126,7 +1298,7 @@ bool SelectNodeConfig(
         {
             std::ostringstream stream;
             stream << "Missing gate instance for selector '" << parsed_selector->value << "'.";
-            return SetError(stream.str(), error_message);
+            return SetConfigError(ConfigErrorCode::MissingInstance, stream.str(), error_message);
         }
 
         node_config.process_type = ProcessType::Gate;
@@ -1144,7 +1316,7 @@ bool SelectNodeConfig(
         {
             std::ostringstream stream;
             stream << "Missing game instance for selector '" << parsed_selector->value << "'.";
-            return SetError(stream.str(), error_message);
+            return SetConfigError(ConfigErrorCode::MissingInstance, stream.str(), error_message);
         }
 
         node_config.process_type = ProcessType::Game;
@@ -1158,10 +1330,10 @@ bool SelectNodeConfig(
 
     *output = std::move(node_config);
     ClearError(error_message);
-    return true;
+    return ConfigErrorCode::None;
 }
 
-bool LoadNodeConfigFile(
+ConfigErrorCode LoadNodeConfigFile(
     const std::filesystem::path& path,
     std::string_view selector,
     NodeConfig* output,
@@ -1169,23 +1341,26 @@ bool LoadNodeConfigFile(
 {
     if (output == nullptr)
     {
-        return SetError("Node config output must not be null.", error_message);
+        return SetConfigError(ConfigErrorCode::InvalidArgument, "Node config output must not be null.", error_message);
     }
 
     ClusterConfig cluster_config;
-    if (!LoadClusterConfigFile(path, &cluster_config, error_message))
+    std::string detail_error;
+    const ConfigErrorCode load_cluster_result = LoadClusterConfigFile(path, &cluster_config, &detail_error);
+    if (load_cluster_result != ConfigErrorCode::None)
     {
-        return false;
+        return SetConfigError(load_cluster_result, std::move(detail_error), error_message);
     }
 
-    if (!SelectNodeConfig(cluster_config, selector, output, error_message))
+    const ConfigErrorCode select_result = SelectNodeConfig(cluster_config, selector, output, &detail_error);
+    if (select_result != ConfigErrorCode::None)
     {
-        return false;
+        return SetConfigError(select_result, std::move(detail_error), error_message);
     }
 
     output->source_path = path;
     ClearError(error_message);
-    return true;
+    return ConfigErrorCode::None;
 }
 
 } // namespace xs::core

@@ -3,6 +3,7 @@
 #include <asio/any_io_executor.hpp>
 #include <asio/io_context.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -15,7 +16,19 @@ struct CoreLoopExecutorOptions
     std::string thread_name{"xs-core-loop"};
 };
 
-[[nodiscard]] bool SetCurrentThreadName(std::string_view name, std::string* error_message = nullptr);
+enum class CoreLoopErrorCode : std::uint8_t
+{
+    None = 0,
+    EmptyThreadName,
+    AlreadyRunning,
+    ThreadNameConversionFailed,
+    ThreadNameSetFailed,
+    RunFailed,
+    InvalidState,
+};
+
+[[nodiscard]] std::string_view CoreLoopErrorMessage(CoreLoopErrorCode code) noexcept;
+[[nodiscard]] CoreLoopErrorCode SetCurrentThreadName(std::string_view name, std::string* error_message = nullptr);
 [[nodiscard]] std::string CurrentThreadName();
 
 class CoreLoopExecutor final
@@ -30,7 +43,7 @@ class CoreLoopExecutor final
     CoreLoopExecutor& operator=(CoreLoopExecutor&&) = delete;
 
     // Owner-thread only. Runs the io_context on the current thread until Stop() is requested.
-    [[nodiscard]] bool Start(std::string* error_message = nullptr);
+    [[nodiscard]] CoreLoopErrorCode Start(std::string* error_message = nullptr);
     // Owner-thread only. Requests the active Start() call on the same thread to exit the event loop.
     void Stop() noexcept;
 

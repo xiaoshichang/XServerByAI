@@ -606,8 +606,14 @@ class Logger::Impl
         : options_(std::move(options)), process_id_(GetCurrentProcessIdValue())
     {
         std::string error_message;
-        if (!ValidateLoggingConfig(options_.config, &error_message))
+        const LoggingErrorCode validation_result = ValidateLoggingConfig(options_.config, &error_message);
+        if (validation_result != LoggingErrorCode::None)
         {
+            if (error_message.empty())
+            {
+                error_message = std::string(LoggingErrorMessage(validation_result));
+            }
+
             throw std::invalid_argument(error_message);
         }
 
@@ -797,40 +803,67 @@ std::string_view ProcessTypeName(ProcessType value) noexcept
     return "GM";
 }
 
-bool ValidateLoggingConfig(const LoggingConfig& config, std::string* error_message)
+std::string_view LoggingErrorMessage(LoggingErrorCode code) noexcept
 {
-    auto set_error = [error_message](std::string_view message) {
+    switch (code)
+    {
+    case LoggingErrorCode::None:
+        return "No error.";
+    case LoggingErrorCode::EmptyRootDir:
+        return "logging.rootDir must not be empty.";
+    case LoggingErrorCode::FlushIntervalMustBePositive:
+        return "logging.flushIntervalMs must be greater than zero.";
+    case LoggingErrorCode::MaxFileSizeMustBePositive:
+        return "logging.maxFileSizeMB must be greater than zero.";
+    case LoggingErrorCode::MaxRetainedFilesMustBePositive:
+        return "logging.maxRetainedFiles must be greater than zero.";
+    }
+
+    return "Unknown logging error.";
+}
+
+LoggingErrorCode ValidateLoggingConfig(const LoggingConfig& config, std::string* error_message)
+{
+    auto set_error = [error_message](LoggingErrorCode code, std::string_view message) {
         if (error_message != nullptr)
         {
             *error_message = std::string(message);
         }
+        return code;
     };
 
     if (config.root_dir.empty())
     {
-        set_error("logging.rootDir must not be empty.");
-        return false;
+        return set_error(LoggingErrorCode::EmptyRootDir, "logging.rootDir must not be empty.");
     }
 
     if (config.flush_interval_ms == 0U)
     {
-        set_error("logging.flushIntervalMs must be greater than zero.");
-        return false;
+        return set_error(
+            LoggingErrorCode::FlushIntervalMustBePositive,
+            "logging.flushIntervalMs must be greater than zero.");
     }
 
     if (config.max_file_size_mb == 0U)
     {
-        set_error("logging.maxFileSizeMB must be greater than zero.");
-        return false;
+        return set_error(
+            LoggingErrorCode::MaxFileSizeMustBePositive,
+            "logging.maxFileSizeMB must be greater than zero.");
     }
 
     if (config.max_retained_files == 0U)
     {
-        set_error("logging.maxRetainedFiles must be greater than zero.");
-        return false;
+        return set_error(
+            LoggingErrorCode::MaxRetainedFilesMustBePositive,
+            "logging.maxRetainedFiles must be greater than zero.");
     }
 
-    return true;
+    if (error_message != nullptr)
+    {
+        error_message->clear();
+    }
+
+    return LoggingErrorCode::None;
 }
 
 } // namespace xs::core

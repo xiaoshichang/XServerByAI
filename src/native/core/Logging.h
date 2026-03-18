@@ -28,6 +28,15 @@ enum class ProcessType : std::uint8_t
     Game,
 };
 
+enum class LoggingErrorCode : std::uint8_t
+{
+    None = 0,
+    EmptyRootDir,
+    FlushIntervalMustBePositive,
+    MaxFileSizeMustBePositive,
+    MaxRetainedFilesMustBePositive,
+};
+
 struct LoggingConfig
 {
     std::string root_dir{"logs"};
@@ -81,6 +90,7 @@ class Logger final
 [[nodiscard]] std::optional<LogLevel> ParseLogLevel(std::string_view value) noexcept;
 [[nodiscard]] std::string_view LogLevelName(LogLevel value) noexcept;
 [[nodiscard]] std::string_view ProcessTypeName(ProcessType value) noexcept;
-[[nodiscard]] bool ValidateLoggingConfig(const LoggingConfig& config, std::string* error_message = nullptr);
+[[nodiscard]] std::string_view LoggingErrorMessage(LoggingErrorCode code) noexcept;
+[[nodiscard]] LoggingErrorCode ValidateLoggingConfig(const LoggingConfig& config, std::string* error_message = nullptr);
 
 } // namespace xs::core

@@ -20,6 +20,29 @@ enum class NodeSelectorKind : std::uint8_t
     Game,
 };
 
+enum class ConfigErrorCode : std::uint8_t
+{
+    None = 0,
+    InvalidArgument,
+    JsonLoadFailed,
+    ExpectedObject,
+    UnknownField,
+    MissingRequiredField,
+    InvalidString,
+    EmptyString,
+    InvalidBoolean,
+    InvalidUnsignedInteger,
+    ValueOutOfRange,
+    InvalidLogLevel,
+    InvalidEndpointPort,
+    InvalidSelector,
+    MissingInstance,
+    InvalidNodeId,
+    EmptyCollection,
+    LoggingConfigInvalid,
+    Unknown,
+};
+
 struct NodeSelector
 {
     NodeSelectorKind kind{NodeSelectorKind::Gm};
@@ -106,16 +129,17 @@ struct NodeConfig
 
 [[nodiscard]] std::optional<NodeSelector> ParseNodeSelector(std::string_view selector) noexcept;
 [[nodiscard]] std::string SelectorCanonicalNodeId(const NodeSelector& selector);
-[[nodiscard]] bool LoadClusterConfigFile(
+[[nodiscard]] std::string_view ConfigErrorMessage(ConfigErrorCode code) noexcept;
+[[nodiscard]] ConfigErrorCode LoadClusterConfigFile(
     const std::filesystem::path& path,
     ClusterConfig* output,
     std::string* error_message = nullptr);
-[[nodiscard]] bool SelectNodeConfig(
+[[nodiscard]] ConfigErrorCode SelectNodeConfig(
     const ClusterConfig& cluster_config,
     std::string_view selector,
     NodeConfig* output,
     std::string* error_message = nullptr);
-[[nodiscard]] bool LoadNodeConfigFile(
+[[nodiscard]] ConfigErrorCode LoadNodeConfigFile(
     const std::filesystem::path& path,
     std::string_view selector,
     NodeConfig* output,

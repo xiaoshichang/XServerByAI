@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ZmqContext.h"
+#include "ZmqError.h"
 
 #include <asio/io_context.hpp>
 
@@ -48,9 +49,9 @@ class ZmqPassiveListener final
     ZmqPassiveListener(ZmqPassiveListener&&) = delete;
     ZmqPassiveListener& operator=(ZmqPassiveListener&&) = delete;
 
-    [[nodiscard]] bool Start(std::string* error_message = nullptr);
+    [[nodiscard]] ZmqSocketErrorCode Start(std::string* error_message = nullptr);
     void Stop() noexcept;
-    [[nodiscard]] bool Send(
+    [[nodiscard]] ZmqSocketErrorCode Send(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> message,
         std::string* error_message = nullptr);

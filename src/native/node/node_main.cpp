@@ -31,8 +31,15 @@ int main(int argc, char* argv[])
 
     xs::core::NodeConfig node_config;
     std::string error_message;
-    if (!xs::core::LoadNodeConfigFile(config_path, selector, &node_config, &error_message))
+    const xs::core::ConfigErrorCode load_result =
+        xs::core::LoadNodeConfigFile(config_path, selector, &node_config, &error_message);
+    if (load_result != xs::core::ConfigErrorCode::None)
     {
+        if (error_message.empty())
+        {
+            error_message = std::string(xs::core::ConfigErrorMessage(load_result));
+        }
+
         std::cerr << error_message << '\n';
         return 1;
     }

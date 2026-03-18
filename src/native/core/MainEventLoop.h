@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace xs::core
 {
@@ -22,6 +23,22 @@ struct MainEventLoopOptions
     SteadyDuration tick_interval{SteadyDuration::zero()};
 };
 
+enum class MainEventLoopErrorCode : std::uint8_t
+{
+    None = 0,
+    EmptyThreadName,
+    NegativeTickInterval,
+    TickCallbackRequiresPositiveInterval,
+    TickIntervalRequiresCallback,
+    AlreadyRunning,
+    ExecutorStartFailed,
+    StartupCallbackFailed,
+    TickTimerCreateFailed,
+    TickCallbackThrew,
+    StopCallbackThrew,
+    InvalidState,
+};
+
 struct MainEventLoopTickInfo
 {
     SteadyTimePoint now{};
@@ -29,7 +46,9 @@ struct MainEventLoopTickInfo
     std::uint64_t tick_count{0};
 };
 
-using MainEventLoopStartCallback = std::function<bool(MainEventLoop&, std::string* error_message)>;
+[[nodiscard]] std::string_view MainEventLoopErrorMessage(MainEventLoopErrorCode code) noexcept;
+
+using MainEventLoopStartCallback = std::function<MainEventLoopErrorCode(MainEventLoop&, std::string* error_message)>;
 using MainEventLoopTickCallback = std::function<void(MainEventLoop&, const MainEventLoopTickInfo&)>;
 using MainEventLoopStopCallback = std::function<void(MainEventLoop&)>;
 
@@ -52,7 +71,7 @@ class MainEventLoop final
     MainEventLoop& operator=(MainEventLoop&&) = delete;
 
     // Owner-thread only. Runs the event loop on the current thread until RequestStop() is requested.
-    [[nodiscard]] bool Run(MainEventLoopHooks hooks = {}, std::string* error_message = nullptr);
+    [[nodiscard]] MainEventLoopErrorCode Run(MainEventLoopHooks hooks = {}, std::string* error_message = nullptr);
     // Owner-thread only. Requests the active Run() call on the same thread to exit the event loop.
     void RequestStop() noexcept;
 

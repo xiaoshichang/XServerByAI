@@ -53,7 +53,7 @@ void TestMainEventLoopRunsHooksOnCurrentThread()
         start_thread_name = xs::core::CurrentThreadName();
         start_on_caller_thread = std::this_thread::get_id() == caller_thread_id;
         running_loop.RequestStop();
-        return true;
+        return xs::core::MainEventLoopErrorCode::None;
     };
     hooks.on_stop = [&](xs::core::MainEventLoop&) {
         stop_thread_name = xs::core::CurrentThreadName();
@@ -61,7 +61,7 @@ void TestMainEventLoopRunsHooksOnCurrentThread()
     };
 
     std::string error_message;
-    XS_CHECK_MSG(event_loop.Run(std::move(hooks), &error_message), error_message.c_str());
+    XS_CHECK_MSG(event_loop.Run(std::move(hooks), &error_message) == xs::core::MainEventLoopErrorCode::None, error_message.c_str());
     XS_CHECK(start_thread_name == "xs-main-loop1");
     XS_CHECK(stop_thread_name == "xs-main-loop1");
     XS_CHECK(start_on_caller_thread);
@@ -74,10 +74,11 @@ void TestMainEventLoopRejectsInvalidTickConfiguration()
     xs::core::MainEventLoop zero_interval_loop({.thread_name = "xs-main-loop2"});
     std::string error_message{"not-cleared"};
 
-    XS_CHECK(!zero_interval_loop.Run(
-        {.on_tick = [](xs::core::MainEventLoop&, const xs::core::MainEventLoopTickInfo&) {
-        }},
-        &error_message));
+    XS_CHECK(
+        zero_interval_loop.Run(
+            {.on_tick = [](xs::core::MainEventLoop&, const xs::core::MainEventLoopTickInfo&) {
+            }},
+            &error_message) == xs::core::MainEventLoopErrorCode::TickCallbackRequiresPositiveInterval);
     XS_CHECK_MSG(
         error_message.find("requires a positive tick interval") != std::string::npos,
         error_message.c_str());
@@ -85,7 +86,8 @@ void TestMainEventLoopRejectsInvalidTickConfiguration()
     xs::core::MainEventLoop missing_callback_loop(
         {.thread_name = "xs-main-loop3", .tick_interval = std::chrono::milliseconds(1)});
     error_message = "not-cleared";
-    XS_CHECK(!missing_callback_loop.Run({}, &error_message));
+    XS_CHECK(
+        missing_callback_loop.Run({}, &error_message) == xs::core::MainEventLoopErrorCode::TickIntervalRequiresCallback);
     XS_CHECK_MSG(
         error_message.find("requires an on_tick callback") != std::string::npos,
         error_message.c_str());
@@ -93,7 +95,8 @@ void TestMainEventLoopRejectsInvalidTickConfiguration()
     xs::core::MainEventLoop negative_interval_loop(
         {.thread_name = "xs-main-loop4", .tick_interval = -std::chrono::milliseconds(1)});
     error_message = "not-cleared";
-    XS_CHECK(!negative_interval_loop.Run({}, &error_message));
+    XS_CHECK(
+        negative_interval_loop.Run({}, &error_message) == xs::core::MainEventLoopErrorCode::NegativeTickInterval);
     XS_CHECK_MSG(
         error_message.find("must not be negative") != std::string::npos,
         error_message.c_str());
@@ -127,7 +130,7 @@ void TestMainEventLoopDrivesTicksAndPreScheduledTimers()
     };
 
     std::string error_message;
-    XS_CHECK_MSG(event_loop.Run(std::move(hooks), &error_message), error_message.c_str());
+    XS_CHECK_MSG(event_loop.Run(std::move(hooks), &error_message) == xs::core::MainEventLoopErrorCode::None, error_message.c_str());
     XS_CHECK(timer_fired);
     XS_CHECK(tick_calls == 3);
     XS_CHECK(last_tick_count == 3);
@@ -147,14 +150,14 @@ void TestMainEventLoopPropagatesStartupFailure()
         {
             *error_message = "startup failed";
         }
-        return false;
+        return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
     };
     hooks.on_stop = [&](xs::core::MainEventLoop&) {
         stop_called = true;
     };
 
     std::string error_message;
-    XS_CHECK(!event_loop.Run(std::move(hooks), &error_message));
+    XS_CHECK(event_loop.Run(std::move(hooks), &error_message) == xs::core::MainEventLoopErrorCode::StartupCallbackFailed);
     XS_CHECK_MSG(error_message.find("startup failed") != std::string::npos, error_message.c_str());
     XS_CHECK(stop_called);
     XS_CHECK(!event_loop.IsRunning());
@@ -175,7 +178,7 @@ void TestMainEventLoopPropagatesTickExceptions()
     };
 
     std::string error_message;
-    XS_CHECK(!event_loop.Run(std::move(hooks), &error_message));
+    XS_CHECK(event_loop.Run(std::move(hooks), &error_message) == xs::core::MainEventLoopErrorCode::TickCallbackThrew);
     XS_CHECK_MSG(error_message.find("tick boom") != std::string::npos, error_message.c_str());
     XS_CHECK(stop_called);
     XS_CHECK(!event_loop.IsRunning());

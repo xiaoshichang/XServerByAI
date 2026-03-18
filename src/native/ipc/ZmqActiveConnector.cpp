@@ -103,29 +103,34 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
     {
     }
 
-    [[nodiscard]] bool Start(std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode Start(std::string* error_message)
     {
         if (running_)
         {
-            return SetLastError("ZeroMQ active connector is already running.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::AlreadyRunning,
+                "ZeroMQ active connector is already running.",
+                error_message);
         }
 
-        if (!ValidateOptions(error_message))
+        const ZmqSocketErrorCode validation_result = ValidateOptions(error_message);
+        if (validation_result != ZmqSocketErrorCode::None)
         {
-            return false;
+            return validation_result;
         }
 
-        if (!OpenSockets(error_message))
+        const ZmqSocketErrorCode open_result = OpenSockets(error_message);
+        if (open_result != ZmqSocketErrorCode::None)
         {
             CloseSockets();
-            return false;
+            return open_result;
         }
 
         running_ = true;
         ClearLastError();
         UpdateState(ZmqConnectionState::Connecting);
         SchedulePump();
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
     void Stop() noexcept
@@ -141,22 +146,28 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
         UpdateState(ZmqConnectionState::Stopped);
     }
 
-    [[nodiscard]] bool Send(std::span<const std::byte> message, std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode Send(std::span<const std::byte> message, std::string* error_message)
     {
         if (!running_ || socket_ == nullptr)
         {
-            return SetLastError("ZeroMQ active connector must be started before Send().", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::NotStarted,
+                "ZeroMQ active connector must be started before Send().",
+                error_message);
         }
 
         const void* data = message.empty() ? static_cast<const void*>("") : static_cast<const void*>(message.data());
         const int send_result = zmq_send(socket_, data, message.size(), ZMQ_DONTWAIT);
         if (send_result < 0)
         {
-            return SetLastError(BuildZmqErrorMessage("Failed to send ZeroMQ message", zmq_errno()), error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::MessageSendFailed,
+                BuildZmqErrorMessage("Failed to send ZeroMQ message", zmq_errno()),
+                error_message);
         }
 
         ClearLastError();
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
     void SetMessageHandler(ZmqMessageHandler handler)
@@ -190,45 +201,63 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
     }
 
   private:
-    [[nodiscard]] bool ValidateOptions(std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode ValidateOptions(std::string* error_message)
     {
         if (!context_.IsValid() || context_.native_handle() == nullptr)
         {
-            return SetLastError("ZeroMQ context is not initialized.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::ContextNotInitialized,
+                "ZeroMQ context is not initialized.",
+                error_message);
         }
 
         if (options_.remote_endpoint.empty())
         {
-            return SetLastError("ZeroMQ active connector remote_endpoint must not be empty.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::EndpointEmpty,
+                "ZeroMQ active connector remote_endpoint must not be empty.",
+                error_message);
         }
 
         if (options_.poll_interval <= std::chrono::milliseconds::zero())
         {
-            return SetLastError("ZeroMQ active connector poll_interval must be greater than zero.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::PollIntervalMustBePositive,
+                "ZeroMQ active connector poll_interval must be greater than zero.",
+                error_message);
         }
 
         if (options_.send_high_water_mark < 0 || options_.receive_high_water_mark < 0)
         {
-            return SetLastError("ZeroMQ active connector high water marks must not be negative.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::HighWaterMarkNegative,
+                "ZeroMQ active connector high water marks must not be negative.",
+                error_message);
         }
 
         if (options_.reconnect_interval_ms < 0 || options_.reconnect_interval_max_ms < 0 ||
             options_.handshake_interval_ms < 0)
         {
-            return SetLastError("ZeroMQ active connector timing options must not be negative.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::TimingOptionNegative,
+                "ZeroMQ active connector timing options must not be negative.",
+                error_message);
         }
 
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
-    [[nodiscard]] bool OpenSockets(std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode OpenSockets(std::string* error_message)
     {
         std::string option_error;
 
         socket_ = zmq_socket(context_.native_handle(), ZMQ_DEALER);
         if (socket_ == nullptr)
         {
-            return SetLastError(BuildZmqErrorMessage("Failed to create ZeroMQ DEALER socket", zmq_errno()), error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::SocketCreateFailed,
+                BuildZmqErrorMessage("Failed to create ZeroMQ DEALER socket", zmq_errno()),
+                error_message);
         }
 
         if (!SetIntegerSocketOption(socket_, ZMQ_LINGER, 0, &option_error) ||
@@ -239,47 +268,56 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
             !SetIntegerSocketOption(socket_, ZMQ_RECONNECT_IVL_MAX, options_.reconnect_interval_max_ms, &option_error) ||
             !SetIntegerSocketOption(socket_, ZMQ_HANDSHAKE_IVL, options_.handshake_interval_ms, &option_error))
         {
-            return SetLastError(std::move(option_error), error_message);
+            return SetLastError(ZmqSocketErrorCode::SocketOptionFailed, std::move(option_error), error_message);
         }
 
         if (!options_.routing_id.empty() &&
             !SetBinarySocketOption(
                 socket_, ZMQ_ROUTING_ID, options_.routing_id.data(), options_.routing_id.size(), &option_error))
         {
-            return SetLastError(std::move(option_error), error_message);
+            return SetLastError(ZmqSocketErrorCode::SocketOptionFailed, std::move(option_error), error_message);
         }
 
         monitor_endpoint_ = MakeMonitorEndpoint();
         if (zmq_socket_monitor(socket_, monitor_endpoint_.c_str(), kMonitorEvents) != 0)
         {
             return SetLastError(
-                BuildZmqErrorMessage("Failed to enable ZeroMQ socket monitor", zmq_errno()), error_message);
+                ZmqSocketErrorCode::MonitorEnableFailed,
+                BuildZmqErrorMessage("Failed to enable ZeroMQ socket monitor", zmq_errno()),
+                error_message);
         }
 
         monitor_socket_ = zmq_socket(context_.native_handle(), ZMQ_PAIR);
         if (monitor_socket_ == nullptr)
         {
             return SetLastError(
-                BuildZmqErrorMessage("Failed to create ZeroMQ monitor socket", zmq_errno()), error_message);
+                ZmqSocketErrorCode::MonitorSocketCreateFailed,
+                BuildZmqErrorMessage("Failed to create ZeroMQ monitor socket", zmq_errno()),
+                error_message);
         }
 
         if (!SetIntegerSocketOption(monitor_socket_, ZMQ_LINGER, 0, &option_error))
         {
-            return SetLastError(std::move(option_error), error_message);
+            return SetLastError(ZmqSocketErrorCode::SocketOptionFailed, std::move(option_error), error_message);
         }
 
         if (zmq_connect(monitor_socket_, monitor_endpoint_.c_str()) != 0)
         {
             return SetLastError(
-                BuildZmqErrorMessage("Failed to connect ZeroMQ monitor socket", zmq_errno()), error_message);
+                ZmqSocketErrorCode::MonitorSocketConnectFailed,
+                BuildZmqErrorMessage("Failed to connect ZeroMQ monitor socket", zmq_errno()),
+                error_message);
         }
 
         if (zmq_connect(socket_, options_.remote_endpoint.c_str()) != 0)
         {
-            return SetLastError(BuildZmqErrorMessage("Failed to connect ZeroMQ DEALER socket", zmq_errno()), error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::ConnectFailed,
+                BuildZmqErrorMessage("Failed to connect ZeroMQ DEALER socket", zmq_errno()),
+                error_message);
         }
 
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
     void CloseSockets() noexcept
@@ -330,7 +368,10 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
 
         if (error_code)
         {
-            (void)SetLastError("Asio timer error while driving ZeroMQ active connector: " + error_code.message(), nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::TimerPumpFailed,
+                "Asio timer error while driving ZeroMQ active connector: " + error_code.message(),
+                nullptr);
             return;
         }
 
@@ -428,7 +469,10 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
                 return false;
             }
 
-            (void)SetLastError(BuildZmqErrorMessage("Failed to receive ZeroMQ monitor event", error_code), nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::MonitorReceiveFailed,
+                BuildZmqErrorMessage("Failed to receive ZeroMQ monitor event", error_code),
+                nullptr);
             return false;
         }
 
@@ -438,7 +482,10 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
         {
             zmq_msg_close(&frame);
             DrainMultipartFrames(monitor_socket_);
-            (void)SetLastError("ZeroMQ monitor emitted an unexpected event frame.", nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::MonitorReceiveFailed,
+                "ZeroMQ monitor emitted an unexpected event frame.",
+                nullptr);
             return false;
         }
 
@@ -455,7 +502,9 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
             const int error_code = zmq_errno();
             zmq_msg_close(&address_frame);
             (void)SetLastError(
-                BuildZmqErrorMessage("Failed to receive ZeroMQ monitor address frame", error_code), nullptr);
+                ZmqSocketErrorCode::MonitorReceiveFailed,
+                BuildZmqErrorMessage("Failed to receive ZeroMQ monitor address frame", error_code),
+                nullptr);
             return false;
         }
 
@@ -463,7 +512,10 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
         {
             zmq_msg_close(&address_frame);
             DrainMultipartFrames(monitor_socket_);
-            (void)SetLastError("ZeroMQ monitor emitted an unexpected multipart address frame.", nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::MonitorReceiveFailed,
+                "ZeroMQ monitor emitted an unexpected multipart address frame.",
+                nullptr);
             return false;
         }
 
@@ -490,7 +542,10 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
                 return false;
             }
 
-            (void)SetLastError(BuildZmqErrorMessage("Failed to receive ZeroMQ message", error_code), nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::ReceiveFailed,
+                BuildZmqErrorMessage("Failed to receive ZeroMQ message", error_code),
+                nullptr);
             return false;
         }
 
@@ -498,7 +553,10 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
         {
             zmq_msg_close(&frame);
             DrainMultipartFrames(socket_);
-            (void)SetLastError("ZeroMQ active connector only supports single-frame messages.", nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::MultipartNotSupported,
+                "ZeroMQ active connector only supports single-frame messages.",
+                nullptr);
             return false;
         }
 
@@ -551,14 +609,17 @@ class ZmqActiveConnector::Impl final : public std::enable_shared_from_this<Impl>
         }
     }
 
-    [[nodiscard]] bool SetLastError(std::string message, std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode SetLastError(
+        ZmqSocketErrorCode code,
+        std::string message,
+        std::string* error_message)
     {
         last_error_message_ = std::move(message);
         if (error_message != nullptr)
         {
             *error_message = last_error_message_;
         }
-        return false;
+        return code;
     }
 
     void ClearLastError() noexcept
@@ -592,9 +653,18 @@ ZmqActiveConnector::~ZmqActiveConnector()
     }
 }
 
-bool ZmqActiveConnector::Start(std::string* error_message)
+ZmqSocketErrorCode ZmqActiveConnector::Start(std::string* error_message)
 {
-    return impl_ != nullptr && impl_->Start(error_message);
+    if (impl_ == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(ZmqSocketErrorMessage(ZmqSocketErrorCode::InvalidState));
+        }
+        return ZmqSocketErrorCode::InvalidState;
+    }
+
+    return impl_->Start(error_message);
 }
 
 void ZmqActiveConnector::Stop() noexcept
@@ -605,9 +675,18 @@ void ZmqActiveConnector::Stop() noexcept
     }
 }
 
-bool ZmqActiveConnector::Send(std::span<const std::byte> message, std::string* error_message)
+ZmqSocketErrorCode ZmqActiveConnector::Send(std::span<const std::byte> message, std::string* error_message)
 {
-    return impl_ != nullptr && impl_->Send(message, error_message);
+    if (impl_ == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(ZmqSocketErrorMessage(ZmqSocketErrorCode::InvalidState));
+        }
+        return ZmqSocketErrorCode::InvalidState;
+    }
+
+    return impl_->Send(message, error_message);
 }
 
 void ZmqActiveConnector::SetMessageHandler(ZmqMessageHandler handler)

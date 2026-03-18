@@ -83,29 +83,34 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
     {
     }
 
-    [[nodiscard]] bool Start(std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode Start(std::string* error_message)
     {
         if (running_)
         {
-            return SetLastError("ZeroMQ passive listener is already running.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::AlreadyRunning,
+                "ZeroMQ passive listener is already running.",
+                error_message);
         }
 
-        if (!ValidateOptions(error_message))
+        const ZmqSocketErrorCode validation_result = ValidateOptions(error_message);
+        if (validation_result != ZmqSocketErrorCode::None)
         {
-            return false;
+            return validation_result;
         }
 
-        if (!OpenSocket(error_message))
+        const ZmqSocketErrorCode open_result = OpenSocket(error_message);
+        if (open_result != ZmqSocketErrorCode::None)
         {
             CloseSocket();
-            return false;
+            return open_result;
         }
 
         running_ = true;
         ClearLastError();
         UpdateState(ZmqListenerState::Listening);
         SchedulePump();
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
     void Stop() noexcept
@@ -121,35 +126,47 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
         UpdateState(ZmqListenerState::Stopped);
     }
 
-    [[nodiscard]] bool Send(
+    [[nodiscard]] ZmqSocketErrorCode Send(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> message,
         std::string* error_message)
     {
         if (!running_ || socket_ == nullptr)
         {
-            return SetLastError("ZeroMQ passive listener must be started before Send().", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::NotStarted,
+                "ZeroMQ passive listener must be started before Send().",
+                error_message);
         }
 
         if (routing_id.empty())
         {
-            return SetLastError("ZeroMQ passive listener routing_id must not be empty.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::EmptyRoutingId,
+                "ZeroMQ passive listener routing_id must not be empty.",
+                error_message);
         }
 
         const void* routing_data = static_cast<const void*>(routing_id.data());
         if (zmq_send(socket_, routing_data, routing_id.size(), ZMQ_DONTWAIT | ZMQ_SNDMORE) < 0)
         {
-            return SetLastError(BuildZmqErrorMessage("Failed to send ZeroMQ routing id frame", zmq_errno()), error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::RoutingIdSendFailed,
+                BuildZmqErrorMessage("Failed to send ZeroMQ routing id frame", zmq_errno()),
+                error_message);
         }
 
         const void* payload_data = message.empty() ? static_cast<const void*>("") : static_cast<const void*>(message.data());
         if (zmq_send(socket_, payload_data, message.size(), ZMQ_DONTWAIT) < 0)
         {
-            return SetLastError(BuildZmqErrorMessage("Failed to send ZeroMQ payload frame", zmq_errno()), error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::PayloadSendFailed,
+                BuildZmqErrorMessage("Failed to send ZeroMQ payload frame", zmq_errno()),
+                error_message);
         }
 
         ClearLastError();
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
     void SetMessageHandler(ZmqRoutedMessageHandler handler)
@@ -188,44 +205,62 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
     }
 
   private:
-    [[nodiscard]] bool ValidateOptions(std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode ValidateOptions(std::string* error_message)
     {
         if (!context_.IsValid() || context_.native_handle() == nullptr)
         {
-            return SetLastError("ZeroMQ context is not initialized.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::ContextNotInitialized,
+                "ZeroMQ context is not initialized.",
+                error_message);
         }
 
         if (options_.local_endpoint.empty())
         {
-            return SetLastError("ZeroMQ passive listener local_endpoint must not be empty.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::EndpointEmpty,
+                "ZeroMQ passive listener local_endpoint must not be empty.",
+                error_message);
         }
 
         if (options_.poll_interval <= std::chrono::milliseconds::zero())
         {
-            return SetLastError("ZeroMQ passive listener poll_interval must be greater than zero.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::PollIntervalMustBePositive,
+                "ZeroMQ passive listener poll_interval must be greater than zero.",
+                error_message);
         }
 
         if (options_.send_high_water_mark < 0 || options_.receive_high_water_mark < 0)
         {
-            return SetLastError("ZeroMQ passive listener high water marks must not be negative.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::HighWaterMarkNegative,
+                "ZeroMQ passive listener high water marks must not be negative.",
+                error_message);
         }
 
         if (options_.handshake_interval_ms < 0)
         {
-            return SetLastError("ZeroMQ passive listener handshake_interval_ms must not be negative.", error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::TimingOptionNegative,
+                "ZeroMQ passive listener handshake_interval_ms must not be negative.",
+                error_message);
         }
 
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
-    [[nodiscard]] bool OpenSocket(std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode OpenSocket(std::string* error_message)
     {
         std::string option_error;
 
         socket_ = zmq_socket(context_.native_handle(), ZMQ_ROUTER);
         if (socket_ == nullptr)
         {
-            return SetLastError(BuildZmqErrorMessage("Failed to create ZeroMQ ROUTER socket", zmq_errno()), error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::SocketCreateFailed,
+                BuildZmqErrorMessage("Failed to create ZeroMQ ROUTER socket", zmq_errno()),
+                error_message);
         }
 
         if (!SetIntegerSocketOption(socket_, ZMQ_LINGER, 0, &option_error) ||
@@ -234,20 +269,23 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
             !SetIntegerSocketOption(socket_, ZMQ_RCVHWM, options_.receive_high_water_mark, &option_error) ||
             !SetIntegerSocketOption(socket_, ZMQ_HANDSHAKE_IVL, options_.handshake_interval_ms, &option_error))
         {
-            return SetLastError(std::move(option_error), error_message);
+            return SetLastError(ZmqSocketErrorCode::SocketOptionFailed, std::move(option_error), error_message);
         }
 
         if (zmq_bind(socket_, options_.local_endpoint.c_str()) != 0)
         {
-            return SetLastError(BuildZmqErrorMessage("Failed to bind ZeroMQ ROUTER socket", zmq_errno()), error_message);
+            return SetLastError(
+                ZmqSocketErrorCode::BindFailed,
+                BuildZmqErrorMessage("Failed to bind ZeroMQ ROUTER socket", zmq_errno()),
+                error_message);
         }
 
         if (!QueryLastEndpoint(socket_, &bound_endpoint_, &option_error))
         {
-            return SetLastError(std::move(option_error), error_message);
+            return SetLastError(ZmqSocketErrorCode::LastEndpointQueryFailed, std::move(option_error), error_message);
         }
 
-        return true;
+        return ZmqSocketErrorCode::None;
     }
 
     void CloseSocket() noexcept
@@ -287,7 +325,10 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
 
         if (error_code)
         {
-            (void)SetLastError("Asio timer error while driving ZeroMQ passive listener: " + error_code.message(), nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::TimerPumpFailed,
+                "Asio timer error while driving ZeroMQ passive listener: " + error_code.message(),
+                nullptr);
             return;
         }
 
@@ -341,14 +382,20 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
                 return false;
             }
 
-            (void)SetLastError(BuildZmqErrorMessage("Failed to receive ZeroMQ routing id frame", error_code), nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::ReceiveFailed,
+                BuildZmqErrorMessage("Failed to receive ZeroMQ routing id frame", error_code),
+                nullptr);
             return false;
         }
 
         if (zmq_msg_more(&routing_frame) == 0)
         {
             zmq_msg_close(&routing_frame);
-            (void)SetLastError("ZeroMQ passive listener expected a payload frame after routing id.", nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::PayloadMissing,
+                "ZeroMQ passive listener expected a payload frame after routing id.",
+                nullptr);
             return false;
         }
 
@@ -364,7 +411,10 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
         {
             const int error_code = zmq_errno();
             zmq_msg_close(&payload_frame);
-            (void)SetLastError(BuildZmqErrorMessage("Failed to receive ZeroMQ payload frame", error_code), nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::ReceiveFailed,
+                BuildZmqErrorMessage("Failed to receive ZeroMQ payload frame", error_code),
+                nullptr);
             return false;
         }
 
@@ -372,7 +422,10 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
         {
             zmq_msg_close(&payload_frame);
             DrainMultipartFrames(socket_);
-            (void)SetLastError("ZeroMQ passive listener only supports routing id plus single-frame payload.", nullptr);
+            (void)SetLastError(
+                ZmqSocketErrorCode::MultipartNotSupported,
+                "ZeroMQ passive listener only supports routing id plus single-frame payload.",
+                nullptr);
             return false;
         }
 
@@ -425,14 +478,17 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
         }
     }
 
-    [[nodiscard]] bool SetLastError(std::string message, std::string* error_message)
+    [[nodiscard]] ZmqSocketErrorCode SetLastError(
+        ZmqSocketErrorCode code,
+        std::string message,
+        std::string* error_message)
     {
         last_error_message_ = std::move(message);
         if (error_message != nullptr)
         {
             *error_message = last_error_message_;
         }
-        return false;
+        return code;
     }
 
     void ClearLastError() noexcept
@@ -468,9 +524,18 @@ ZmqPassiveListener::~ZmqPassiveListener()
     }
 }
 
-bool ZmqPassiveListener::Start(std::string* error_message)
+ZmqSocketErrorCode ZmqPassiveListener::Start(std::string* error_message)
 {
-    return impl_ != nullptr && impl_->Start(error_message);
+    if (impl_ == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(ZmqSocketErrorMessage(ZmqSocketErrorCode::InvalidState));
+        }
+        return ZmqSocketErrorCode::InvalidState;
+    }
+
+    return impl_->Start(error_message);
 }
 
 void ZmqPassiveListener::Stop() noexcept
@@ -481,12 +546,21 @@ void ZmqPassiveListener::Stop() noexcept
     }
 }
 
-bool ZmqPassiveListener::Send(
+ZmqSocketErrorCode ZmqPassiveListener::Send(
     std::span<const std::byte> routing_id,
     std::span<const std::byte> message,
     std::string* error_message)
 {
-    return impl_ != nullptr && impl_->Send(routing_id, message, error_message);
+    if (impl_ == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(ZmqSocketErrorMessage(ZmqSocketErrorCode::InvalidState));
+        }
+        return ZmqSocketErrorCode::InvalidState;
+    }
+
+    return impl_->Send(routing_id, message, error_message);
 }
 
 void ZmqPassiveListener::SetMessageHandler(ZmqRoutedMessageHandler handler)

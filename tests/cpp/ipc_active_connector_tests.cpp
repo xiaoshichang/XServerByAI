@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <span>
@@ -265,9 +266,8 @@ void TestConnectorRejectsInvalidOptionsAndSendBeforeStart()
         {.remote_endpoint = "", .routing_id = "Gate0"});
 
     std::string error_message;
-    XS_CHECK(!invalid_connector.Start(&error_message));
-    XS_CHECK(
-        error_message == std::string("ZeroMQ active connector remote_endpoint must not be empty."));
+    XS_CHECK(invalid_connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::EndpointEmpty);
+    XS_CHECK(error_message == std::string("ZeroMQ active connector remote_endpoint must not be empty."));
     XS_CHECK(invalid_connector.state() == xs::ipc::ZmqConnectionState::Stopped);
 
     xs::ipc::ZmqActiveConnector idle_connector(
@@ -277,7 +277,7 @@ void TestConnectorRejectsInvalidOptionsAndSendBeforeStart()
 
     const auto payload = BytesFromText("ping");
     error_message.clear();
-    XS_CHECK(!idle_connector.Send(payload, &error_message));
+    XS_CHECK(idle_connector.Send(payload, &error_message) == xs::ipc::ZmqSocketErrorCode::NotStarted);
     XS_CHECK(error_message == std::string("ZeroMQ active connector must be started before Send()."));
 }
 
@@ -317,7 +317,7 @@ void TestConnectorConnectsAndExchangesMessages()
     });
 
     std::string error_message;
-    XS_CHECK(connector.Start(&error_message));
+    XS_CHECK(connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
     const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&connector]() {
@@ -329,7 +329,7 @@ void TestConnectorConnectsAndExchangesMessages()
     XS_CHECK(std::find(states.begin(), states.end(), xs::ipc::ZmqConnectionState::Connected) != states.end());
 
     const auto outbound_payload = BytesFromText("register");
-    XS_CHECK(connector.Send(outbound_payload, &error_message));
+    XS_CHECK(connector.Send(outbound_payload, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
     std::vector<std::vector<std::byte>> router_frames;
@@ -389,7 +389,7 @@ void TestConnectorReportsRemoteDisconnect()
     });
 
     std::string error_message;
-    XS_CHECK(connector.Start(&error_message));
+    XS_CHECK(connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
     const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&connector]() {

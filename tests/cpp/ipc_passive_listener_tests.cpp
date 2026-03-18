@@ -231,7 +231,7 @@ void TestListenerRejectsInvalidOptionsAndSendBeforeStart()
         {.local_endpoint = ""});
 
     std::string error_message;
-    XS_CHECK(!invalid_listener.Start(&error_message));
+    XS_CHECK(invalid_listener.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::EndpointEmpty);
     XS_CHECK(error_message == std::string("ZeroMQ passive listener local_endpoint must not be empty."));
     XS_CHECK(invalid_listener.state() == xs::ipc::ZmqListenerState::Stopped);
 
@@ -243,7 +243,7 @@ void TestListenerRejectsInvalidOptionsAndSendBeforeStart()
     const auto routing_id = BytesFromText("Gate0");
     const auto payload = BytesFromText("ping");
     error_message.clear();
-    XS_CHECK(!idle_listener.Send(routing_id, payload, &error_message));
+    XS_CHECK(idle_listener.Send(routing_id, payload, &error_message) == xs::ipc::ZmqSocketErrorCode::NotStarted);
     XS_CHECK(error_message == std::string("ZeroMQ passive listener must be started before Send()."));
 }
 
@@ -274,7 +274,7 @@ void TestListenerBindsAndExchangesMessages()
     });
 
     std::string error_message;
-    XS_CHECK(listener.Start(&error_message));
+    XS_CHECK(listener.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(listener.IsRunning());
     XS_CHECK(listener.state() == xs::ipc::ZmqListenerState::Listening);
@@ -301,7 +301,7 @@ void TestListenerBindsAndExchangesMessages()
         connector_messages.push_back(std::move(payload));
     });
 
-    XS_CHECK(connector.Start(&error_message));
+    XS_CHECK(connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
     const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&connector]() {
@@ -312,12 +312,13 @@ void TestListenerBindsAndExchangesMessages()
     const auto empty_routing_id = std::vector<std::byte>{};
     const auto empty_routing_payload = BytesFromText("probe");
     error_message.clear();
-    XS_CHECK(!listener.Send(empty_routing_id, empty_routing_payload, &error_message));
+    XS_CHECK(
+        listener.Send(empty_routing_id, empty_routing_payload, &error_message) == xs::ipc::ZmqSocketErrorCode::EmptyRoutingId);
     XS_CHECK(error_message == std::string("ZeroMQ passive listener routing_id must not be empty."));
 
     const auto outbound_payload = BytesFromText("register");
     error_message.clear();
-    XS_CHECK(connector.Send(outbound_payload, &error_message));
+    XS_CHECK(connector.Send(outbound_payload, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
     const bool listener_received = SpinUntil(io_context, std::chrono::seconds(2), [&routed_messages]() {
@@ -330,7 +331,7 @@ void TestListenerBindsAndExchangesMessages()
 
     const auto reply_payload = BytesFromText("accepted");
     error_message.clear();
-    XS_CHECK(listener.Send(routed_messages.front().routing_id, reply_payload, &error_message));
+    XS_CHECK(listener.Send(routed_messages.front().routing_id, reply_payload, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
     const bool connector_received = SpinUntil(io_context, std::chrono::seconds(2), [&connector_messages]() {
@@ -371,7 +372,7 @@ void TestListenerRejectsMultipartPayloadMessages()
     });
 
     std::string error_message;
-    XS_CHECK(listener.Start(&error_message));
+    XS_CHECK(listener.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(!listener.bound_endpoint().empty());
 
@@ -385,7 +386,8 @@ void TestListenerRejectsMultipartPayloadMessages()
     XS_CHECK(dealer.SendMultipart(first_part, second_part));
 
     const bool multipart_rejected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
-        return listener.last_error_message() == std::string_view("ZeroMQ passive listener only supports routing id plus single-frame payload.");
+        return listener.last_error_message() ==
+               std::string_view("ZeroMQ passive listener only supports routing id plus single-frame payload.");
     });
     XS_CHECK(multipart_rejected);
     XS_CHECK(routed_messages.empty());

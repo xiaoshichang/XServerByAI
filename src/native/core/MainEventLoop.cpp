@@ -22,13 +22,16 @@ void ClearError(std::string* error_message)
     }
 }
 
-bool SetError(std::string message, std::string* error_message)
+MainEventLoopErrorCode SetError(
+    MainEventLoopErrorCode code,
+    std::string message,
+    std::string* error_message)
 {
     if (error_message != nullptr)
     {
         *error_message = std::move(message);
     }
-    return false;
+    return code;
 }
 
 CoreLoopExecutorOptions ToExecutorOptions(const MainEventLoopOptions& options)
@@ -56,8 +59,8 @@ struct RunState final
     std::string startup_error{};
     std::string runtime_error{};
     bool bootstrap_started{false};
-    bool startup_failed{false};
-    bool runtime_failed{false};
+    MainEventLoopErrorCode startup_result{MainEventLoopErrorCode::None};
+    MainEventLoopErrorCode runtime_result{MainEventLoopErrorCode::None};
     std::optional<SteadyTimePoint> last_tick_time{};
     std::uint64_t tick_count{0};
 };
@@ -70,6 +73,39 @@ std::string DescribeTickTimerCreateFailure(TimerCreateResult create_result)
 
 } // namespace
 
+std::string_view MainEventLoopErrorMessage(MainEventLoopErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case MainEventLoopErrorCode::None:
+        return "No error.";
+    case MainEventLoopErrorCode::EmptyThreadName:
+        return "Main event loop thread name must not be empty.";
+    case MainEventLoopErrorCode::NegativeTickInterval:
+        return "Main event loop tick interval must not be negative.";
+    case MainEventLoopErrorCode::TickCallbackRequiresPositiveInterval:
+        return "Main event loop tick callback requires a positive tick interval.";
+    case MainEventLoopErrorCode::TickIntervalRequiresCallback:
+        return "Main event loop tick interval requires an on_tick callback.";
+    case MainEventLoopErrorCode::AlreadyRunning:
+        return "Main event loop is already running.";
+    case MainEventLoopErrorCode::ExecutorStartFailed:
+        return "Failed to start the main event loop executor.";
+    case MainEventLoopErrorCode::StartupCallbackFailed:
+        return "Main event loop startup callback failed.";
+    case MainEventLoopErrorCode::TickTimerCreateFailed:
+        return "Failed to create the main event loop tick timer.";
+    case MainEventLoopErrorCode::TickCallbackThrew:
+        return "Main event loop tick callback threw an exception.";
+    case MainEventLoopErrorCode::StopCallbackThrew:
+        return "Main event loop stop callback threw an exception.";
+    case MainEventLoopErrorCode::InvalidState:
+        return "Main event loop is in an invalid state.";
+    }
+
+    return "Unknown main event loop error.";
+}
+
 class MainEventLoop::Impl final
 {
   public:
@@ -80,17 +116,22 @@ class MainEventLoop::Impl final
     {
     }
 
-    bool Run(MainEventLoop& owner, MainEventLoopHooks hooks, std::string* error_message)
+    MainEventLoopErrorCode Run(MainEventLoop& owner, MainEventLoopHooks hooks, std::string* error_message)
     {
         ClearError(error_message);
-        if (!ValidateOptionsAndHooks(hooks, error_message))
+
+        const MainEventLoopErrorCode validation_result = ValidateOptionsAndHooks(hooks, error_message);
+        if (validation_result != MainEventLoopErrorCode::None)
         {
-            return false;
+            return validation_result;
         }
 
         if (state_ != EventLoopState::stopped)
         {
-            return SetError("Main event loop is already running.", error_message);
+            return SetError(
+                MainEventLoopErrorCode::AlreadyRunning,
+                "Main event loop is already running.",
+                error_message);
         }
 
         state_ = EventLoopState::running;
@@ -101,12 +142,13 @@ class MainEventLoop::Impl final
         });
 
         std::string executor_error;
-        const bool started = executor_.Start(&executor_error);
+        const CoreLoopErrorCode executor_result = executor_.Start(&executor_error);
 
         timer_manager_.CancelAll();
         state_ = EventLoopState::stopped;
 
         std::string stop_error;
+        MainEventLoopErrorCode stop_result = MainEventLoopErrorCode::None;
         if (run_state->bootstrap_started && run_state->hooks.on_stop)
         {
             try
@@ -115,40 +157,59 @@ class MainEventLoop::Impl final
             }
             catch (const std::exception& exception)
             {
+                stop_result = MainEventLoopErrorCode::StopCallbackThrew;
                 stop_error = std::string("Main event loop stop callback threw: ") + exception.what();
             }
             catch (...)
             {
+                stop_result = MainEventLoopErrorCode::StopCallbackThrew;
                 stop_error = "Main event loop stop callback threw an unknown exception.";
             }
         }
 
-        if (!started)
+        if (executor_result != CoreLoopErrorCode::None)
         {
-            return SetError(std::move(executor_error), error_message);
+            if (executor_error.empty())
+            {
+                executor_error = std::string("Failed to start main event loop executor: ") +
+                                 std::string(CoreLoopErrorMessage(executor_result));
+            }
+
+            return SetError(MainEventLoopErrorCode::ExecutorStartFailed, std::move(executor_error), error_message);
         }
 
-        if (run_state->startup_failed)
+        if (run_state->startup_result != MainEventLoopErrorCode::None)
         {
-            return SetError(
-                run_state->startup_error.empty() ? std::string("Main event loop startup failed.") : run_state->startup_error,
-                error_message);
+            if (run_state->startup_error.empty())
+            {
+                run_state->startup_error = std::string(MainEventLoopErrorMessage(run_state->startup_result));
+            }
+
+            return SetError(run_state->startup_result, std::move(run_state->startup_error), error_message);
         }
 
-        if (run_state->runtime_failed)
+        if (run_state->runtime_result != MainEventLoopErrorCode::None)
         {
-            return SetError(
-                run_state->runtime_error.empty() ? std::string("Main event loop runtime failed.") : run_state->runtime_error,
-                error_message);
+            if (run_state->runtime_error.empty())
+            {
+                run_state->runtime_error = std::string(MainEventLoopErrorMessage(run_state->runtime_result));
+            }
+
+            return SetError(run_state->runtime_result, std::move(run_state->runtime_error), error_message);
         }
 
-        if (!stop_error.empty())
+        if (stop_result != MainEventLoopErrorCode::None)
         {
-            return SetError(std::move(stop_error), error_message);
+            if (stop_error.empty())
+            {
+                stop_error = std::string(MainEventLoopErrorMessage(stop_result));
+            }
+
+            return SetError(stop_result, std::move(stop_error), error_message);
         }
 
         ClearError(error_message);
-        return true;
+        return MainEventLoopErrorCode::None;
     }
 
     void RequestStop() noexcept
@@ -193,30 +254,44 @@ class MainEventLoop::Impl final
     }
 
   private:
-    bool ValidateOptionsAndHooks(const MainEventLoopHooks& hooks, std::string* error_message) const
+    MainEventLoopErrorCode ValidateOptionsAndHooks(
+        const MainEventLoopHooks& hooks,
+        std::string* error_message) const
     {
         if (options_.thread_name.empty())
         {
-            return SetError("Main event loop thread name must not be empty.", error_message);
+            return SetError(
+                MainEventLoopErrorCode::EmptyThreadName,
+                "Main event loop thread name must not be empty.",
+                error_message);
         }
 
         if (options_.tick_interval < SteadyDuration::zero())
         {
-            return SetError("Main event loop tick interval must not be negative.", error_message);
+            return SetError(
+                MainEventLoopErrorCode::NegativeTickInterval,
+                "Main event loop tick interval must not be negative.",
+                error_message);
         }
 
         if (hooks.on_tick && options_.tick_interval <= SteadyDuration::zero())
         {
-            return SetError("Main event loop tick callback requires a positive tick interval.", error_message);
+            return SetError(
+                MainEventLoopErrorCode::TickCallbackRequiresPositiveInterval,
+                "Main event loop tick callback requires a positive tick interval.",
+                error_message);
         }
 
         if (!hooks.on_tick && options_.tick_interval > SteadyDuration::zero())
         {
-            return SetError("Main event loop tick interval requires an on_tick callback.", error_message);
+            return SetError(
+                MainEventLoopErrorCode::TickIntervalRequiresCallback,
+                "Main event loop tick interval requires an on_tick callback.",
+                error_message);
         }
 
         ClearError(error_message);
-        return true;
+        return MainEventLoopErrorCode::None;
     }
 
     void Bootstrap(MainEventLoop& owner, const std::shared_ptr<RunState>& run_state)
@@ -225,15 +300,19 @@ class MainEventLoop::Impl final
 
         try
         {
-            if (run_state->hooks.on_start && !run_state->hooks.on_start(owner, &run_state->startup_error))
+            if (run_state->hooks.on_start)
             {
-                if (run_state->startup_error.empty())
+                const MainEventLoopErrorCode start_result = run_state->hooks.on_start(owner, &run_state->startup_error);
+                if (start_result != MainEventLoopErrorCode::None)
                 {
-                    run_state->startup_error = "Main event loop startup callback failed.";
+                    run_state->startup_result = start_result;
+                    if (run_state->startup_error.empty())
+                    {
+                        run_state->startup_error = std::string(MainEventLoopErrorMessage(start_result));
+                    }
+                    RequestStop();
+                    return;
                 }
-                run_state->startup_failed = true;
-                RequestStop();
-                return;
             }
 
             if (!run_state->hooks.on_tick)
@@ -247,28 +326,28 @@ class MainEventLoop::Impl final
             });
             if (!IsTimerID(create_result))
             {
+                run_state->startup_result = MainEventLoopErrorCode::TickTimerCreateFailed;
                 run_state->startup_error = DescribeTickTimerCreateFailure(create_result);
-                run_state->startup_failed = true;
                 RequestStop();
             }
         }
         catch (const std::exception& exception)
         {
+            run_state->startup_result = MainEventLoopErrorCode::StartupCallbackFailed;
             run_state->startup_error = std::string("Main event loop startup callback threw: ") + exception.what();
-            run_state->startup_failed = true;
             RequestStop();
         }
         catch (...)
         {
+            run_state->startup_result = MainEventLoopErrorCode::StartupCallbackFailed;
             run_state->startup_error = "Main event loop startup callback threw an unknown exception.";
-            run_state->startup_failed = true;
             RequestStop();
         }
     }
 
     void HandleTick(MainEventLoop& owner, const std::shared_ptr<RunState>& run_state)
     {
-        if (run_state->runtime_failed || !run_state->hooks.on_tick)
+        if (run_state->runtime_result != MainEventLoopErrorCode::None || !run_state->hooks.on_tick)
         {
             return;
         }
@@ -286,14 +365,14 @@ class MainEventLoop::Impl final
         }
         catch (const std::exception& exception)
         {
+            run_state->runtime_result = MainEventLoopErrorCode::TickCallbackThrew;
             run_state->runtime_error = std::string("Main event loop tick callback threw: ") + exception.what();
-            run_state->runtime_failed = true;
             RequestStop();
         }
         catch (...)
         {
+            run_state->runtime_result = MainEventLoopErrorCode::TickCallbackThrew;
             run_state->runtime_error = "Main event loop tick callback threw an unknown exception.";
-            run_state->runtime_failed = true;
             RequestStop();
         }
     }
@@ -314,8 +393,16 @@ MainEventLoop::~MainEventLoop()
     RequestStop();
 }
 
-bool MainEventLoop::Run(MainEventLoopHooks hooks, std::string* error_message)
+MainEventLoopErrorCode MainEventLoop::Run(MainEventLoopHooks hooks, std::string* error_message)
 {
+    if (impl_ == nullptr)
+    {
+        return SetError(
+            MainEventLoopErrorCode::InvalidState,
+            std::string(MainEventLoopErrorMessage(MainEventLoopErrorCode::InvalidState)),
+            error_message);
+    }
+
     return impl_->Run(*this, std::move(hooks), error_message);
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ZmqContext.h"
+#include "ZmqError.h"
 
 #include <asio/io_context.hpp>
 
@@ -53,9 +54,9 @@ class ZmqActiveConnector final
     ZmqActiveConnector(ZmqActiveConnector&&) = delete;
     ZmqActiveConnector& operator=(ZmqActiveConnector&&) = delete;
 
-    [[nodiscard]] bool Start(std::string* error_message = nullptr);
+    [[nodiscard]] ZmqSocketErrorCode Start(std::string* error_message = nullptr);
     void Stop() noexcept;
-    [[nodiscard]] bool Send(std::span<const std::byte> message, std::string* error_message = nullptr);
+    [[nodiscard]] ZmqSocketErrorCode Send(std::span<const std::byte> message, std::string* error_message = nullptr);
 
     void SetMessageHandler(ZmqMessageHandler handler);
     void SetStateHandler(ZmqStateHandler handler);
