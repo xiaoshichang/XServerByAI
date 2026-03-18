@@ -5,6 +5,8 @@ add_library(ipc STATIC
     ZmqContext.cpp
     ZmqContext.h
     ZmqError.h
+    ZmqListenerMetrics.cpp
+    ZmqListenerMetrics.h
     ZmqPassiveListener.cpp
     ZmqPassiveListener.h
 )

@@ -2,6 +2,7 @@
 
 #include "ZmqContext.h"
 #include "ZmqError.h"
+#include "ZmqListenerMetrics.h"
 
 #include <asio/io_context.hpp>
 
@@ -64,6 +65,7 @@ class ZmqPassiveListener final
     [[nodiscard]] const ZmqPassiveListenerOptions& options() const noexcept;
     [[nodiscard]] std::string_view bound_endpoint() const noexcept;
     [[nodiscard]] std::string_view last_error_message() const noexcept;
+    [[nodiscard]] ZmqListenerMetricsSnapshot metrics() const noexcept;
 
   private:
     class Impl;

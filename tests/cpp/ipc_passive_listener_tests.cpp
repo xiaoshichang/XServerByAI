@@ -217,6 +217,28 @@ class RawZmqSocket final
     return predicate();
 }
 
+void CheckMetricsZero(const xs::ipc::ZmqListenerMetricsSnapshot& snapshot)
+{
+    XS_CHECK(snapshot.active_connection_count == 0u);
+    XS_CHECK(snapshot.received_message_count == 0u);
+    XS_CHECK(snapshot.received_payload_bytes == 0u);
+    XS_CHECK(snapshot.sent_message_count == 0u);
+    XS_CHECK(snapshot.sent_payload_bytes == 0u);
+    XS_CHECK(snapshot.snapshot_unix_ms == 0);
+}
+
+void CheckMetricsEqual(
+    const xs::ipc::ZmqListenerMetricsSnapshot& actual,
+    const xs::ipc::ZmqListenerMetricsSnapshot& expected)
+{
+    XS_CHECK(actual.active_connection_count == expected.active_connection_count);
+    XS_CHECK(actual.received_message_count == expected.received_message_count);
+    XS_CHECK(actual.received_payload_bytes == expected.received_payload_bytes);
+    XS_CHECK(actual.sent_message_count == expected.sent_message_count);
+    XS_CHECK(actual.sent_payload_bytes == expected.sent_payload_bytes);
+    XS_CHECK(actual.snapshot_unix_ms == expected.snapshot_unix_ms);
+}
+
 void TestListenerRejectsInvalidOptionsAndSendBeforeStart()
 {
     asio::io_context io_context;
@@ -234,6 +256,7 @@ void TestListenerRejectsInvalidOptionsAndSendBeforeStart()
     XS_CHECK(invalid_listener.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::EndpointEmpty);
     XS_CHECK(error_message == std::string("ZeroMQ passive listener local_endpoint must not be empty."));
     XS_CHECK(invalid_listener.state() == xs::ipc::ZmqListenerState::Stopped);
+    CheckMetricsZero(invalid_listener.metrics());
 
     xs::ipc::ZmqPassiveListener idle_listener(
         io_context,
@@ -245,9 +268,10 @@ void TestListenerRejectsInvalidOptionsAndSendBeforeStart()
     error_message.clear();
     XS_CHECK(idle_listener.Send(routing_id, payload, &error_message) == xs::ipc::ZmqSocketErrorCode::NotStarted);
     XS_CHECK(error_message == std::string("ZeroMQ passive listener must be started before Send()."));
+    CheckMetricsZero(idle_listener.metrics());
 }
 
-void TestListenerBindsAndExchangesMessages()
+void TestListenerBindsExchangesMessagesAndTracksMetrics()
 {
     asio::io_context io_context;
     xs::ipc::ZmqContext context;
@@ -281,6 +305,27 @@ void TestListenerBindsAndExchangesMessages()
     XS_CHECK(!listener.bound_endpoint().empty());
     XS_CHECK(!listener_states.empty());
     XS_CHECK(listener_states.front() == xs::ipc::ZmqListenerState::Listening);
+    CheckMetricsZero(listener.metrics());
+
+    RawZmqSocket probe(ZMQ_DEALER);
+    XS_CHECK(probe.IsValid());
+    XS_CHECK(probe.SetRoutingId("Probe0"));
+    XS_CHECK(probe.Connect(listener.bound_endpoint()));
+
+    const bool probe_connected = SpinUntil(io_context, std::chrono::seconds(2), [&listener, &routed_messages]() {
+        return listener.metrics().active_connection_count == 1u && routed_messages.empty();
+    });
+    XS_CHECK(probe_connected);
+    XS_CHECK(routed_messages.empty());
+    XS_CHECK(listener.metrics().received_message_count == 0u);
+    XS_CHECK(listener.metrics().sent_message_count == 0u);
+
+    probe.Close();
+    const bool probe_disconnected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
+        return listener.metrics().active_connection_count == 0u;
+    });
+    XS_CHECK(probe_disconnected);
+    XS_CHECK(routed_messages.empty());
 
     xs::ipc::ZmqActiveConnector connector(
         io_context,
@@ -304,8 +349,9 @@ void TestListenerBindsAndExchangesMessages()
     XS_CHECK(connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
-    const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&connector]() {
-        return connector.state() == xs::ipc::ZmqConnectionState::Connected;
+    const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&connector, &listener]() {
+        return connector.state() == xs::ipc::ZmqConnectionState::Connected &&
+               listener.metrics().active_connection_count == 1u;
     });
     XS_CHECK(connected);
 
@@ -321,32 +367,128 @@ void TestListenerBindsAndExchangesMessages()
     XS_CHECK(connector.Send(outbound_payload, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
-    const bool listener_received = SpinUntil(io_context, std::chrono::seconds(2), [&routed_messages]() {
-        return !routed_messages.empty();
+    const bool listener_received = SpinUntil(io_context, std::chrono::seconds(2), [&routed_messages, &listener, &outbound_payload]() {
+        return routed_messages.size() == 1u &&
+               listener.metrics().received_message_count == 1u &&
+               listener.metrics().received_payload_bytes == outbound_payload.size();
     });
     XS_CHECK(listener_received);
-    XS_CHECK(routed_messages.size() == 1);
+    XS_CHECK(routed_messages.size() == 1u);
     XS_CHECK(ByteSpanEqualsText(routed_messages.front().routing_id, "Gate0"));
     XS_CHECK(ByteSpanEqualsSpan(routed_messages.front().payload, outbound_payload));
+
+    const auto received_snapshot = listener.metrics();
+    XS_CHECK(received_snapshot.active_connection_count == 1u);
+    XS_CHECK(received_snapshot.received_message_count == 1u);
+    XS_CHECK(received_snapshot.received_payload_bytes == outbound_payload.size());
+    XS_CHECK(received_snapshot.sent_message_count == 0u);
+    XS_CHECK(received_snapshot.sent_payload_bytes == 0u);
+    XS_CHECK(received_snapshot.snapshot_unix_ms != 0);
 
     const auto reply_payload = BytesFromText("accepted");
     error_message.clear();
     XS_CHECK(listener.Send(routed_messages.front().routing_id, reply_payload, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
-    const bool connector_received = SpinUntil(io_context, std::chrono::seconds(2), [&connector_messages]() {
-        return !connector_messages.empty();
+    const bool connector_received = SpinUntil(io_context, std::chrono::seconds(2), [&connector_messages, &listener, &reply_payload]() {
+        return connector_messages.size() == 1u &&
+               listener.metrics().sent_message_count == 1u &&
+               listener.metrics().sent_payload_bytes == reply_payload.size();
     });
     XS_CHECK(connector_received);
-    XS_CHECK(connector_messages.size() == 1);
+    XS_CHECK(connector_messages.size() == 1u);
     XS_CHECK(ByteSpanEqualsSpan(connector_messages.front(), reply_payload));
 
+    const auto final_snapshot = listener.metrics();
+    XS_CHECK(final_snapshot.active_connection_count == 1u);
+    XS_CHECK(final_snapshot.received_message_count == 1u);
+    XS_CHECK(final_snapshot.received_payload_bytes == outbound_payload.size());
+    XS_CHECK(final_snapshot.sent_message_count == 1u);
+    XS_CHECK(final_snapshot.sent_payload_bytes == reply_payload.size());
+    XS_CHECK(final_snapshot.snapshot_unix_ms != 0);
+
     connector.Stop();
+    const bool connector_disconnected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
+        return listener.metrics().active_connection_count == 0u;
+    });
+    XS_CHECK(connector_disconnected);
+
     listener.Stop();
     XS_CHECK(!listener.IsRunning());
     XS_CHECK(listener.state() == xs::ipc::ZmqListenerState::Stopped);
     XS_CHECK(listener.bound_endpoint().empty());
     XS_CHECK(std::find(listener_states.begin(), listener_states.end(), xs::ipc::ZmqListenerState::Stopped) != listener_states.end());
+}
+
+void TestListenerRetainsMetricsAfterStopAndResetsOnRestart()
+{
+    asio::io_context io_context;
+    xs::ipc::ZmqContext context;
+    XS_CHECK(context.IsValid());
+
+    std::vector<RoutedMessage> routed_messages;
+    xs::ipc::ZmqPassiveListener listener(
+        io_context,
+        context,
+        {
+            .local_endpoint = "tcp://127.0.0.1:*",
+            .poll_interval = std::chrono::milliseconds(2),
+            .send_high_water_mark = 16,
+            .receive_high_water_mark = 16,
+            .handshake_interval_ms = 1000,
+        });
+    listener.SetMessageHandler([&routed_messages](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
+        routed_messages.push_back({std::move(routing_id), std::move(payload)});
+    });
+
+    std::string error_message;
+    XS_CHECK(listener.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+
+    RawZmqSocket dealer(ZMQ_DEALER);
+    XS_CHECK(dealer.IsValid());
+    XS_CHECK(dealer.SetRoutingId("Restart0"));
+    XS_CHECK(dealer.Connect(listener.bound_endpoint()));
+
+    const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
+        return listener.metrics().active_connection_count == 1u;
+    });
+    XS_CHECK(connected);
+
+    const auto payload = BytesFromText("hello");
+    XS_CHECK(dealer.Send(payload));
+
+    const bool received = SpinUntil(io_context, std::chrono::seconds(2), [&listener, &routed_messages, &payload]() {
+        return routed_messages.size() == 1u &&
+               listener.metrics().received_message_count == 1u &&
+               listener.metrics().received_payload_bytes == payload.size();
+    });
+    XS_CHECK(received);
+    XS_CHECK(ByteSpanEqualsText(routed_messages.front().routing_id, "Restart0"));
+    XS_CHECK(ByteSpanEqualsSpan(routed_messages.front().payload, payload));
+
+    dealer.Close();
+    const bool disconnected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
+        return listener.metrics().active_connection_count == 0u;
+    });
+    XS_CHECK(disconnected);
+
+    const auto before_stop = listener.metrics();
+    XS_CHECK(before_stop.received_message_count == 1u);
+    XS_CHECK(before_stop.received_payload_bytes == payload.size());
+    XS_CHECK(before_stop.sent_message_count == 0u);
+    XS_CHECK(before_stop.sent_payload_bytes == 0u);
+    XS_CHECK(before_stop.snapshot_unix_ms != 0);
+
+    listener.Stop();
+    XS_CHECK(!listener.IsRunning());
+    const auto after_stop = listener.metrics();
+    CheckMetricsEqual(after_stop, before_stop);
+
+    XS_CHECK(listener.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    CheckMetricsZero(listener.metrics());
+    listener.Stop();
 }
 
 void TestListenerRejectsMultipartPayloadMessages()
@@ -381,6 +523,11 @@ void TestListenerRejectsMultipartPayloadMessages()
     XS_CHECK(dealer.SetRoutingId("DealerMultipart"));
     XS_CHECK(dealer.Connect(listener.bound_endpoint()));
 
+    const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
+        return listener.metrics().active_connection_count == 1u;
+    });
+    XS_CHECK(connected);
+
     const auto first_part = BytesFromText("part-a");
     const auto second_part = BytesFromText("part-b");
     XS_CHECK(dealer.SendMultipart(first_part, second_part));
@@ -391,15 +538,19 @@ void TestListenerRejectsMultipartPayloadMessages()
     });
     XS_CHECK(multipart_rejected);
     XS_CHECK(routed_messages.empty());
+    XS_CHECK(listener.metrics().received_message_count == 0u);
+    XS_CHECK(listener.metrics().received_payload_bytes == 0u);
 
     const auto valid_payload = BytesFromText("hello");
     XS_CHECK(dealer.Send(valid_payload));
 
-    const bool valid_message_received = SpinUntil(io_context, std::chrono::seconds(2), [&routed_messages]() {
-        return !routed_messages.empty();
+    const bool valid_message_received = SpinUntil(io_context, std::chrono::seconds(2), [&routed_messages, &listener, &valid_payload]() {
+        return routed_messages.size() == 1u &&
+               listener.metrics().received_message_count == 1u &&
+               listener.metrics().received_payload_bytes == valid_payload.size();
     });
     XS_CHECK(valid_message_received);
-    XS_CHECK(routed_messages.size() == 1);
+    XS_CHECK(routed_messages.size() == 1u);
     XS_CHECK(ByteSpanEqualsText(routed_messages.front().routing_id, "DealerMultipart"));
     XS_CHECK(ByteSpanEqualsSpan(routed_messages.front().payload, valid_payload));
 
@@ -411,7 +562,8 @@ void TestListenerRejectsMultipartPayloadMessages()
 int main()
 {
     TestListenerRejectsInvalidOptionsAndSendBeforeStart();
-    TestListenerBindsAndExchangesMessages();
+    TestListenerBindsExchangesMessagesAndTracksMetrics();
+    TestListenerRetainsMetricsAfterStopAndResetsOnRestart();
     TestListenerRejectsMultipartPayloadMessages();
 
     if (g_failures != 0)
