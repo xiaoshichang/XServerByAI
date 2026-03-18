@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PacketCodec.h"
+#include "message/PacketCodec.h"
 
 #include <cstddef>
 #include <cstdint>

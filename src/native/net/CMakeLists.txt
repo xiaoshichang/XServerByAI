@@ -4,12 +4,12 @@ add_library(net STATIC
     ByteOrder.h
     MessageDispatcher.cpp
     MessageDispatcher.h
+    message/HeartbeatCodec.cpp
+    message/HeartbeatCodec.h
+    message/PacketCodec.cpp
+    message/PacketCodec.h
     net.cpp
-    PacketCodec.cpp
-    PacketCodec.h
     PacketHeader.h
-    ProcessHeartbeatCodec.cpp
-    ProcessHeartbeatCodec.h
 )
 
 target_include_directories(net PUBLIC ${CMAKE_CURRENT_LIST_DIR})

@@ -1,9 +1,9 @@
 #include "BinarySerialization.h"
 #include "ByteOrder.h"
 #include "MessageDispatcher.h"
-#include "PacketCodec.h"
 #include "PacketHeader.h"
-#include "ProcessHeartbeatCodec.h"
+#include "message/HeartbeatCodec.h"
+#include "message/PacketCodec.h"
 
 #include <asio/io_context.hpp>
 #include <asio/version.hpp>
@@ -23,15 +23,15 @@ static_assert(std::is_default_constructible_v<xs::net::PacketView>, "PacketView 
 static_assert(std::is_default_constructible_v<xs::net::MessageDispatcher>, "MessageDispatcher must remain default constructible.");
 static_assert(std::is_copy_constructible_v<xs::net::MessageHandler>, "MessageHandler must remain copy constructible.");
 static_assert(std::is_default_constructible_v<xs::net::LoadSnapshot>, "LoadSnapshot must remain default constructible.");
-static_assert(std::is_default_constructible_v<xs::net::ProcessHeartbeatRequest>, "ProcessHeartbeatRequest must remain default constructible.");
-static_assert(std::is_default_constructible_v<xs::net::ProcessHeartbeatSuccessResponse>, "ProcessHeartbeatSuccessResponse must remain default constructible.");
-static_assert(std::is_default_constructible_v<xs::net::ProcessHeartbeatErrorResponse>, "ProcessHeartbeatErrorResponse must remain default constructible.");
+static_assert(std::is_default_constructible_v<xs::net::HeartbeatRequest>, "HeartbeatRequest must remain default constructible.");
+static_assert(std::is_default_constructible_v<xs::net::HeartbeatSuccessResponse>, "HeartbeatSuccessResponse must remain default constructible.");
+static_assert(std::is_default_constructible_v<xs::net::HeartbeatErrorResponse>, "HeartbeatErrorResponse must remain default constructible.");
 static_assert(
     xs::net::NetworkToHost(xs::net::HostToNetwork<std::uint64_t>(0x0102030405060708ull)) == 0x0102030405060708ull,
     "Byte-order conversion must round-trip fixed-width integers.");
 static_assert(std::is_default_constructible_v<asio::io_context>, "Asio io_context must remain available");
 static_assert(xs::net::kPacketMagic == 0x47535052u, "Packet magic must match the protocol spec");
-static_assert(xs::net::kControlProcessHeartbeatMsgId == 1100u, "Heartbeat msgId must match the control-plane spec");
+static_assert(xs::net::kControlHeartbeatMsgId == 1100u, "Heartbeat msgId must match the control-plane spec");
 
 namespace xs::net
 {

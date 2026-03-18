@@ -1,4 +1,4 @@
-#include "ProcessHeartbeatCodec.h"
+#include "message/HeartbeatCodec.h"
 
 #include <array>
 #include <cstddef>
@@ -78,17 +78,17 @@ void CheckLoadSnapshotEquals(const xs::net::LoadSnapshot& actual, const xs::net:
 
 void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
 {
-    const xs::net::ProcessHeartbeatRequest request{
+    const xs::net::HeartbeatRequest request{
         .registration_id = 0x0102030405060708ull,
         .sent_at_unix_ms = 0x1112131415161718ull,
         .status_flags = 0u,
         .load = MakeLoadSnapshot(1u, 2u, 3u, 4u, 5u),
     };
 
-    std::array<std::byte, xs::net::kProcessHeartbeatRequestSize> buffer{};
-    XS_CHECK(xs::net::EncodeProcessHeartbeatRequest(request, buffer) == xs::net::ProcessHeartbeatCodecErrorCode::None);
+    std::array<std::byte, xs::net::kHeartbeatRequestSize> buffer{};
+    XS_CHECK(xs::net::EncodeHeartbeatRequest(request, buffer) == xs::net::HeartbeatCodecErrorCode::None);
 
-    const std::array<std::byte, xs::net::kProcessHeartbeatRequestSize> expected{
+    const std::array<std::byte, xs::net::kHeartbeatRequestSize> expected{
         std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
         std::byte{0x05}, std::byte{0x06}, std::byte{0x07}, std::byte{0x08},
         std::byte{0x11}, std::byte{0x12}, std::byte{0x13}, std::byte{0x14},
@@ -102,8 +102,8 @@ void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
     };
     XS_CHECK(ByteSpanEqualsSpan(buffer, expected));
 
-    xs::net::ProcessHeartbeatRequest decoded{};
-    XS_CHECK(xs::net::DecodeProcessHeartbeatRequest(buffer, &decoded) == xs::net::ProcessHeartbeatCodecErrorCode::None);
+    xs::net::HeartbeatRequest decoded{};
+    XS_CHECK(xs::net::DecodeHeartbeatRequest(buffer, &decoded) == xs::net::HeartbeatCodecErrorCode::None);
     XS_CHECK(decoded.registration_id == request.registration_id);
     XS_CHECK(decoded.sent_at_unix_ms == request.sent_at_unix_ms);
     XS_CHECK(decoded.status_flags == 0u);
@@ -112,19 +112,19 @@ void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
 
 void TestEncodeSuccessAndErrorResponsesRoundTrip()
 {
-    const xs::net::ProcessHeartbeatSuccessResponse success{
+    const xs::net::HeartbeatSuccessResponse success{
         .registration_id = 0x0102030405060708ull,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 15000u,
         .server_now_unix_ms = 0x2122232425262728ull,
     };
 
-    std::array<std::byte, xs::net::kProcessHeartbeatSuccessResponseSize> success_buffer{};
+    std::array<std::byte, xs::net::kHeartbeatSuccessResponseSize> success_buffer{};
     XS_CHECK(
-        xs::net::EncodeProcessHeartbeatSuccessResponse(success, success_buffer) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::None);
+        xs::net::EncodeHeartbeatSuccessResponse(success, success_buffer) ==
+        xs::net::HeartbeatCodecErrorCode::None);
 
-    const std::array<std::byte, xs::net::kProcessHeartbeatSuccessResponseSize> expected_success{
+    const std::array<std::byte, xs::net::kHeartbeatSuccessResponseSize> expected_success{
         std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
         std::byte{0x05}, std::byte{0x06}, std::byte{0x07}, std::byte{0x08},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x13}, std::byte{0x88},
@@ -134,37 +134,37 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
     };
     XS_CHECK(ByteSpanEqualsSpan(success_buffer, expected_success));
 
-    xs::net::ProcessHeartbeatSuccessResponse decoded_success{};
+    xs::net::HeartbeatSuccessResponse decoded_success{};
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatSuccessResponse(success_buffer, &decoded_success) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::None);
+        xs::net::DecodeHeartbeatSuccessResponse(success_buffer, &decoded_success) ==
+        xs::net::HeartbeatCodecErrorCode::None);
     XS_CHECK(decoded_success.registration_id == success.registration_id);
     XS_CHECK(decoded_success.heartbeat_interval_ms == success.heartbeat_interval_ms);
     XS_CHECK(decoded_success.heartbeat_timeout_ms == success.heartbeat_timeout_ms);
     XS_CHECK(decoded_success.server_now_unix_ms == success.server_now_unix_ms);
 
-    const xs::net::ProcessHeartbeatErrorResponse error{
+    const xs::net::HeartbeatErrorResponse error{
         .error_code = 3004,
         .retry_after_ms = 250u,
         .require_full_register = true,
     };
 
-    std::array<std::byte, xs::net::kProcessHeartbeatErrorResponseSize> error_buffer{};
+    std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> error_buffer{};
     XS_CHECK(
-        xs::net::EncodeProcessHeartbeatErrorResponse(error, error_buffer) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::None);
+        xs::net::EncodeHeartbeatErrorResponse(error, error_buffer) ==
+        xs::net::HeartbeatCodecErrorCode::None);
 
-    const std::array<std::byte, xs::net::kProcessHeartbeatErrorResponseSize> expected_error{
+    const std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> expected_error{
         std::byte{0x00}, std::byte{0x00}, std::byte{0x0B}, std::byte{0xBC},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0xFA},
         std::byte{0x01},
     };
     XS_CHECK(ByteSpanEqualsSpan(error_buffer, expected_error));
 
-    xs::net::ProcessHeartbeatErrorResponse decoded_error{};
+    xs::net::HeartbeatErrorResponse decoded_error{};
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatErrorResponse(error_buffer, &decoded_error) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::None);
+        xs::net::DecodeHeartbeatErrorResponse(error_buffer, &decoded_error) ==
+        xs::net::HeartbeatCodecErrorCode::None);
     XS_CHECK(decoded_error.error_code == error.error_code);
     XS_CHECK(decoded_error.retry_after_ms == error.retry_after_ms);
     XS_CHECK(decoded_error.require_full_register == error.require_full_register);
@@ -172,22 +172,22 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
 
 void TestRejectsSemanticViolationsAndMalformedBuffers()
 {
-    const xs::net::ProcessHeartbeatRequest request{
+    const xs::net::HeartbeatRequest request{
         .registration_id = 0x0102030405060708ull,
         .sent_at_unix_ms = 0x1112131415161718ull,
         .status_flags = 0u,
         .load = MakeLoadSnapshot(1u, 2u, 3u, 4u, 5u),
     };
 
-    std::array<std::byte, xs::net::kProcessHeartbeatRequestSize> request_buffer{};
-    XS_CHECK(xs::net::EncodeProcessHeartbeatRequest(request, request_buffer) == xs::net::ProcessHeartbeatCodecErrorCode::None);
+    std::array<std::byte, xs::net::kHeartbeatRequestSize> request_buffer{};
+    XS_CHECK(xs::net::EncodeHeartbeatRequest(request, request_buffer) == xs::net::HeartbeatCodecErrorCode::None);
 
     auto invalid_status = request_buffer;
     invalid_status[19] = std::byte{0x01};
-    xs::net::ProcessHeartbeatRequest decoded_request{};
+    xs::net::HeartbeatRequest decoded_request{};
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatRequest(invalid_status, &decoded_request) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidStatusFlags);
+        xs::net::DecodeHeartbeatRequest(invalid_status, &decoded_request) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidStatusFlags);
 
     auto invalid_registration = request_buffer;
     for (std::size_t index = 0; index < 8u; ++index)
@@ -195,104 +195,104 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
         invalid_registration[index] = std::byte{0x00};
     }
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatRequest(invalid_registration, &decoded_request) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidRegistrationId);
+        xs::net::DecodeHeartbeatRequest(invalid_registration, &decoded_request) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidRegistrationId);
 
     const std::span<const std::byte> truncated_request(request_buffer.data(), request_buffer.size() - 1u);
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatRequest(truncated_request, &decoded_request) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::BufferTooSmall);
+        xs::net::DecodeHeartbeatRequest(truncated_request, &decoded_request) ==
+        xs::net::HeartbeatCodecErrorCode::BufferTooSmall);
 
     std::vector<std::byte> trailing_request(request_buffer.begin(), request_buffer.end());
     trailing_request.push_back(std::byte{0xFF});
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatRequest(trailing_request, &decoded_request) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::TrailingBytes);
+        xs::net::DecodeHeartbeatRequest(trailing_request, &decoded_request) ==
+        xs::net::HeartbeatCodecErrorCode::TrailingBytes);
 
-    const xs::net::ProcessHeartbeatSuccessResponse success{
+    const xs::net::HeartbeatSuccessResponse success{
         .registration_id = 0x0102030405060708ull,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 15000u,
         .server_now_unix_ms = 0x2122232425262728ull,
     };
-    std::array<std::byte, xs::net::kProcessHeartbeatSuccessResponseSize> success_buffer{};
+    std::array<std::byte, xs::net::kHeartbeatSuccessResponseSize> success_buffer{};
     XS_CHECK(
-        xs::net::EncodeProcessHeartbeatSuccessResponse(success, success_buffer) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::None);
+        xs::net::EncodeHeartbeatSuccessResponse(success, success_buffer) ==
+        xs::net::HeartbeatCodecErrorCode::None);
     success_buffer[8] = std::byte{0x00};
     success_buffer[9] = std::byte{0x00};
     success_buffer[10] = std::byte{0x3A};
     success_buffer[11] = std::byte{0x98};
 
-    xs::net::ProcessHeartbeatSuccessResponse decoded_success{};
+    xs::net::HeartbeatSuccessResponse decoded_success{};
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatSuccessResponse(success_buffer, &decoded_success) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidHeartbeatTiming);
+        xs::net::DecodeHeartbeatSuccessResponse(success_buffer, &decoded_success) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidHeartbeatTiming);
 
-    const xs::net::ProcessHeartbeatErrorResponse error{
+    const xs::net::HeartbeatErrorResponse error{
         .error_code = 3004,
         .retry_after_ms = 250u,
         .require_full_register = true,
     };
-    std::array<std::byte, xs::net::kProcessHeartbeatErrorResponseSize> error_buffer{};
+    std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> error_buffer{};
     XS_CHECK(
-        xs::net::EncodeProcessHeartbeatErrorResponse(error, error_buffer) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::None);
+        xs::net::EncodeHeartbeatErrorResponse(error, error_buffer) ==
+        xs::net::HeartbeatCodecErrorCode::None);
     error_buffer[8] = std::byte{0x02};
 
-    xs::net::ProcessHeartbeatErrorResponse decoded_error{};
+    xs::net::HeartbeatErrorResponse decoded_error{};
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatErrorResponse(error_buffer, &decoded_error) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidBoolValue);
+        xs::net::DecodeHeartbeatErrorResponse(error_buffer, &decoded_error) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidBoolValue);
 }
 
 void TestRejectsInvalidArgumentsAndSmallBuffers()
 {
-    const xs::net::ProcessHeartbeatRequest invalid_request{
+    const xs::net::HeartbeatRequest invalid_request{
         .registration_id = 0u,
         .sent_at_unix_ms = 1u,
         .status_flags = 0u,
         .load = MakeLoadSnapshot(0u, 0u, 0u, 0u, 0u),
     };
-    std::array<std::byte, xs::net::kProcessHeartbeatRequestSize> request_buffer{};
+    std::array<std::byte, xs::net::kHeartbeatRequestSize> request_buffer{};
     XS_CHECK(
-        xs::net::EncodeProcessHeartbeatRequest(invalid_request, request_buffer) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidRegistrationId);
+        xs::net::EncodeHeartbeatRequest(invalid_request, request_buffer) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidRegistrationId);
 
-    const xs::net::ProcessHeartbeatSuccessResponse invalid_success{
+    const xs::net::HeartbeatSuccessResponse invalid_success{
         .registration_id = 1u,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 5000u,
         .server_now_unix_ms = 2u,
     };
-    std::array<std::byte, xs::net::kProcessHeartbeatSuccessResponseSize> success_buffer{};
+    std::array<std::byte, xs::net::kHeartbeatSuccessResponseSize> success_buffer{};
     XS_CHECK(
-        xs::net::EncodeProcessHeartbeatSuccessResponse(invalid_success, success_buffer) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidHeartbeatTiming);
+        xs::net::EncodeHeartbeatSuccessResponse(invalid_success, success_buffer) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidHeartbeatTiming);
 
-    std::array<std::byte, xs::net::kProcessHeartbeatRequestSize - 1> short_request_buffer{};
-    const xs::net::ProcessHeartbeatRequest valid_request{
+    std::array<std::byte, xs::net::kHeartbeatRequestSize - 1> short_request_buffer{};
+    const xs::net::HeartbeatRequest valid_request{
         .registration_id = 1u,
         .sent_at_unix_ms = 2u,
         .status_flags = 0u,
         .load = MakeLoadSnapshot(3u, 4u, 5u, 6u, 7u),
     };
     XS_CHECK(
-        xs::net::EncodeProcessHeartbeatRequest(valid_request, short_request_buffer) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::BufferTooSmall);
+        xs::net::EncodeHeartbeatRequest(valid_request, short_request_buffer) ==
+        xs::net::HeartbeatCodecErrorCode::BufferTooSmall);
 
-    std::array<std::byte, xs::net::kProcessHeartbeatErrorResponseSize> error_buffer{};
+    std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> error_buffer{};
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatRequest(request_buffer, nullptr) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidArgument);
+        xs::net::DecodeHeartbeatRequest(request_buffer, nullptr) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidArgument);
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatSuccessResponse(success_buffer, nullptr) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidArgument);
+        xs::net::DecodeHeartbeatSuccessResponse(success_buffer, nullptr) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidArgument);
     XS_CHECK(
-        xs::net::DecodeProcessHeartbeatErrorResponse(error_buffer, nullptr) ==
-        xs::net::ProcessHeartbeatCodecErrorCode::InvalidArgument);
+        xs::net::DecodeHeartbeatErrorResponse(error_buffer, nullptr) ==
+        xs::net::HeartbeatCodecErrorCode::InvalidArgument);
     XS_CHECK(
-        xs::net::ProcessHeartbeatCodecErrorMessage(xs::net::ProcessHeartbeatCodecErrorCode::TrailingBytes) ==
+        xs::net::HeartbeatCodecErrorMessage(xs::net::HeartbeatCodecErrorCode::TrailingBytes) ==
         std::string_view("Heartbeat buffer must not contain trailing bytes."));
 }
 
@@ -307,7 +307,7 @@ int main()
 
     if (g_failures != 0)
     {
-        std::cerr << g_failures << " process heartbeat codec test(s) failed.\n";
+        std::cerr << g_failures << " heartbeat codec test(s) failed.\n";
         return EXIT_FAILURE;
     }
 
