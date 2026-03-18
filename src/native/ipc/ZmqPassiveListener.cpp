@@ -450,6 +450,11 @@ class ZmqPassiveListener::Impl final : public std::enable_shared_from_this<Impl>
                 return;
             }
 
+            if (message.empty())
+            {
+                continue;
+            }
+
             metrics_.RecordReceivedMessage(message.size());
             if (message_handler_)
             {

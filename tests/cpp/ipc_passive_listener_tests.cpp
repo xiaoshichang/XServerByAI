@@ -557,6 +557,75 @@ void TestListenerRejectsMultipartPayloadMessages()
     listener.Stop();
 }
 
+void TestListenerIgnoresEmptyPayloadMessages()
+{
+    asio::io_context io_context;
+    xs::ipc::ZmqContext context;
+    XS_CHECK(context.IsValid());
+
+    std::vector<RoutedMessage> routed_messages;
+
+    xs::ipc::ZmqPassiveListener listener(
+        io_context,
+        context,
+        {
+            .local_endpoint = "tcp://127.0.0.1:*",
+            .poll_interval = std::chrono::milliseconds(2),
+            .send_high_water_mark = 16,
+            .receive_high_water_mark = 16,
+            .handshake_interval_ms = 1000,
+        });
+    listener.SetMessageHandler([&routed_messages](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
+        routed_messages.push_back({std::move(routing_id), std::move(payload)});
+    });
+
+    std::string error_message;
+    XS_CHECK(listener.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(!listener.bound_endpoint().empty());
+
+    RawZmqSocket dealer(ZMQ_DEALER);
+    XS_CHECK(dealer.IsValid());
+    XS_CHECK(dealer.SetRoutingId("DealerEmptyPayload"));
+    XS_CHECK(dealer.Connect(listener.bound_endpoint()));
+
+    const bool connected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
+        return listener.metrics().active_connection_count == 1u;
+    });
+    XS_CHECK(connected);
+
+    const auto empty_payload = std::vector<std::byte>{};
+    XS_CHECK(dealer.Send(empty_payload));
+
+    const bool empty_payload_ignored = SpinUntil(io_context, std::chrono::seconds(2), [&listener, &routed_messages]() {
+        return listener.metrics().active_connection_count == 1u &&
+               listener.metrics().received_message_count == 0u &&
+               listener.metrics().received_payload_bytes == 0u &&
+               routed_messages.empty();
+    });
+    XS_CHECK(empty_payload_ignored);
+
+    const auto valid_payload = BytesFromText("hello");
+    XS_CHECK(dealer.Send(valid_payload));
+
+    const bool valid_message_received = SpinUntil(io_context, std::chrono::seconds(2), [&listener, &routed_messages, &valid_payload]() {
+        return routed_messages.size() == 1u &&
+               listener.metrics().received_message_count == 1u &&
+               listener.metrics().received_payload_bytes == valid_payload.size();
+    });
+    XS_CHECK(valid_message_received);
+    XS_CHECK(ByteSpanEqualsText(routed_messages.front().routing_id, "DealerEmptyPayload"));
+    XS_CHECK(ByteSpanEqualsSpan(routed_messages.front().payload, valid_payload));
+
+    dealer.Close();
+    const bool disconnected = SpinUntil(io_context, std::chrono::seconds(2), [&listener]() {
+        return listener.metrics().active_connection_count == 0u;
+    });
+    XS_CHECK(disconnected);
+
+    listener.Stop();
+}
+
 } // namespace
 
 int main()
@@ -565,6 +634,7 @@ int main()
     TestListenerBindsExchangesMessagesAndTracksMetrics();
     TestListenerRetainsMetricsAfterStopAndResetsOnRestart();
     TestListenerRejectsMultipartPayloadMessages();
+    TestListenerIgnoresEmptyPayloadMessages();
 
     if (g_failures != 0)
     {
