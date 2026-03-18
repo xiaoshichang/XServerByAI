@@ -1,46 +1,42 @@
-#include "Config.h"
+#include "NodeRuntime.h"
 
 #include <iostream>
-#include <string_view>
+#include <string>
+#include <utility>
 
 namespace
 {
 
-void PrintUsage()
+std::string ResolveErrorMessage(xs::node::NodeRuntimeErrorCode code, std::string error_message)
 {
-    std::cerr << "Usage: xserver-node <configPath> <gm|gateN|gameN>\n";
+    if (!error_message.empty())
+    {
+        return error_message;
+    }
+
+    return std::string(xs::node::NodeRuntimeErrorMessage(code));
 }
 
 } // namespace
 
 int main(int argc, char* argv[])
 {
-    if (argc != 3)
-    {
-        PrintUsage();
-        return 1;
-    }
-
-    const std::string_view config_path = argv[1];
-    const std::string_view selector = argv[2];
-    if (config_path.empty())
-    {
-        PrintUsage();
-        return 1;
-    }
-
-    xs::core::NodeConfig node_config;
+    xs::node::NodeCommandLineArgs args;
     std::string error_message;
-    const xs::core::ConfigErrorCode load_result =
-        xs::core::LoadNodeConfigFile(config_path, selector, &node_config, &error_message);
-    if (load_result != xs::core::ConfigErrorCode::None)
+    const xs::node::NodeRuntimeErrorCode parse_result =
+        xs::node::ParseNodeCommandLine(argc, argv, &args, &error_message);
+    if (parse_result != xs::node::NodeRuntimeErrorCode::None)
     {
-        if (error_message.empty())
-        {
-            error_message = std::string(xs::core::ConfigErrorMessage(load_result));
-        }
+        std::cerr << ResolveErrorMessage(parse_result, std::move(error_message)) << '\n';
+        return 1;
+    }
 
-        std::cerr << error_message << '\n';
+    error_message.clear();
+    const xs::node::NodeRuntimeErrorCode run_result =
+        xs::node::RunNodeProcess(args, xs::node::NodeRuntimeRunOptions{}, &error_message);
+    if (run_result != xs::node::NodeRuntimeErrorCode::None)
+    {
+        std::cerr << ResolveErrorMessage(run_result, std::move(error_message)) << '\n';
         return 1;
     }
 

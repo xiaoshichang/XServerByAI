@@ -85,3 +85,11 @@ add_executable(xs_ipc_passive_listener_tests
 target_link_libraries(xs_ipc_passive_listener_tests PRIVATE ipc)
 
 add_test(NAME xs_ipc_passive_listener_tests COMMAND xs_ipc_passive_listener_tests)
+
+add_executable(xs_node_runtime_tests
+    node_runtime_tests.cpp
+)
+
+target_link_libraries(xs_node_runtime_tests PRIVATE node_runtime)
+
+add_test(NAME xs_node_runtime_tests COMMAND xs_node_runtime_tests)
