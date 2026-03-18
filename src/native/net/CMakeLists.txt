@@ -8,6 +8,8 @@ add_library(net STATIC
     PacketCodec.cpp
     PacketCodec.h
     PacketHeader.h
+    ProcessHeartbeatCodec.cpp
+    ProcessHeartbeatCodec.h
 )
 
 target_include_directories(net PUBLIC ${CMAKE_CURRENT_LIST_DIR})
