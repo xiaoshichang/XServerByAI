@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ControlMessageTypes.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -9,7 +11,6 @@ namespace xs::net
 {
 
 inline constexpr std::uint32_t kControlHeartbeatMsgId = 1100u;
-inline constexpr std::size_t kControlLoadSnapshotSize = sizeof(std::uint32_t) * 5u;
 inline constexpr std::size_t kHeartbeatRequestSize = sizeof(std::uint64_t) + sizeof(std::uint64_t) + sizeof(std::uint32_t) + kControlLoadSnapshotSize;
 inline constexpr std::size_t kHeartbeatSuccessResponseSize = sizeof(std::uint64_t) + sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kHeartbeatErrorResponseSize = sizeof(std::int32_t) + sizeof(std::uint32_t) + sizeof(std::uint8_t);
@@ -28,15 +29,6 @@ enum class HeartbeatCodecErrorCode : std::uint8_t
 };
 
 [[nodiscard]] std::string_view HeartbeatCodecErrorMessage(HeartbeatCodecErrorCode error_code) noexcept;
-
-struct LoadSnapshot
-{
-    std::uint32_t connection_count{0};
-    std::uint32_t session_count{0};
-    std::uint32_t entity_count{0};
-    std::uint32_t space_count{0};
-    std::uint32_t load_score{0};
-};
 
 struct HeartbeatRequest
 {
