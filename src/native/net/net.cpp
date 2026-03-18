@@ -1,5 +1,6 @@
 #include "BinarySerialization.h"
 #include "ByteOrder.h"
+#include "MessageDispatcher.h"
 #include "PacketCodec.h"
 #include "PacketHeader.h"
 
@@ -18,6 +19,8 @@ static_assert(std::is_standard_layout_v<xs::net::PacketHeader>, "PacketHeader mu
 static_assert(std::is_constructible_v<xs::net::BinaryWriter, std::span<std::byte>>, "BinaryWriter must remain span-based.");
 static_assert(std::is_constructible_v<xs::net::BinaryReader, std::span<const std::byte>>, "BinaryReader must remain span-based.");
 static_assert(std::is_default_constructible_v<xs::net::PacketView>, "PacketView must remain default constructible.");
+static_assert(std::is_default_constructible_v<xs::net::MessageDispatcher>, "MessageDispatcher must remain default constructible.");
+static_assert(std::is_copy_constructible_v<xs::net::MessageHandler>, "MessageHandler must remain copy constructible.");
 static_assert(
     xs::net::NetworkToHost(xs::net::HostToNetwork<std::uint64_t>(0x0102030405060708ull)) == 0x0102030405060708ull,
     "Byte-order conversion must round-trip fixed-width integers.");

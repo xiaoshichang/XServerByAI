@@ -2,6 +2,8 @@ add_library(net STATIC
     BinarySerialization.cpp
     BinarySerialization.h
     ByteOrder.h
+    MessageDispatcher.cpp
+    MessageDispatcher.h
     net.cpp
     PacketCodec.cpp
     PacketCodec.h

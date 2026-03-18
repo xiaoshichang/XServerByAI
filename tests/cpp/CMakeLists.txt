@@ -38,6 +38,14 @@ target_link_libraries(xs_net_packet_tests PRIVATE net)
 
 add_test(NAME xs_net_packet_tests COMMAND xs_net_packet_tests)
 
+add_executable(xs_net_message_dispatcher_tests
+    message_dispatcher_tests.cpp
+)
+
+target_link_libraries(xs_net_message_dispatcher_tests PRIVATE net)
+
+add_test(NAME xs_net_message_dispatcher_tests COMMAND xs_net_message_dispatcher_tests)
+
 add_executable(xs_main_event_loop_tests
     main_event_loop_tests.cpp
 )
