@@ -50,27 +50,27 @@
 13. M2-14 实现基础 metrics 结构（连接数、吞吐）。Deps: M2-08 | 状态: 未开发
 
 **里程碑 M3：进程与注册控制面（17 条）**
-1. M3-01 实现 GM 进程主入口与生命周期。Deps: M1-03, M2-05 | 状态: 未开发
-2. M3-02 实现 GM 监听内部控制端口（ZeroMQ over TCP）。Deps: M2-08 | 状态: 未开发
+1. M3-01 实现统一 `xserver-node` 运行时入口与节点角色分派（根据启动参数确定 `processType` 与 `nodeId`）。Deps: M1-03, M2-05 | 状态: 未开发
+2. M3-02 实现 GM 角色生命周期与内部控制端口监听（ZeroMQ over TCP）。Deps: M3-01, M2-08 | 状态: 未开发
 3. M3-03 实现注册表数据结构（保存 Gate/Game 节点信息与 NodeID）。Deps: M1-09 | 状态: 未开发
 4. M3-04 实现注册请求处理与响应。Deps: M2-12, M3-03 | 状态: 未开发
 5. M3-05 实现心跳处理与超时检测。Deps: M2-11, M2-03 | 状态: 未开发
-6. M3-06 实现 GM→Gate/Game 配置下发消息。Deps: M2-06 | 状态: 未开发
-7. M3-07 实现 GM 管理命令接口（本地 CLI 或 HTTP）。Deps: M3-01 | 状态: 未开发
-8. M3-08 实现 Gate 进程主入口与生命周期。Deps: M1-03, M2-05 | 状态: 未开发
-9. M3-09 实现 Gate→GM 注册与心跳。Deps: M2-07, M2-11, M2-12 | 状态: 未开发
-10. M3-10 实现 Game 进程主入口与生命周期。Deps: M1-03, M2-05 | 状态: 未开发
-11. M3-11 实现 Game→GM 注册与心跳。Deps: M2-07, M2-11, M2-12 | 状态: 未开发
+6. M3-06 实现 GM→Gate/Game 配置与集群就绪状态下发消息。Deps: M2-06 | 状态: 未开发
+7. M3-07 实现 GM 管理命令接口（本地 CLI 或 HTTP）。Deps: M3-02 | 状态: 未开发
+8. M3-08 实现 Gate 角色启动骨架与 GM 控制链路接入。Deps: M3-01, M2-07 | 状态: 未开发
+9. M3-09 实现 Gate→GM 注册与心跳。Deps: M3-08, M2-11, M2-12 | 状态: 未开发
+10. M3-10 实现 Game 角色启动骨架与 GM 控制链路接入。Deps: M3-01, M2-07 | 状态: 未开发
+11. M3-11 实现 Game→GM 注册与心跳。Deps: M3-10, M2-11, M2-12 | 状态: 未开发
 12. M3-12 实现 GM 推送 Game 节点路由目录到 Gate。Deps: M3-03, M3-06 | 状态: 未开发
 13. M3-13 实现 Gate 维护 Game 节点路由目录与变更更新。Deps: M3-12 | 状态: 未开发
-14. M3-14 实现 GM 负载统计字段上报（占位）。Deps: M3-03 | 状态: 未开发
-15. M3-15 实现 GM 断线剔除逻辑与路由更新通知。Deps: M3-05, M3-12 | 状态: 未开发
-16. M3-16 完成集成测试：GM 启动 + Gate/Game 注册心跳。Deps: M3-09, M3-11 | 状态: 未开发
+14. M3-14 实现 Game 服务就绪状态上报（含 ServerStubEntity ready 聚合）。Deps: M3-03 | 状态: 未开发
+15. M3-15 实现 GM 断线剔除、服务就绪聚合与路由更新通知。Deps: M3-05, M3-12, M3-14 | 状态: 未开发
+16. M3-16 完成集成测试：通过 `xserver-node` 启动 GM + Gate/Game 注册心跳。Deps: M3-09, M3-11 | 状态: 未开发
 17. M3-17 管理命令：查询在线进程与强制下线。Deps: M3-07, M3-15 | 状态: 未开发
 
 **里程碑 M4：网络与会话（16 条）**
 1. M4-01 集成 KCP 库并封装会话对象。Deps: M2-06 | 状态: 未开发
-2. M4-02 实现 Gate KCP 监听与会话创建。Deps: M4-01, M3-08 | 状态: 未开发
+2. M4-02 实现 Gate KCP 监听骨架、受控开放与会话创建；仅在全部 ServerStubEntity ready 后开放客户端入口。Deps: M4-01, M3-08, M3-06, M3-15 | 状态: 未开发
 3. M4-03 实现客户端鉴权流程骨架（占位）。Deps: M4-02 | 状态: 未开发
 4. M4-04 实现 Gate 会话管理表（sessionId → playerId）。Deps: M4-02 | 状态: 未开发
 5. M4-05 实现 Gate 与全部 Game 节点的内部 ZeroMQ over TCP 全连接池。Deps: M3-13, M2-07 | 状态: 未开发
@@ -107,10 +107,10 @@
 
 **里程碑 M6：闭环集成与质量（17 条）**
 1. M6-01 实现 C++↔C# blittable 数据结构约定与封送。Deps: M5-02 | 状态: 未开发
-2. M6-02 实现 Game 进程调用 C# 入口（Init/OnMessage/OnTick）。Deps: M5-02 | 状态: 未开发
+2. M6-02 实现 Game 进程调用 C# 入口（Init/OnMessage/OnTick）与本地 ServerStubEntity ready 判定。Deps: M5-02, M5-14, M5-15 | 状态: 未开发
 3. M6-03 实现 Game 将业务响应回传 Gate。Deps: M4-07, M6-02 | 状态: 未开发
 4. M6-04 实现 Gate 将业务响应回传客户端。Deps: M4-09, M6-03 | 状态: 未开发
-5. M6-05 完成端到端测试：客户端→Gate→Game→C#。Deps: M6-04 | 状态: 未开发
+5. M6-05 完成端到端测试：客户端→Gate→Game→C#，并验证全部 ServerStubEntity ready 前 Gate 不开放客户端入口。Deps: M6-04, M6-02 | 状态: 未开发
 6. M6-06 实现进程配置文件（GM/Gate/Game）。Deps: M2-02, M3-01 | 状态: 未开发
 7. M6-07 完成 Windows/Linux 构建脚本与说明（含 `3rd/` vendored 依赖）。Deps: M1-01, M1-04, M1-13 | 状态: 未开发
 8. M6-08 完成一键启动脚本（GM/Gate/Game）。Deps: M3-01, M3-08, M3-10 | 状态: 未开发

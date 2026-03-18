@@ -48,10 +48,11 @@
 
 **启动与注册流程（建议）**
 1. GM 启动，监听控制端口并加载配置。
-2. Game 启动后向 GM 注册，持续上报心跳、能力与负载信息。
-3. Gate 启动后向 GM 注册，并拉取 Game 路由目录或订阅变更。
-4. 客户端连接 Gate，完成鉴权后建立会话，Gate 将会话绑定到目标 Game 节点。
-5. 注册与心跳消息结构、字段含义与默认时序约定见 `docs/PROCESS_CONTROL.md`。
+2. Game 启动后向 GM 注册，初始化托管层与本地 `ServerStubEntity`；只有当本进程要求的 `ServerStubEntity` 全部 ready 后，才向 GM 上报本地服务就绪。
+3. Gate 启动后向 GM 注册，并拉取 Game 路由目录或订阅变更；在收到 GM 的集群就绪放行指令前，必须保持客户端连接入口关闭。
+4. GM 聚合各 Game 上报的 `ServerStubEntity ready` 状态；只有当服务器组内要求的 `ServerStubEntity` 全部 ready 后，才向 Gate 下发开放客户端入口的控制消息。
+5. 客户端连接 Gate，完成鉴权后建立会话，Gate 将会话绑定到目标 Game 节点。
+6. 注册、心跳、服务就绪与入口开放控制消息的结构、字段含义与默认时序约定见 `docs/PROCESS_CONTROL.md`。
 
 **进程间二进制协议**
 1. 节点间业务消息体统一使用网络字节序（大端）编码的固定包头与二进制 body。
@@ -82,9 +83,10 @@
 1. C# 业务层采用 `ServerEntity` / `ServerStubEntity` 两级模型，完整语义见 `docs/DISTRIBUTED_ENTITY.md`。
 2. Gate 只负责客户端连接、会话与转发，不持有业务实体状态；GM 只负责控制面与路由目录；业务实体统一由 Game 承载。
 3. `PlayerEntity` 可迁移，`SpaceEntity` 不可迁移；`ServerStubEntity` 的承载 Game 在启动时确定，运行期不迁移。
-4. 实体间 RPC 默认分为两种寻址方式：静态 `Mailbox` 用于不可迁移实体，动态 `Proxy` 用于可迁移实体。
-5. 当前默认业务链路为 `session -> PlayerEntity Proxy -> SpaceEntity Mailbox / other server entity / ServerStubEntity Mailbox`。
-6. 当前阶段不定义 active-active 多写，也不定义跨 Game 直接业务通信。
+4. `ServerStubEntity ready` 是集群级启动门闩：Game 负责本地 ready 判定并上报 GM，GM 聚合后再通知 Gate 开放客户端入口；Gate 不得自行推断集群是否已 ready。
+5. 实体间 RPC 默认分为两种寻址方式：静态 `Mailbox` 用于不可迁移实体，动态 `Proxy` 用于可迁移实体。
+6. 当前默认业务链路为 `session -> PlayerEntity Proxy -> SpaceEntity Mailbox / other server entity / ServerStubEntity Mailbox`。
+7. 当前阶段不定义 active-active 多写，也不定义跨 Game 直接业务通信。
 
 **心跳与健康检查（建议默认值）**
 1. Gate/Game 对 GM 心跳间隔建议为 `5s`，超时建议为 `15s`。
