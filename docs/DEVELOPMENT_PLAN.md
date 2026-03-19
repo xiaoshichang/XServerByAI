@@ -50,7 +50,7 @@
 13. M2-14 实现基础 metrics 结构（连接数、吞吐）。Deps: M2-08 | 状态: 已完成
 
 **里程碑 M3：进程与注册控制面（17 条）**
-1. M3-01 实现统一 `xserver-node` 运行时入口与节点角色分派（根据启动参数确定 `processType` 与 `nodeId`）。Deps: M1-03, M2-05 | 状态: 开发中
+1. M3-01 实现统一 `xserver-node` 运行时入口与节点角色分派（根据启动参数确定 `processType` 与 `nodeId`）。Deps: M1-03, M2-05 | 状态: 已完成
 2. M3-02 实现 GM 角色生命周期与内部控制端口监听（ZeroMQ over TCP）。Deps: M3-01, M2-08 | 状态: 未开发
 3. M3-03 实现注册表数据结构（保存 Gate/Game 节点信息与 NodeID）。Deps: M1-09 | 状态: 未开发
 4. M3-04 实现注册请求处理与响应。Deps: M2-12, M3-03 | 状态: 未开发
