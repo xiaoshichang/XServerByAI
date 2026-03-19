@@ -1,9 +1,14 @@
+#include "GameNode.h"
+#include "GateNode.h"
+#include "GmNode.h"
 #include "Json.h"
 #include "NodeRuntime.h"
+#include "ServerNode.h"
 
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -146,6 +151,91 @@ bool LoadRuntimeContext(
     XS_CHECK_MSG(result == xs::node::NodeRuntimeErrorCode::None, error_message.c_str());
     return result == xs::node::NodeRuntimeErrorCode::None;
 }
+
+xs::core::LoggerOptions BuildLoggerOptions(const xs::node::NodeRuntimeContext& context)
+{
+    xs::core::LoggerOptions options;
+    options.process_type = context.process_type;
+    options.instance_id = context.node_id;
+    options.config = context.node_config.logging;
+    return options;
+}
+
+class TestServerNode final : public xs::node::ServerNode
+{
+  public:
+    struct Options
+    {
+        xs::node::NodeRuntimeErrorCode init_result{xs::node::NodeRuntimeErrorCode::None};
+        xs::node::NodeRuntimeErrorCode run_result{xs::node::NodeRuntimeErrorCode::None};
+        std::string init_error{};
+        std::string run_error{};
+        bool request_stop_in_run{false};
+    };
+
+    TestServerNode(
+        xs::node::ServerNodeEnvironment environment,
+        Options options,
+        bool* init_called,
+        bool* run_called,
+        bool* uninit_called)
+        : xs::node::ServerNode(environment),
+          options_(std::move(options)),
+          init_called_(init_called),
+          run_called_(run_called),
+          uninit_called_(uninit_called)
+    {
+    }
+
+    [[nodiscard]] xs::node::NodeRuntimeErrorCode Init(std::string* error_message) override
+    {
+        if (init_called_ != nullptr)
+        {
+            *init_called_ = true;
+        }
+
+        if (error_message != nullptr)
+        {
+            *error_message = options_.init_error;
+        }
+
+        return options_.init_result;
+    }
+
+    [[nodiscard]] xs::node::NodeRuntimeErrorCode Run(std::string* error_message) override
+    {
+        if (run_called_ != nullptr)
+        {
+            *run_called_ = true;
+        }
+
+        if (error_message != nullptr)
+        {
+            *error_message = options_.run_error;
+        }
+
+        if (options_.request_stop_in_run)
+        {
+            event_loop().RequestStop();
+        }
+
+        return options_.run_result;
+    }
+
+    void Uninit() noexcept override
+    {
+        if (uninit_called_ != nullptr)
+        {
+            *uninit_called_ = true;
+        }
+    }
+
+  private:
+    Options options_{};
+    bool* init_called_{nullptr};
+    bool* run_called_{nullptr};
+    bool* uninit_called_{nullptr};
+};
 
 void TestParseNodeCommandLineSuccess()
 {
@@ -319,11 +409,12 @@ void TestLoadNodeRuntimeContextDerivesGame()
     CleanupTestDirectory(base_path);
 }
 
-void VerifyRoleDispatch(
+void VerifyDefaultNodeCreation(
     std::string_view test_name,
     std::string_view selector,
-    xs::core::ProcessType expected_process_type,
-    std::string_view expected_node_id)
+    bool expect_gm,
+    bool expect_gate,
+    bool expect_game)
 {
     const std::filesystem::path base_path = PrepareTestDirectory(test_name);
     std::filesystem::path config_path;
@@ -340,109 +431,40 @@ void VerifyRoleDispatch(
         return;
     }
 
-    bool gm_called = false;
-    bool gate_called = false;
-    bool game_called = false;
-    xs::core::ProcessType captured_process_type = xs::core::ProcessType::Gm;
-    std::string captured_node_id;
-    std::string captured_selector;
-    std::filesystem::path captured_config_path;
-    std::string captured_log_root;
-
-    xs::node::NodeRoleRunners role_runners;
-    role_runners.gm = [&](const xs::node::NodeRuntimeContext& runtime_context,
-                          xs::core::Logger& logger,
-                          xs::core::MainEventLoop& event_loop,
-                          xs::node::NodeRoleRuntimeBindings* runtime_bindings,
-                          std::string* error_message) {
-        XS_CHECK(runtime_bindings != nullptr);
-        gm_called = true;
-        if (error_message != nullptr)
-        {
-            error_message->clear();
-        }
-        captured_process_type = runtime_context.process_type;
-        captured_node_id = runtime_context.node_id;
-        captured_selector = runtime_context.selector;
-        captured_config_path = runtime_context.config_path;
-        captured_log_root = logger.options().config.root_dir;
-        event_loop.RequestStop();
-        return xs::node::NodeRuntimeErrorCode::None;
-    };
-    role_runners.gate = [&](const xs::node::NodeRuntimeContext& runtime_context,
-                            xs::core::Logger& logger,
-                            xs::core::MainEventLoop& event_loop,
-                            xs::node::NodeRoleRuntimeBindings* runtime_bindings,
-                            std::string* error_message) {
-        XS_CHECK(runtime_bindings != nullptr);
-        gate_called = true;
-        if (error_message != nullptr)
-        {
-            error_message->clear();
-        }
-        captured_process_type = runtime_context.process_type;
-        captured_node_id = runtime_context.node_id;
-        captured_selector = runtime_context.selector;
-        captured_config_path = runtime_context.config_path;
-        captured_log_root = logger.options().config.root_dir;
-        event_loop.RequestStop();
-        return xs::node::NodeRuntimeErrorCode::None;
-    };
-    role_runners.game = [&](const xs::node::NodeRuntimeContext& runtime_context,
-                            xs::core::Logger& logger,
-                            xs::core::MainEventLoop& event_loop,
-                            xs::node::NodeRoleRuntimeBindings* runtime_bindings,
-                            std::string* error_message) {
-        XS_CHECK(runtime_bindings != nullptr);
-        game_called = true;
-        if (error_message != nullptr)
-        {
-            error_message->clear();
-        }
-        captured_process_type = runtime_context.process_type;
-        captured_node_id = runtime_context.node_id;
-        captured_selector = runtime_context.selector;
-        captured_config_path = runtime_context.config_path;
-        captured_log_root = logger.options().config.root_dir;
-        event_loop.RequestStop();
-        return xs::node::NodeRuntimeErrorCode::None;
-    };
-
+    xs::core::Logger logger(BuildLoggerOptions(context));
+    xs::core::MainEventLoop event_loop({.thread_name = "node-create-test"});
+    xs::node::ServerNodePtr node;
     std::string error_message;
     const xs::node::NodeRuntimeErrorCode result =
-        xs::node::RunNodeProcess(context, role_runners, xs::node::NodeRuntimeRunOptions{}, &error_message);
+        xs::node::CreateServerNode(context, logger, event_loop, &node, &error_message);
 
     XS_CHECK_MSG(result == xs::node::NodeRuntimeErrorCode::None, error_message.c_str());
-    XS_CHECK(gm_called == (expected_process_type == xs::core::ProcessType::Gm));
-    XS_CHECK(gate_called == (expected_process_type == xs::core::ProcessType::Gate));
-    XS_CHECK(game_called == (expected_process_type == xs::core::ProcessType::Game));
-    XS_CHECK(captured_process_type == expected_process_type);
-    XS_CHECK(captured_node_id == expected_node_id);
-    XS_CHECK(captured_selector == selector);
-    XS_CHECK(captured_config_path == config_path);
-    XS_CHECK(captured_log_root == context.node_config.logging.root_dir);
+    XS_CHECK(node != nullptr);
+    XS_CHECK((dynamic_cast<xs::node::GmNode*>(node.get()) != nullptr) == expect_gm);
+    XS_CHECK((dynamic_cast<xs::node::GateNode*>(node.get()) != nullptr) == expect_gate);
+    XS_CHECK((dynamic_cast<xs::node::GameNode*>(node.get()) != nullptr) == expect_game);
 
     CleanupTestDirectory(base_path);
 }
 
-void TestRunNodeProcessDispatchesGm()
+void TestCreateServerNodeDispatchesGm()
 {
-    VerifyRoleDispatch("node-runtime-dispatch-gm", "gm", xs::core::ProcessType::Gm, "GM");
+    VerifyDefaultNodeCreation("node-runtime-create-gm", "gm", true, false, false);
 }
 
-void TestRunNodeProcessDispatchesGate()
+void TestCreateServerNodeDispatchesGate()
 {
-    VerifyRoleDispatch("node-runtime-dispatch-gate", "gate0", xs::core::ProcessType::Gate, "Gate0");
+    VerifyDefaultNodeCreation("node-runtime-create-gate", "gate0", false, true, false);
 }
 
-void TestRunNodeProcessDispatchesGame()
+void TestCreateServerNodeDispatchesGame()
 {
-    VerifyRoleDispatch("node-runtime-dispatch-game", "game0", xs::core::ProcessType::Game, "Game0");
+    VerifyDefaultNodeCreation("node-runtime-create-game", "game0", false, false, true);
 }
 
-void TestRunNodeProcessInvokesRoleStopHandler()
+void TestRunNodeProcessInvokesServerNodeLifecycle()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-stop-handler");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-lifecycle");
     std::filesystem::path config_path;
     if (!WriteRuntimeConfig(base_path, &config_path))
     {
@@ -457,51 +479,47 @@ void TestRunNodeProcessInvokesRoleStopHandler()
         return;
     }
 
-    bool stop_called = false;
+    bool init_called = false;
+    bool run_called = false;
+    bool uninit_called = false;
 
-    xs::node::NodeRoleRunners role_runners;
-    role_runners.gm = [](
-                          const xs::node::NodeRuntimeContext&,
-                          xs::core::Logger&,
-                          xs::core::MainEventLoop&,
-                          xs::node::NodeRoleRuntimeBindings*,
-                          std::string*) {
-        return xs::node::NodeRuntimeErrorCode::None;
-    };
-    role_runners.gate = [&](const xs::node::NodeRuntimeContext&,
-                            xs::core::Logger&,
-                            xs::core::MainEventLoop& event_loop,
-                            xs::node::NodeRoleRuntimeBindings* runtime_bindings,
-                            std::string* error_message) {
-        XS_CHECK(runtime_bindings != nullptr);
-        if (runtime_bindings != nullptr)
-        {
-            runtime_bindings->on_stop = [&](xs::core::MainEventLoop&) {
-                stop_called = true;
-            };
-        }
+    xs::node::ServerNodeFactory factory = [&](const xs::node::NodeRuntimeContext& runtime_context,
+                                              xs::core::Logger& logger,
+                                              xs::core::MainEventLoop& event_loop,
+                                              std::string* error_message) {
         if (error_message != nullptr)
         {
             error_message->clear();
         }
-        event_loop.RequestStop();
-        return xs::node::NodeRuntimeErrorCode::None;
+
+        XS_CHECK(runtime_context.process_type == xs::core::ProcessType::Gate);
+        XS_CHECK(logger.options().instance_id == "Gate0");
+
+        xs::node::ServerNodeEnvironment environment{
+            .context = runtime_context,
+            .logger = logger,
+            .event_loop = event_loop,
+        };
+        TestServerNode::Options options;
+        options.request_stop_in_run = true;
+        return std::make_unique<TestServerNode>(environment, std::move(options), &init_called, &run_called, &uninit_called);
     };
-    role_runners.game = role_runners.gm;
 
     std::string error_message;
     const xs::node::NodeRuntimeErrorCode result =
-        xs::node::RunNodeProcess(context, role_runners, xs::node::NodeRuntimeRunOptions{}, &error_message);
+        xs::node::RunNodeProcess(context, std::move(factory), xs::node::NodeRuntimeRunOptions{}, &error_message);
 
     XS_CHECK_MSG(result == xs::node::NodeRuntimeErrorCode::None, error_message.c_str());
-    XS_CHECK(stop_called);
+    XS_CHECK(init_called);
+    XS_CHECK(run_called);
+    XS_CHECK(uninit_called);
 
     CleanupTestDirectory(base_path);
 }
 
-void TestRunNodeProcessRejectsMissingRoleRunner()
+void TestRunNodeProcessRejectsMissingFactory()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-missing-runner");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-missing-factory");
     std::filesystem::path config_path;
     if (!WriteRuntimeConfig(base_path, &config_path))
     {
@@ -516,20 +534,19 @@ void TestRunNodeProcessRejectsMissingRoleRunner()
         return;
     }
 
-    xs::node::NodeRoleRunners role_runners;
     std::string error_message;
     const xs::node::NodeRuntimeErrorCode result =
-        xs::node::RunNodeProcess(context, role_runners, xs::node::NodeRuntimeRunOptions{}, &error_message);
+        xs::node::RunNodeProcess(context, xs::node::ServerNodeFactory{}, xs::node::NodeRuntimeRunOptions{}, &error_message);
 
-    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::MissingRoleRunner);
-    XS_CHECK_MSG(error_message.find("GM") != std::string::npos, error_message.c_str());
+    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::NodeCreateFailed);
+    XS_CHECK_MSG(error_message.find("factory") != std::string::npos, error_message.c_str());
 
     CleanupTestDirectory(base_path);
 }
 
-void TestRunNodeProcessPropagatesRoleRunnerFailure()
+void TestRunNodeProcessRejectsNullServerNode()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-runner-failure");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-null-node");
     std::filesystem::path config_path;
     if (!WriteRuntimeConfig(base_path, &config_path))
     {
@@ -544,29 +561,132 @@ void TestRunNodeProcessPropagatesRoleRunnerFailure()
         return;
     }
 
-    xs::node::NodeRoleRunners role_runners;
-    role_runners.gm = [](
-                          const xs::node::NodeRuntimeContext&,
-                          xs::core::Logger&,
-                          xs::core::MainEventLoop&,
-                          xs::node::NodeRoleRuntimeBindings* runtime_bindings,
-                          std::string* error_message) {
-        (void)runtime_bindings;
+    xs::node::ServerNodeFactory factory = [](
+                                              const xs::node::NodeRuntimeContext&,
+                                              xs::core::Logger&,
+                                              xs::core::MainEventLoop&,
+                                              std::string* error_message) -> xs::node::ServerNodePtr {
         if (error_message != nullptr)
         {
-            *error_message = "runner failed";
+            *error_message = "factory returned null";
         }
-        return xs::node::NodeRuntimeErrorCode::RoleRunnerFailed;
+        return nullptr;
     };
-    role_runners.gate = role_runners.gm;
-    role_runners.game = role_runners.gm;
 
     std::string error_message;
     const xs::node::NodeRuntimeErrorCode result =
-        xs::node::RunNodeProcess(context, role_runners, xs::node::NodeRuntimeRunOptions{}, &error_message);
+        xs::node::RunNodeProcess(context, std::move(factory), xs::node::NodeRuntimeRunOptions{}, &error_message);
 
-    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::RoleRunnerFailed);
-    XS_CHECK_MSG(error_message == "runner failed", error_message.c_str());
+    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::NodeCreateFailed);
+    XS_CHECK_MSG(error_message == "factory returned null", error_message.c_str());
+
+    CleanupTestDirectory(base_path);
+}
+
+void TestRunNodeProcessPropagatesNodeInitFailure()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-init-failure");
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    xs::node::NodeRuntimeContext context;
+    if (!LoadRuntimeContext(config_path, "gm", &context))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    bool init_called = false;
+    bool run_called = false;
+    bool uninit_called = false;
+
+    xs::node::ServerNodeFactory factory = [&](const xs::node::NodeRuntimeContext& runtime_context,
+                                              xs::core::Logger& logger,
+                                              xs::core::MainEventLoop& event_loop,
+                                              std::string* error_message) {
+        if (error_message != nullptr)
+        {
+            error_message->clear();
+        }
+
+        xs::node::ServerNodeEnvironment environment{
+            .context = runtime_context,
+            .logger = logger,
+            .event_loop = event_loop,
+        };
+        TestServerNode::Options options;
+        options.init_result = xs::node::NodeRuntimeErrorCode::InvalidArgument;
+        options.init_error = "init failed";
+        return std::make_unique<TestServerNode>(environment, std::move(options), &init_called, &run_called, &uninit_called);
+    };
+
+    std::string error_message;
+    const xs::node::NodeRuntimeErrorCode result =
+        xs::node::RunNodeProcess(context, std::move(factory), xs::node::NodeRuntimeRunOptions{}, &error_message);
+
+    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::InvalidArgument);
+    XS_CHECK_MSG(error_message == "init failed", error_message.c_str());
+    XS_CHECK(init_called);
+    XS_CHECK(!run_called);
+    XS_CHECK(uninit_called);
+
+    CleanupTestDirectory(base_path);
+}
+
+void TestRunNodeProcessPropagatesNodeRunFailure()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-run-failure");
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    xs::node::NodeRuntimeContext context;
+    if (!LoadRuntimeContext(config_path, "gm", &context))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    bool init_called = false;
+    bool run_called = false;
+    bool uninit_called = false;
+
+    xs::node::ServerNodeFactory factory = [&](const xs::node::NodeRuntimeContext& runtime_context,
+                                              xs::core::Logger& logger,
+                                              xs::core::MainEventLoop& event_loop,
+                                              std::string* error_message) {
+        if (error_message != nullptr)
+        {
+            error_message->clear();
+        }
+
+        xs::node::ServerNodeEnvironment environment{
+            .context = runtime_context,
+            .logger = logger,
+            .event_loop = event_loop,
+        };
+        TestServerNode::Options options;
+        options.run_result = xs::node::NodeRuntimeErrorCode::NodeRunFailed;
+        options.run_error = "run failed";
+        return std::make_unique<TestServerNode>(environment, std::move(options), &init_called, &run_called, &uninit_called);
+    };
+
+    std::string error_message;
+    const xs::node::NodeRuntimeErrorCode result =
+        xs::node::RunNodeProcess(context, std::move(factory), xs::node::NodeRuntimeRunOptions{}, &error_message);
+
+    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::NodeRunFailed);
+    XS_CHECK_MSG(error_message == "run failed", error_message.c_str());
+    XS_CHECK(init_called);
+    XS_CHECK(run_called);
+    XS_CHECK(uninit_called);
 
     CleanupTestDirectory(base_path);
 }
@@ -582,36 +702,37 @@ void TestRunNodeProcessPropagatesEventLoopFailure()
     }
 
     xs::node::NodeRuntimeContext context;
-    if (!LoadRuntimeContext(config_path, "gm", &context))
+    if (!LoadRuntimeContext(config_path, "gate0", &context))
     {
         CleanupTestDirectory(base_path);
         return;
     }
 
-    xs::node::NodeRoleRunners role_runners;
-    role_runners.gm = [](
-                          const xs::node::NodeRuntimeContext&,
-                          xs::core::Logger&,
-                          xs::core::MainEventLoop& event_loop,
-                          xs::node::NodeRoleRuntimeBindings* runtime_bindings,
-                          std::string* error_message) {
-        (void)runtime_bindings;
+    xs::node::ServerNodeFactory factory = [&](const xs::node::NodeRuntimeContext& runtime_context,
+                                              xs::core::Logger& logger,
+                                              xs::core::MainEventLoop& event_loop,
+                                              std::string* error_message) {
         if (error_message != nullptr)
         {
             error_message->clear();
         }
-        event_loop.RequestStop();
-        return xs::node::NodeRuntimeErrorCode::None;
+
+        xs::node::ServerNodeEnvironment environment{
+            .context = runtime_context,
+            .logger = logger,
+            .event_loop = event_loop,
+        };
+        TestServerNode::Options options;
+        options.request_stop_in_run = true;
+        return std::make_unique<TestServerNode>(environment, std::move(options), nullptr, nullptr, nullptr);
     };
-    role_runners.gate = role_runners.gm;
-    role_runners.game = role_runners.gm;
 
     xs::node::NodeRuntimeRunOptions options;
     options.event_loop_options = xs::core::MainEventLoopOptions{};
     options.event_loop_options->thread_name.clear();
 
     std::string error_message;
-    const xs::node::NodeRuntimeErrorCode result = xs::node::RunNodeProcess(context, role_runners, options, &error_message);
+    const xs::node::NodeRuntimeErrorCode result = xs::node::RunNodeProcess(context, std::move(factory), options, &error_message);
 
     XS_CHECK(result == xs::node::NodeRuntimeErrorCode::EventLoopFailed);
     XS_CHECK_MSG(error_message.find("thread name") != std::string::npos, error_message.c_str());
@@ -619,9 +740,9 @@ void TestRunNodeProcessPropagatesEventLoopFailure()
     CleanupTestDirectory(base_path);
 }
 
-void TestRunNodeProcessUsesDefaultRunners()
+void TestRunNodeProcessUsesDefaultNodes()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-default-runners");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-runtime-default-nodes");
     std::filesystem::path config_path;
     if (!WriteRuntimeConfig(base_path, &config_path))
     {
@@ -655,14 +776,16 @@ int main()
     TestLoadNodeRuntimeContextDerivesGm();
     TestLoadNodeRuntimeContextDerivesGate();
     TestLoadNodeRuntimeContextDerivesGame();
-    TestRunNodeProcessDispatchesGm();
-    TestRunNodeProcessDispatchesGate();
-    TestRunNodeProcessDispatchesGame();
-    TestRunNodeProcessInvokesRoleStopHandler();
-    TestRunNodeProcessRejectsMissingRoleRunner();
-    TestRunNodeProcessPropagatesRoleRunnerFailure();
+    TestCreateServerNodeDispatchesGm();
+    TestCreateServerNodeDispatchesGate();
+    TestCreateServerNodeDispatchesGame();
+    TestRunNodeProcessInvokesServerNodeLifecycle();
+    TestRunNodeProcessRejectsMissingFactory();
+    TestRunNodeProcessRejectsNullServerNode();
+    TestRunNodeProcessPropagatesNodeInitFailure();
+    TestRunNodeProcessPropagatesNodeRunFailure();
     TestRunNodeProcessPropagatesEventLoopFailure();
-    TestRunNodeProcessUsesDefaultRunners();
+    TestRunNodeProcessUsesDefaultNodes();
 
     if (g_failures != 0)
     {

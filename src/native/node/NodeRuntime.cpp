@@ -1,8 +1,9 @@
 #include "NodeRuntime.h"
 
-#include "NodeGameRunner.h"
-#include "NodeGateRunner.h"
-#include "NodeGmRunner.h"
+#include "GameNode.h"
+#include "GateNode.h"
+#include "GmNode.h"
+#include "ServerNode.h"
 
 #include <exception>
 #include <memory>
@@ -90,68 +91,6 @@ xs::core::MainEventLoopOptions ResolveEventLoopOptions(
     return resolved_options;
 }
 
-NodeRuntimeErrorCode SelectRoleRunner(
-    const NodeRuntimeContext& context,
-    const NodeRoleRunners& role_runners,
-    const NodeRoleRunner** output,
-    std::string* error_message)
-{
-    if (output == nullptr)
-    {
-        return SetError(
-            NodeRuntimeErrorCode::InvalidArgument,
-            "Node role runner output must not be null.",
-            error_message);
-    }
-
-    switch (context.process_type)
-    {
-    case xs::core::ProcessType::Gm:
-        if (!role_runners.gm)
-        {
-            return SetError(
-                NodeRuntimeErrorCode::MissingRoleRunner,
-                "GM role runner is not configured.",
-                error_message);
-        }
-
-        *output = &role_runners.gm;
-        ClearError(error_message);
-        return NodeRuntimeErrorCode::None;
-
-    case xs::core::ProcessType::Gate:
-        if (!role_runners.gate)
-        {
-            return SetError(
-                NodeRuntimeErrorCode::MissingRoleRunner,
-                "Gate role runner is not configured.",
-                error_message);
-        }
-
-        *output = &role_runners.gate;
-        ClearError(error_message);
-        return NodeRuntimeErrorCode::None;
-
-    case xs::core::ProcessType::Game:
-        if (!role_runners.game)
-        {
-            return SetError(
-                NodeRuntimeErrorCode::MissingRoleRunner,
-                "Game role runner is not configured.",
-                error_message);
-        }
-
-        *output = &role_runners.game;
-        ClearError(error_message);
-        return NodeRuntimeErrorCode::None;
-    }
-
-    return SetError(
-        NodeRuntimeErrorCode::UnsupportedProcessType,
-        "Node runtime does not support the selected process type.",
-        error_message);
-}
-
 NodeRuntimeErrorCode MapConfigError(xs::core::ConfigErrorCode code) noexcept
 {
     if (code == xs::core::ConfigErrorCode::InvalidSelector)
@@ -160,6 +99,24 @@ NodeRuntimeErrorCode MapConfigError(xs::core::ConfigErrorCode code) noexcept
     }
 
     return NodeRuntimeErrorCode::ConfigLoadFailed;
+}
+
+ServerNodeFactory DefaultServerNodeFactory()
+{
+    return [](
+               const NodeRuntimeContext& context,
+               xs::core::Logger& logger,
+               xs::core::MainEventLoop& event_loop,
+               std::string* error_message) -> ServerNodePtr {
+        ServerNodePtr node;
+        const NodeRuntimeErrorCode result = CreateServerNode(context, logger, event_loop, &node, error_message);
+        if (result != NodeRuntimeErrorCode::None)
+        {
+            return nullptr;
+        }
+
+        return node;
+    };
 }
 
 } // namespace
@@ -187,12 +144,14 @@ std::string_view NodeRuntimeErrorMessage(NodeRuntimeErrorCode code) noexcept
         return "Node selector is invalid.";
     case NodeRuntimeErrorCode::ConfigLoadFailed:
         return "Failed to load node configuration.";
-    case NodeRuntimeErrorCode::MissingRoleRunner:
-        return "No role runner is registered for the selected process type.";
     case NodeRuntimeErrorCode::LoggerInitFailed:
         return "Failed to initialize node logger.";
-    case NodeRuntimeErrorCode::RoleRunnerFailed:
-        return "Node role runner failed.";
+    case NodeRuntimeErrorCode::NodeCreateFailed:
+        return "Failed to create server node.";
+    case NodeRuntimeErrorCode::NodeInitFailed:
+        return "Server node initialization failed.";
+    case NodeRuntimeErrorCode::NodeRunFailed:
+        return "Server node run failed.";
     case NodeRuntimeErrorCode::EventLoopFailed:
         return "Node event loop failed.";
     case NodeRuntimeErrorCode::UnsupportedProcessType:
@@ -200,15 +159,6 @@ std::string_view NodeRuntimeErrorMessage(NodeRuntimeErrorCode code) noexcept
     }
 
     return "Unknown node runtime error.";
-}
-
-NodeRoleRunners DefaultNodeRoleRunners()
-{
-    NodeRoleRunners role_runners;
-    role_runners.gm = RunGmNode;
-    role_runners.gate = RunGateNode;
-    role_runners.game = RunGameNode;
-    return role_runners;
 }
 
 NodeRuntimeErrorCode ParseNodeCommandLine(
@@ -307,17 +257,63 @@ NodeRuntimeErrorCode LoadNodeRuntimeContext(
     return NodeRuntimeErrorCode::None;
 }
 
+NodeRuntimeErrorCode CreateServerNode(
+    const NodeRuntimeContext& context,
+    xs::core::Logger& logger,
+    xs::core::MainEventLoop& event_loop,
+    ServerNodePtr* output,
+    std::string* error_message)
+{
+    if (output == nullptr)
+    {
+        return SetError(
+            NodeRuntimeErrorCode::InvalidArgument,
+            "Server node output must not be null.",
+            error_message);
+    }
+
+    ServerNodeEnvironment environment{
+        .context = context,
+        .logger = logger,
+        .event_loop = event_loop,
+    };
+
+    switch (context.process_type)
+    {
+    case xs::core::ProcessType::Gm:
+        *output = std::make_unique<GmNode>(environment);
+        ClearError(error_message);
+        return NodeRuntimeErrorCode::None;
+
+    case xs::core::ProcessType::Gate:
+        *output = std::make_unique<GateNode>(environment);
+        ClearError(error_message);
+        return NodeRuntimeErrorCode::None;
+
+    case xs::core::ProcessType::Game:
+        *output = std::make_unique<GameNode>(environment);
+        ClearError(error_message);
+        return NodeRuntimeErrorCode::None;
+    }
+
+    return SetError(
+        NodeRuntimeErrorCode::UnsupportedProcessType,
+        "Node runtime does not support the selected process type.",
+        error_message);
+}
+
 NodeRuntimeErrorCode RunNodeProcess(
     const NodeRuntimeContext& context,
-    const NodeRoleRunners& role_runners,
+    ServerNodeFactory factory,
     NodeRuntimeRunOptions options,
     std::string* error_message)
 {
-    const NodeRoleRunner* role_runner = nullptr;
-    const NodeRuntimeErrorCode select_result = SelectRoleRunner(context, role_runners, &role_runner, error_message);
-    if (select_result != NodeRuntimeErrorCode::None)
+    if (!factory)
     {
-        return select_result;
+        return SetError(
+            NodeRuntimeErrorCode::NodeCreateFailed,
+            "Server node factory is not configured.",
+            error_message);
     }
 
     std::unique_ptr<xs::core::Logger> logger;
@@ -342,39 +338,111 @@ NodeRuntimeErrorCode RunNodeProcess(
 
     xs::core::MainEventLoop event_loop(ResolveEventLoopOptions(context, options));
 
-    NodeRuntimeErrorCode runner_result = NodeRuntimeErrorCode::None;
-    std::string runner_error;
-    NodeRoleRuntimeBindings runtime_bindings;
+    ServerNodePtr server_node;
+    NodeRuntimeErrorCode node_result = NodeRuntimeErrorCode::None;
+    std::string node_error;
     xs::core::MainEventLoopHooks hooks;
-    hooks.on_start = [&context, &logger, role_runner, &runtime_bindings, &runner_result, &runner_error](
+    hooks.on_start = [&context, &logger, &factory, &server_node, &node_result, &node_error](
                          xs::core::MainEventLoop& started_event_loop,
                          std::string* loop_error) {
         try
         {
-            runtime_bindings.on_stop = {};
-            runner_result = (*role_runner)(context, *logger, started_event_loop, &runtime_bindings, &runner_error);
+            server_node = factory(context, *logger, started_event_loop, &node_error);
         }
         catch (const std::exception& exception)
         {
-            runner_result = NodeRuntimeErrorCode::RoleRunnerFailed;
-            runner_error = std::string("Role runner threw: ") + exception.what();
+            node_result = NodeRuntimeErrorCode::NodeCreateFailed;
+            node_error = std::string("Server node factory threw: ") + exception.what();
         }
         catch (...)
         {
-            runner_result = NodeRuntimeErrorCode::RoleRunnerFailed;
-            runner_error = "Role runner threw an unknown exception.";
+            node_result = NodeRuntimeErrorCode::NodeCreateFailed;
+            node_error = "Server node factory threw an unknown exception.";
         }
 
-        if (runner_result != NodeRuntimeErrorCode::None)
+        if (node_result != NodeRuntimeErrorCode::None)
         {
-            if (runner_error.empty())
+            if (loop_error != nullptr)
             {
-                runner_error = std::string(NodeRuntimeErrorMessage(runner_result));
+                *loop_error = node_error;
+            }
+
+            return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
+        }
+
+        if (server_node == nullptr)
+        {
+            node_result = NodeRuntimeErrorCode::NodeCreateFailed;
+            if (node_error.empty())
+            {
+                node_error = "Server node factory returned null.";
             }
 
             if (loop_error != nullptr)
             {
-                *loop_error = runner_error;
+                *loop_error = node_error;
+            }
+
+            return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
+        }
+
+        try
+        {
+            node_error.clear();
+            node_result = server_node->Init(&node_error);
+        }
+        catch (const std::exception& exception)
+        {
+            node_result = NodeRuntimeErrorCode::NodeInitFailed;
+            node_error = std::string("Server node Init() threw: ") + exception.what();
+        }
+        catch (...)
+        {
+            node_result = NodeRuntimeErrorCode::NodeInitFailed;
+            node_error = "Server node Init() threw an unknown exception.";
+        }
+
+        if (node_result != NodeRuntimeErrorCode::None)
+        {
+            if (node_error.empty())
+            {
+                node_error = std::string(NodeRuntimeErrorMessage(node_result));
+            }
+
+            if (loop_error != nullptr)
+            {
+                *loop_error = node_error;
+            }
+
+            return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
+        }
+
+        try
+        {
+            node_error.clear();
+            node_result = server_node->Run(&node_error);
+        }
+        catch (const std::exception& exception)
+        {
+            node_result = NodeRuntimeErrorCode::NodeRunFailed;
+            node_error = std::string("Server node Run() threw: ") + exception.what();
+        }
+        catch (...)
+        {
+            node_result = NodeRuntimeErrorCode::NodeRunFailed;
+            node_error = "Server node Run() threw an unknown exception.";
+        }
+
+        if (node_result != NodeRuntimeErrorCode::None)
+        {
+            if (node_error.empty())
+            {
+                node_error = std::string(NodeRuntimeErrorMessage(node_result));
+            }
+
+            if (loop_error != nullptr)
+            {
+                *loop_error = node_error;
             }
 
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
@@ -382,18 +450,18 @@ NodeRuntimeErrorCode RunNodeProcess(
 
         return xs::core::MainEventLoopErrorCode::None;
     };
-    hooks.on_stop = [&runtime_bindings](xs::core::MainEventLoop& stopped_event_loop) {
-        if (runtime_bindings.on_stop)
+    hooks.on_stop = [&server_node](xs::core::MainEventLoop&) {
+        if (server_node != nullptr)
         {
-            runtime_bindings.on_stop(stopped_event_loop);
+            server_node->Uninit();
         }
     };
 
     std::string loop_error;
     const xs::core::MainEventLoopErrorCode loop_result = event_loop.Run(std::move(hooks), &loop_error);
-    if (runner_result != NodeRuntimeErrorCode::None)
+    if (node_result != NodeRuntimeErrorCode::None)
     {
-        return SetError(NodeRuntimeErrorCode::RoleRunnerFailed, std::move(runner_error), error_message);
+        return SetError(node_result, std::move(node_error), error_message);
     }
 
     if (loop_result != xs::core::MainEventLoopErrorCode::None)
@@ -415,12 +483,12 @@ NodeRuntimeErrorCode RunNodeProcess(
     NodeRuntimeRunOptions options,
     std::string* error_message)
 {
-    return RunNodeProcess(context, DefaultNodeRoleRunners(), std::move(options), error_message);
+    return RunNodeProcess(context, DefaultServerNodeFactory(), std::move(options), error_message);
 }
 
 NodeRuntimeErrorCode RunNodeProcess(
     const NodeCommandLineArgs& args,
-    const NodeRoleRunners& role_runners,
+    ServerNodeFactory factory,
     NodeRuntimeRunOptions options,
     std::string* error_message)
 {
@@ -431,7 +499,7 @@ NodeRuntimeErrorCode RunNodeProcess(
         return load_result;
     }
 
-    return RunNodeProcess(context, role_runners, std::move(options), error_message);
+    return RunNodeProcess(context, std::move(factory), std::move(options), error_message);
 }
 
 NodeRuntimeErrorCode RunNodeProcess(
@@ -439,7 +507,7 @@ NodeRuntimeErrorCode RunNodeProcess(
     NodeRuntimeRunOptions options,
     std::string* error_message)
 {
-    return RunNodeProcess(args, DefaultNodeRoleRunners(), std::move(options), error_message);
+    return RunNodeProcess(args, DefaultServerNodeFactory(), std::move(options), error_message);
 }
 
 } // namespace xs::node

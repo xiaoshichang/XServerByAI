@@ -1,7 +1,9 @@
+#include "GmNode.h"
+#include "InnerNetwork.h"
 #include "Json.h"
-#include "NodeGmRunner.h"
 #include "NodeRuntime.h"
 #include "ZmqActiveConnector.h"
+#include "ZmqContext.h"
 
 #include <algorithm>
 #include <chrono>
@@ -11,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -218,9 +221,9 @@ xs::core::LoggerOptions MakeLoggerOptions(
     return options;
 }
 
-void TestRunGmNodeRejectsMissingControlEndpoint()
+void TestGmNodeRejectsMissingControlEndpoint()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-runner-missing-control");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-node-missing-control");
     std::filesystem::path config_path;
     if (!WriteRuntimeConfig(base_path, &config_path))
     {
@@ -238,23 +241,27 @@ void TestRunGmNodeRejectsMissingControlEndpoint()
     context.node_config.control_listen_endpoint.reset();
 
     xs::core::Logger logger(MakeLoggerOptions(base_path / "logs" / "root", xs::core::ProcessType::Gm, "GM"));
-    xs::core::MainEventLoop event_loop({.thread_name = "gm-runner-no-control"});
-    xs::node::NodeRoleRuntimeBindings runtime_bindings;
+    xs::core::MainEventLoop event_loop({.thread_name = "gm-node-no-control"});
+    xs::node::ServerNodeEnvironment environment{
+        .context = context,
+        .logger = logger,
+        .event_loop = event_loop,
+    };
+    xs::node::GmNode node(environment);
 
     std::string error_message;
-    const xs::node::NodeRuntimeErrorCode result =
-        xs::node::RunGmNode(context, logger, event_loop, &runtime_bindings, &error_message);
+    const xs::node::NodeRuntimeErrorCode result = node.Init(&error_message);
 
     XS_CHECK(result == xs::node::NodeRuntimeErrorCode::InvalidArgument);
     XS_CHECK_MSG(error_message.find("control.listenEndpoint") != std::string::npos, error_message.c_str());
-    XS_CHECK(!runtime_bindings.on_stop);
 
+    node.Uninit();
     CleanupTestDirectory(base_path);
 }
 
-void TestRunGmNodeRejectsNonGmProcessType()
+void TestGmNodeRejectsNonGmProcessType()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-runner-non-gm");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-node-non-gm");
     std::filesystem::path config_path;
     if (!WriteRuntimeConfig(base_path, &config_path))
     {
@@ -270,29 +277,37 @@ void TestRunGmNodeRejectsNonGmProcessType()
     }
 
     xs::core::Logger logger(MakeLoggerOptions(base_path / "logs" / "gate", xs::core::ProcessType::Gate, "Gate0"));
-    xs::core::MainEventLoop event_loop({.thread_name = "gm-runner-wrong-type"});
-    xs::node::NodeRoleRuntimeBindings runtime_bindings;
+    xs::core::MainEventLoop event_loop({.thread_name = "gm-node-wrong-type"});
+    xs::node::ServerNodeEnvironment environment{
+        .context = context,
+        .logger = logger,
+        .event_loop = event_loop,
+    };
+    xs::node::GmNode node(environment);
 
     std::string error_message;
-    const xs::node::NodeRuntimeErrorCode result =
-        xs::node::RunGmNode(context, logger, event_loop, &runtime_bindings, &error_message);
+    const xs::node::NodeRuntimeErrorCode result = node.Init(&error_message);
 
     XS_CHECK(result == xs::node::NodeRuntimeErrorCode::InvalidArgument);
     XS_CHECK_MSG(error_message.find("process_type = GM") != std::string::npos, error_message.c_str());
-    XS_CHECK(!runtime_bindings.on_stop);
 
+    node.Uninit();
     CleanupTestDirectory(base_path);
 }
 
-void TestGmControlListenerWildcardBindAndReceivesPayload()
+void TestInnerNetworkWildcardBindAndReceivesPayload()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-control-listener");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-inner-network-listener");
     const std::filesystem::path log_dir = base_path / "logs" / "gm";
 
     xs::core::Logger logger(MakeLoggerOptions(log_dir, xs::core::ProcessType::Gm, "GM"));
-    xs::core::MainEventLoop event_loop({.thread_name = "gm-control-listener"});
+    xs::core::MainEventLoop event_loop({.thread_name = "inner-network-listener"});
 
-    auto listener = std::make_shared<xs::node::GmControlListener>(event_loop, logger, "tcp://127.0.0.1:*");
+    xs::node::InnerNetworkOptions options;
+    options.mode = xs::node::InnerNetworkMode::PassiveListener;
+    options.local_endpoint = "tcp://127.0.0.1:*";
+
+    auto inner_network = std::make_shared<xs::node::InnerNetwork>(event_loop, logger, std::move(options));
     auto payload = std::make_shared<std::vector<std::byte>>(BytesFromString("gm-test-payload"));
 
     std::shared_ptr<xs::ipc::ZmqContext> connector_context;
@@ -308,21 +323,27 @@ void TestGmControlListenerWildcardBindAndReceivesPayload()
 
     xs::core::MainEventLoopHooks hooks;
     hooks.on_start = [&](xs::core::MainEventLoop& running_loop, std::string* error_message) {
-        const xs::node::NodeRuntimeErrorCode listener_result = listener->Start(error_message);
-        if (listener_result != xs::node::NodeRuntimeErrorCode::None)
+        const xs::node::NodeRuntimeErrorCode init_result = inner_network->Init(error_message);
+        if (init_result != xs::node::NodeRuntimeErrorCode::None)
         {
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
 
-        bound_endpoint = std::string(listener->bound_endpoint());
+        const xs::node::NodeRuntimeErrorCode run_result = inner_network->Run(error_message);
+        if (run_result != xs::node::NodeRuntimeErrorCode::None)
+        {
+            return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
+        }
+
+        bound_endpoint = std::string(inner_network->bound_endpoint());
 
         connector_context = std::make_shared<xs::ipc::ZmqContext>();
         if (!connector_context->IsValid())
         {
             if (error_message != nullptr)
             {
-                *error_message =
-                    "Failed to initialize GM runner test ZeroMQ context: " + std::string(connector_context->initialization_error());
+                *error_message = "Failed to initialize test ZeroMQ context: " +
+                                 std::string(connector_context->initialization_error());
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
@@ -331,8 +352,11 @@ void TestGmControlListenerWildcardBindAndReceivesPayload()
         connector_options.remote_endpoint = bound_endpoint;
         connector_options.routing_id = "gm-test-client";
 
-        connector = std::make_shared<xs::ipc::ZmqActiveConnector>(running_loop.context(), *connector_context, std::move(connector_options));
-        connector->SetStateHandler([&](xs::ipc::ZmqConnectionState state) {
+        connector = std::make_shared<xs::ipc::ZmqActiveConnector>(
+            running_loop.context(),
+            *connector_context,
+            std::move(connector_options));
+        connector->SetStateHandler([&, payload](xs::ipc::ZmqConnectionState state) {
             connector_states.push_back(state);
             if (state != xs::ipc::ZmqConnectionState::Connected || send_scheduled)
             {
@@ -340,12 +364,13 @@ void TestGmControlListenerWildcardBindAndReceivesPayload()
             }
 
             send_scheduled = true;
-            const xs::core::TimerCreateResult send_timer = running_loop.timers().CreateOnce(std::chrono::milliseconds(10), [&, payload] {
-                send_attempted = true;
-                std::string local_error;
-                send_succeeded = connector->Send(*payload, &local_error) == xs::ipc::ZmqSocketErrorCode::None;
-                send_error = std::move(local_error);
-            });
+            const xs::core::TimerCreateResult send_timer =
+                running_loop.timers().CreateOnce(std::chrono::milliseconds(10), [&, payload]() {
+                    send_attempted = true;
+                    std::string local_error;
+                    send_succeeded = connector->Send(*payload, &local_error) == xs::ipc::ZmqSocketErrorCode::None;
+                    send_error = std::move(local_error);
+                });
             XS_CHECK(xs::core::IsTimerID(send_timer));
         });
 
@@ -359,34 +384,36 @@ void TestGmControlListenerWildcardBindAndReceivesPayload()
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
 
-        const xs::core::TimerCreateResult poll_timer = running_loop.timers().CreateRepeating(std::chrono::milliseconds(5), [&]() {
-            const xs::ipc::ZmqListenerMetricsSnapshot snapshot = listener->metrics();
-            if (snapshot.received_message_count == 0U)
-            {
-                return;
-            }
+        const xs::core::TimerCreateResult poll_timer =
+            running_loop.timers().CreateRepeating(std::chrono::milliseconds(5), [&]() {
+                const xs::ipc::ZmqListenerMetricsSnapshot snapshot = inner_network->metrics();
+                if (snapshot.received_message_count == 0U)
+                {
+                    return;
+                }
 
-            received_message = true;
-            received_snapshot = snapshot;
-            running_loop.RequestStop();
-        });
+                received_message = true;
+                received_snapshot = snapshot;
+                running_loop.RequestStop();
+            });
         if (!xs::core::IsTimerID(poll_timer))
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to create GM runner test poll timer.";
+                *error_message = "Failed to create inner network poll timer.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
 
-        const xs::core::TimerCreateResult timeout_timer = running_loop.timers().CreateOnce(std::chrono::milliseconds(1500), [&]() {
-            running_loop.RequestStop();
-        });
+        const xs::core::TimerCreateResult timeout_timer =
+            running_loop.timers().CreateOnce(std::chrono::milliseconds(1500), [&]() {
+                running_loop.RequestStop();
+            });
         if (!xs::core::IsTimerID(timeout_timer))
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to create GM runner test timeout timer.";
+                *error_message = "Failed to create inner network timeout timer.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
@@ -399,7 +426,7 @@ void TestGmControlListenerWildcardBindAndReceivesPayload()
             connector->Stop();
         }
 
-        listener->Stop();
+        inner_network->Uninit();
     };
 
     std::string error_message;
@@ -416,15 +443,15 @@ void TestGmControlListenerWildcardBindAndReceivesPayload()
     XS_CHECK(received_message);
     XS_CHECK(received_snapshot.received_message_count >= 1U);
     XS_CHECK(received_snapshot.active_connection_count >= 1U);
-    XS_CHECK(!listener->IsRunning());
-    XS_CHECK(listener->listener_state() == xs::ipc::ZmqListenerState::Stopped);
+    XS_CHECK(!inner_network->IsRunning());
+    XS_CHECK(inner_network->listener_state() == xs::ipc::ZmqListenerState::Stopped);
     XS_CHECK(std::find(connector_states.begin(), connector_states.end(), xs::ipc::ZmqConnectionState::Connected) !=
              connector_states.end());
     XS_CHECK(DirectoryContainsRegularFile(log_dir));
 
     const std::string log_text = ReadDirectoryText(log_dir);
-    XS_CHECK(log_text.find("GM control listener started.") != std::string::npos);
-    XS_CHECK(log_text.find("GM control listener received control-plane payload.") != std::string::npos);
+    XS_CHECK(log_text.find("Inner network listener started.") != std::string::npos);
+    XS_CHECK(log_text.find("Inner network listener received payload.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }
@@ -433,13 +460,13 @@ void TestGmControlListenerWildcardBindAndReceivesPayload()
 
 int main()
 {
-    TestRunGmNodeRejectsMissingControlEndpoint();
-    TestRunGmNodeRejectsNonGmProcessType();
-    TestGmControlListenerWildcardBindAndReceivesPayload();
+    TestGmNodeRejectsMissingControlEndpoint();
+    TestGmNodeRejectsNonGmProcessType();
+    TestInnerNetworkWildcardBindAndReceivesPayload();
 
     if (g_failures != 0)
     {
-        std::cerr << g_failures << " node gm runner test(s) failed.\n";
+        std::cerr << g_failures << " node gm node test(s) failed.\n";
         return EXIT_FAILURE;
     }
 

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Config.h"
 #include "Logging.h"
@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -39,33 +40,21 @@ enum class NodeRuntimeErrorCode : std::uint8_t
     EmptySelector,
     InvalidSelector,
     ConfigLoadFailed,
-    MissingRoleRunner,
     LoggerInitFailed,
-    RoleRunnerFailed,
+    NodeCreateFailed,
+    NodeInitFailed,
+    NodeRunFailed,
     EventLoopFailed,
     UnsupportedProcessType,
 };
 
-using NodeRuntimeStopCallback = std::function<void(xs::core::MainEventLoop& event_loop)>;
-
-struct NodeRoleRuntimeBindings
-{
-    NodeRuntimeStopCallback on_stop{};
-};
-
-using NodeRoleRunner = std::function<NodeRuntimeErrorCode(
+class ServerNode;
+using ServerNodePtr = std::unique_ptr<ServerNode>;
+using ServerNodeFactory = std::function<ServerNodePtr(
     const NodeRuntimeContext& context,
     xs::core::Logger& logger,
     xs::core::MainEventLoop& event_loop,
-    NodeRoleRuntimeBindings* runtime_bindings,
     std::string* error_message)>;
-
-struct NodeRoleRunners
-{
-    NodeRoleRunner gm{};
-    NodeRoleRunner gate{};
-    NodeRoleRunner game{};
-};
 
 struct NodeRuntimeRunOptions
 {
@@ -74,7 +63,6 @@ struct NodeRuntimeRunOptions
 
 [[nodiscard]] std::string_view NodeUsage() noexcept;
 [[nodiscard]] std::string_view NodeRuntimeErrorMessage(NodeRuntimeErrorCode code) noexcept;
-[[nodiscard]] NodeRoleRunners DefaultNodeRoleRunners();
 [[nodiscard]] NodeRuntimeErrorCode ParseNodeCommandLine(
     int argc,
     char* argv[],
@@ -84,9 +72,15 @@ struct NodeRuntimeRunOptions
     const NodeCommandLineArgs& args,
     NodeRuntimeContext* output,
     std::string* error_message = nullptr);
+[[nodiscard]] NodeRuntimeErrorCode CreateServerNode(
+    const NodeRuntimeContext& context,
+    xs::core::Logger& logger,
+    xs::core::MainEventLoop& event_loop,
+    ServerNodePtr* output,
+    std::string* error_message = nullptr);
 [[nodiscard]] NodeRuntimeErrorCode RunNodeProcess(
     const NodeRuntimeContext& context,
-    const NodeRoleRunners& role_runners,
+    ServerNodeFactory factory,
     NodeRuntimeRunOptions options = {},
     std::string* error_message = nullptr);
 [[nodiscard]] NodeRuntimeErrorCode RunNodeProcess(
@@ -95,7 +89,7 @@ struct NodeRuntimeRunOptions
     std::string* error_message = nullptr);
 [[nodiscard]] NodeRuntimeErrorCode RunNodeProcess(
     const NodeCommandLineArgs& args,
-    const NodeRoleRunners& role_runners,
+    ServerNodeFactory factory,
     NodeRuntimeRunOptions options = {},
     std::string* error_message = nullptr);
 [[nodiscard]] NodeRuntimeErrorCode RunNodeProcess(

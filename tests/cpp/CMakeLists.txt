@@ -94,10 +94,10 @@ target_link_libraries(xs_node_runtime_tests PRIVATE node_runtime)
 
 add_test(NAME xs_node_runtime_tests COMMAND xs_node_runtime_tests)
 
-add_executable(xs_node_gm_runner_tests
-    node_gm_runner_tests.cpp
+add_executable(xs_node_gm_node_tests
+    node_gm_node_tests.cpp
 )
 
-target_link_libraries(xs_node_gm_runner_tests PRIVATE node_runtime ipc)
+target_link_libraries(xs_node_gm_node_tests PRIVATE node_runtime ipc)
 
-add_test(NAME xs_node_gm_runner_tests COMMAND xs_node_gm_runner_tests)
+add_test(NAME xs_node_gm_node_tests COMMAND xs_node_gm_node_tests)

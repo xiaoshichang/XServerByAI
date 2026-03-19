@@ -1,12 +1,18 @@
 add_library(node_runtime STATIC
-    NodeGameRunner.cpp
-    NodeGameRunner.h
-    NodeGateRunner.cpp
-    NodeGateRunner.h
-    NodeGmRunner.cpp
-    NodeGmRunner.h
+    ClientNetwork.cpp
+    ClientNetwork.h
+    GameNode.cpp
+    GameNode.h
+    GateNode.cpp
+    GateNode.h
+    GmNode.cpp
+    GmNode.h
+    InnerNetwork.cpp
+    InnerNetwork.h
     NodeRuntime.cpp
     NodeRuntime.h
+    ServerNode.cpp
+    ServerNode.h
 )
 
 target_include_directories(node_runtime PUBLIC ${CMAKE_CURRENT_LIST_DIR})
