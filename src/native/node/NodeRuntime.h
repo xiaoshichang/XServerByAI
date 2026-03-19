@@ -46,10 +46,18 @@ enum class NodeRuntimeErrorCode : std::uint8_t
     UnsupportedProcessType,
 };
 
+using NodeRuntimeStopCallback = std::function<void(xs::core::MainEventLoop& event_loop)>;
+
+struct NodeRoleRuntimeBindings
+{
+    NodeRuntimeStopCallback on_stop{};
+};
+
 using NodeRoleRunner = std::function<NodeRuntimeErrorCode(
     const NodeRuntimeContext& context,
     xs::core::Logger& logger,
     xs::core::MainEventLoop& event_loop,
+    NodeRoleRuntimeBindings* runtime_bindings,
     std::string* error_message)>;
 
 struct NodeRoleRunners

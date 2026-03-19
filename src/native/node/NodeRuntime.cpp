@@ -344,13 +344,15 @@ NodeRuntimeErrorCode RunNodeProcess(
 
     NodeRuntimeErrorCode runner_result = NodeRuntimeErrorCode::None;
     std::string runner_error;
+    NodeRoleRuntimeBindings runtime_bindings;
     xs::core::MainEventLoopHooks hooks;
-    hooks.on_start = [&context, &logger, role_runner, &runner_result, &runner_error](
+    hooks.on_start = [&context, &logger, role_runner, &runtime_bindings, &runner_result, &runner_error](
                          xs::core::MainEventLoop& started_event_loop,
                          std::string* loop_error) {
         try
         {
-            runner_result = (*role_runner)(context, *logger, started_event_loop, &runner_error);
+            runtime_bindings.on_stop = {};
+            runner_result = (*role_runner)(context, *logger, started_event_loop, &runtime_bindings, &runner_error);
         }
         catch (const std::exception& exception)
         {
@@ -379,6 +381,12 @@ NodeRuntimeErrorCode RunNodeProcess(
         }
 
         return xs::core::MainEventLoopErrorCode::None;
+    };
+    hooks.on_stop = [&runtime_bindings](xs::core::MainEventLoop& stopped_event_loop) {
+        if (runtime_bindings.on_stop)
+        {
+            runtime_bindings.on_stop(stopped_event_loop);
+        }
     };
 
     std::string loop_error;

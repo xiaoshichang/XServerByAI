@@ -11,6 +11,7 @@ namespace xs::node
     const NodeRuntimeContext& context,
     core::Logger& logger,
     core::MainEventLoop& event_loop,
+    NodeRoleRuntimeBindings* runtime_bindings,
     std::string* error_message);
 
 } // namespace xs::node

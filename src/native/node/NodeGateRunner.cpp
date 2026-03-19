@@ -21,8 +21,10 @@ NodeRuntimeErrorCode RunGateNode(
     const NodeRuntimeContext& context,
     core::Logger& logger,
     core::MainEventLoop& event_loop,
+    NodeRoleRuntimeBindings* runtime_bindings,
     std::string* error_message)
 {
+    (void)runtime_bindings;
     ClearError(error_message);
 
     const std::string message = "Gate placeholder runner started for selector '" + context.selector + "'.";
