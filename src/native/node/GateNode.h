@@ -12,17 +12,18 @@ namespace xs::node
 class GateNode final : public ServerNode
 {
   public:
-    explicit GateNode(ServerNodeEnvironment environment);
+    explicit GateNode(NodeCommandLineArgs args);
     ~GateNode() override;
 
-    [[nodiscard]] NodeRuntimeErrorCode Init(std::string* error_message) override;
-    [[nodiscard]] NodeRuntimeErrorCode Run(std::string* error_message) override;
-    void Uninit() noexcept override;
+  protected:
+    [[nodiscard]] xs::core::ProcessType role_process_type() const noexcept override;
+    [[nodiscard]] NodeErrorCode OnInit() override;
+    [[nodiscard]] NodeErrorCode OnRun() override;
+    [[nodiscard]] NodeErrorCode OnUninit() override;
 
   private:
     std::unique_ptr<InnerNetwork> inner_network_{};
     std::unique_ptr<ClientNetwork> client_network_{};
-    bool initialized_{false};
 };
 
 } // namespace xs::node

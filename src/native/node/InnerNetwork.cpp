@@ -14,29 +14,31 @@ namespace xs::node
 namespace
 {
 
-void ClearError(std::string* error_message)
+void ClearError(std::string& error_message) noexcept
 {
-    if (error_message != nullptr)
-    {
-        error_message->clear();
-    }
+    error_message.clear();
 }
 
-NodeRuntimeErrorCode SetError(
-    NodeRuntimeErrorCode code,
+NodeErrorCode SetError(
+    std::string& error_message,
+    NodeErrorCode code,
     std::string message,
-    std::string* error_message)
+    std::string_view fallback_message = {})
 {
-    if (error_message != nullptr)
+    if (message.empty())
     {
-        if (message.empty())
+        if (!fallback_message.empty())
         {
-            *error_message = std::string(NodeRuntimeErrorMessage(code));
+            error_message = std::string(fallback_message);
         }
         else
         {
-            *error_message = std::move(message);
+            error_message = std::string(NodeErrorMessage(code));
         }
+    }
+    else
+    {
+        error_message = std::move(message);
     }
 
     return code;
@@ -57,29 +59,26 @@ class InnerNetwork::Impl final
     {
     }
 
-    [[nodiscard]] NodeRuntimeErrorCode Init(std::string* error_message)
+    [[nodiscard]] NodeErrorCode Init()
     {
         if (initialized_)
         {
-            return SetError(
-                NodeRuntimeErrorCode::InvalidArgument,
-                "InnerNetwork is already initialized.",
-                error_message);
+            return SetError(last_error_message_, NodeErrorCode::InvalidArgument, "InnerNetwork is already initialized.");
         }
 
         if (options_.mode == InnerNetworkMode::Disabled)
         {
             initialized_ = true;
-            ClearError(error_message);
-            return NodeRuntimeErrorCode::None;
+            ClearError(last_error_message_);
+            return NodeErrorCode::None;
         }
 
         if (options_.local_endpoint.empty())
         {
             return SetError(
-                NodeRuntimeErrorCode::InvalidArgument,
-                "InnerNetwork local_endpoint must not be empty.",
-                error_message);
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork local_endpoint must not be empty.");
         }
 
         context_ = std::make_unique<ipc::ZmqContext>();
@@ -88,9 +87,9 @@ class InnerNetwork::Impl final
             const std::string initialization_error = std::string(context_->initialization_error());
             context_.reset();
             return SetError(
-                NodeRuntimeErrorCode::NodeInitFailed,
-                "Failed to initialize inner network ZeroMQ context: " + initialization_error,
-                error_message);
+                last_error_message_,
+                NodeErrorCode::NodeInitFailed,
+                "Failed to initialize inner network ZeroMQ context: " + initialization_error);
         }
 
         ipc::ZmqPassiveListenerOptions listener_options;
@@ -117,40 +116,40 @@ class InnerNetwork::Impl final
         });
 
         initialized_ = true;
-        ClearError(error_message);
-        return NodeRuntimeErrorCode::None;
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
     }
 
-    [[nodiscard]] NodeRuntimeErrorCode Run(std::string* error_message)
+    [[nodiscard]] NodeErrorCode Run()
     {
         if (!initialized_)
         {
             return SetError(
-                NodeRuntimeErrorCode::InvalidArgument,
-                "InnerNetwork must be initialized before Run().",
-                error_message);
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork must be initialized before Run().");
         }
 
         if (options_.mode == InnerNetworkMode::Disabled)
         {
-            ClearError(error_message);
-            return NodeRuntimeErrorCode::None;
+            ClearError(last_error_message_);
+            return NodeErrorCode::None;
         }
 
         if (listener_ == nullptr)
         {
             return SetError(
-                NodeRuntimeErrorCode::InvalidArgument,
-                "InnerNetwork listener is not configured.",
-                error_message);
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork listener is not configured.");
         }
 
         if (listener_->IsRunning())
         {
             return SetError(
-                NodeRuntimeErrorCode::InvalidArgument,
-                "InnerNetwork listener is already running.",
-                error_message);
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork listener is already running.");
         }
 
         std::string listener_error;
@@ -158,9 +157,9 @@ class InnerNetwork::Impl final
         if (start_result != ipc::ZmqSocketErrorCode::None)
         {
             return SetError(
-                NodeRuntimeErrorCode::NodeRunFailed,
-                "Failed to start inner network listener: " + listener_error,
-                error_message);
+                last_error_message_,
+                NodeErrorCode::NodeRunFailed,
+                "Failed to start inner network listener: " + listener_error);
         }
 
         bound_endpoint_ = std::string(listener_->bound_endpoint());
@@ -170,18 +169,19 @@ class InnerNetwork::Impl final
         };
         LogInfo("Inner network listener started.", context);
 
-        ClearError(error_message);
-        return NodeRuntimeErrorCode::None;
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
     }
 
-    void Uninit() noexcept
+    [[nodiscard]] NodeErrorCode Uninit() noexcept
     {
         if (!initialized_)
         {
             context_.reset();
             listener_.reset();
             bound_endpoint_.clear();
-            return;
+            ClearError(last_error_message_);
+            return NodeErrorCode::None;
         }
 
         if (listener_ != nullptr && listener_->IsRunning())
@@ -223,6 +223,8 @@ class InnerNetwork::Impl final
         context_.reset();
         bound_endpoint_.clear();
         initialized_ = false;
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
     }
 
     [[nodiscard]] bool IsRunning() const noexcept
@@ -252,6 +254,11 @@ class InnerNetwork::Impl final
 
     [[nodiscard]] std::string_view last_error_message() const noexcept
     {
+        if (!last_error_message_.empty())
+        {
+            return last_error_message_;
+        }
+
         return listener_ != nullptr ? listener_->last_error_message() : std::string_view{};
     }
 
@@ -303,6 +310,7 @@ class InnerNetwork::Impl final
     xs::core::Logger& logger_;
     InnerNetworkOptions options_{};
     std::string bound_endpoint_{};
+    std::string last_error_message_{};
     std::unique_ptr<ipc::ZmqContext> context_{};
     std::unique_ptr<ipc::ZmqPassiveListener> listener_{};
     bool initialized_{false};
@@ -318,22 +326,24 @@ InnerNetwork::InnerNetwork(
 
 InnerNetwork::~InnerNetwork() = default;
 
-NodeRuntimeErrorCode InnerNetwork::Init(std::string* error_message)
+NodeErrorCode InnerNetwork::Init()
 {
-    return impl_->Init(error_message);
+    return impl_->Init();
 }
 
-NodeRuntimeErrorCode InnerNetwork::Run(std::string* error_message)
+NodeErrorCode InnerNetwork::Run()
 {
-    return impl_->Run(error_message);
+    return impl_->Run();
 }
 
-void InnerNetwork::Uninit() noexcept
+NodeErrorCode InnerNetwork::Uninit()
 {
     if (impl_ != nullptr)
     {
-        impl_->Uninit();
+        return impl_->Uninit();
     }
+
+    return NodeErrorCode::None;
 }
 
 bool InnerNetwork::IsRunning() const noexcept

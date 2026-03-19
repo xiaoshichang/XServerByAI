@@ -1,8 +1,12 @@
 #pragma once
 
-#include "NodeRuntime.h"
+#include "NodeCommon.h"
+
+#include "Logging.h"
+#include "MainEventLoop.h"
 
 #include <memory>
+#include <string_view>
 
 namespace xs::node
 {
@@ -18,11 +22,12 @@ class ClientNetwork final
     ClientNetwork(ClientNetwork&&) = delete;
     ClientNetwork& operator=(ClientNetwork&&) = delete;
 
-    [[nodiscard]] NodeRuntimeErrorCode Init(std::string* error_message = nullptr);
-    [[nodiscard]] NodeRuntimeErrorCode Run(std::string* error_message = nullptr);
-    void Uninit() noexcept;
+    [[nodiscard]] NodeErrorCode Init();
+    [[nodiscard]] NodeErrorCode Run();
+    [[nodiscard]] NodeErrorCode Uninit();
 
     [[nodiscard]] bool initialized() const noexcept;
+    [[nodiscard]] std::string_view last_error_message() const noexcept;
 
   private:
     class Impl;

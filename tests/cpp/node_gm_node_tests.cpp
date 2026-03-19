@@ -1,7 +1,7 @@
 #include "GmNode.h"
 #include "InnerNetwork.h"
 #include "Json.h"
-#include "NodeRuntime.h"
+#include "NodeCommon.h"
 #include "ZmqActiveConnector.h"
 #include "ZmqContext.h"
 
@@ -65,11 +65,26 @@ bool WriteJsonFile(const std::filesystem::path& path, const xs::core::Json& valu
     return result == xs::core::JsonErrorCode::None;
 }
 
-xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path)
+xs::core::Json MakeClusterConfigJson(
+    const std::filesystem::path& base_path,
+    bool include_gm_control_endpoint)
 {
     const std::string root_log_dir = (base_path / "logs" / "root").string();
     const std::string gate_log_dir = (base_path / "logs" / "gate").string();
     const std::string game_log_dir = (base_path / "logs" / "game").string();
+
+    xs::core::Json gm_block;
+    if (include_gm_control_endpoint)
+    {
+        gm_block = xs::core::Json{
+            {"control",
+             {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 5000}}}}},
+        };
+    }
+    else
+    {
+        gm_block = xs::core::Json::object();
+    }
 
     return xs::core::Json{
         {"serverGroup", {{"id", "local-dev"}, {"environment", "dev"}}},
@@ -80,9 +95,7 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
           {"rotateDaily", true},
           {"maxFileSizeMB", 64},
           {"maxRetainedFiles", 10}}},
-        {"gm",
-         {{"control",
-           {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 5000}}}}}}},
+        {"gm", gm_block},
         {"gate",
          {{"gate0",
            {{"nodeId", "Gate0"},
@@ -98,7 +111,10 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
     };
 }
 
-bool WriteRuntimeConfig(const std::filesystem::path& base_path, std::filesystem::path* file_path)
+bool WriteRuntimeConfig(
+    const std::filesystem::path& base_path,
+    bool include_gm_control_endpoint,
+    std::filesystem::path* file_path)
 {
     if (file_path == nullptr)
     {
@@ -107,22 +123,7 @@ bool WriteRuntimeConfig(const std::filesystem::path& base_path, std::filesystem:
     }
 
     *file_path = base_path / "config.json";
-    return WriteJsonFile(*file_path, MakeValidClusterConfigJson(base_path));
-}
-
-bool LoadRuntimeContext(
-    const std::filesystem::path& config_path,
-    std::string_view selector,
-    xs::node::NodeRuntimeContext* output)
-{
-    xs::node::NodeCommandLineArgs args;
-    args.config_path = config_path;
-    args.selector = std::string(selector);
-
-    std::string error_message;
-    const xs::node::NodeRuntimeErrorCode result = xs::node::LoadNodeRuntimeContext(args, output, &error_message);
-    XS_CHECK_MSG(result == xs::node::NodeRuntimeErrorCode::None, error_message.c_str());
-    return result == xs::node::NodeRuntimeErrorCode::None;
+    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, include_gm_control_endpoint));
 }
 
 bool DirectoryContainsRegularFile(const std::filesystem::path& path)
@@ -221,77 +222,63 @@ xs::core::LoggerOptions MakeLoggerOptions(
     return options;
 }
 
-void TestGmNodeRejectsMissingControlEndpoint()
+std::string ResolveNodeError(xs::node::NodeErrorCode code, std::string_view error_message)
+{
+    if (!error_message.empty())
+    {
+        return std::string(error_message);
+    }
+
+    return std::string(xs::node::NodeErrorMessage(code));
+}
+
+void TestGmNodeRejectsMissingControlEndpointConfig()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-node-missing-control");
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, &config_path))
+    if (!WriteRuntimeConfig(base_path, false, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
     }
 
-    xs::node::NodeRuntimeContext context;
-    if (!LoadRuntimeContext(config_path, "gm", &context))
-    {
-        CleanupTestDirectory(base_path);
-        return;
-    }
+    xs::node::GmNode node({
+        .config_path = config_path,
+        .selector = "gm",
+    });
 
-    context.node_config.control_listen_endpoint.reset();
+    const xs::node::NodeErrorCode result = node.Init();
 
-    xs::core::Logger logger(MakeLoggerOptions(base_path / "logs" / "root", xs::core::ProcessType::Gm, "GM"));
-    xs::core::MainEventLoop event_loop({.thread_name = "gm-node-no-control"});
-    xs::node::ServerNodeEnvironment environment{
-        .context = context,
-        .logger = logger,
-        .event_loop = event_loop,
-    };
-    xs::node::GmNode node(environment);
+    XS_CHECK(result == xs::node::NodeErrorCode::ConfigLoadFailed);
+    XS_CHECK_MSG(
+        std::string(node.last_error_message()).find("control") != std::string::npos,
+        node.last_error_message().data());
 
-    std::string error_message;
-    const xs::node::NodeRuntimeErrorCode result = node.Init(&error_message);
-
-    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::InvalidArgument);
-    XS_CHECK_MSG(error_message.find("control.listenEndpoint") != std::string::npos, error_message.c_str());
-
-    node.Uninit();
     CleanupTestDirectory(base_path);
 }
 
-void TestGmNodeRejectsNonGmProcessType()
+void TestGmNodeRejectsNonGmSelector()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-node-non-gm");
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, &config_path))
+    if (!WriteRuntimeConfig(base_path, true, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
     }
 
-    xs::node::NodeRuntimeContext context;
-    if (!LoadRuntimeContext(config_path, "gate0", &context))
-    {
-        CleanupTestDirectory(base_path);
-        return;
-    }
+    xs::node::GmNode node({
+        .config_path = config_path,
+        .selector = "gate0",
+    });
 
-    xs::core::Logger logger(MakeLoggerOptions(base_path / "logs" / "gate", xs::core::ProcessType::Gate, "Gate0"));
-    xs::core::MainEventLoop event_loop({.thread_name = "gm-node-wrong-type"});
-    xs::node::ServerNodeEnvironment environment{
-        .context = context,
-        .logger = logger,
-        .event_loop = event_loop,
-    };
-    xs::node::GmNode node(environment);
+    const xs::node::NodeErrorCode result = node.Init();
 
-    std::string error_message;
-    const xs::node::NodeRuntimeErrorCode result = node.Init(&error_message);
+    XS_CHECK(result == xs::node::NodeErrorCode::InvalidArgument);
+    XS_CHECK_MSG(
+        std::string(node.last_error_message()).find("GM node requires process_type = GM.") != std::string::npos,
+        node.last_error_message().data());
 
-    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::InvalidArgument);
-    XS_CHECK_MSG(error_message.find("process_type = GM") != std::string::npos, error_message.c_str());
-
-    node.Uninit();
     CleanupTestDirectory(base_path);
 }
 
@@ -323,15 +310,23 @@ void TestInnerNetworkWildcardBindAndReceivesPayload()
 
     xs::core::MainEventLoopHooks hooks;
     hooks.on_start = [&](xs::core::MainEventLoop& running_loop, std::string* error_message) {
-        const xs::node::NodeRuntimeErrorCode init_result = inner_network->Init(error_message);
-        if (init_result != xs::node::NodeRuntimeErrorCode::None)
+        const xs::node::NodeErrorCode init_result = inner_network->Init();
+        if (init_result != xs::node::NodeErrorCode::None)
         {
+            if (error_message != nullptr)
+            {
+                *error_message = ResolveNodeError(init_result, inner_network->last_error_message());
+            }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
 
-        const xs::node::NodeRuntimeErrorCode run_result = inner_network->Run(error_message);
-        if (run_result != xs::node::NodeRuntimeErrorCode::None)
+        const xs::node::NodeErrorCode run_result = inner_network->Run();
+        if (run_result != xs::node::NodeErrorCode::None)
         {
+            if (error_message != nullptr)
+            {
+                *error_message = ResolveNodeError(run_result, inner_network->last_error_message());
+            }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
 
@@ -426,7 +421,7 @@ void TestInnerNetworkWildcardBindAndReceivesPayload()
             connector->Stop();
         }
 
-        inner_network->Uninit();
+        (void)inner_network->Uninit();
     };
 
     std::string error_message;
@@ -460,8 +455,8 @@ void TestInnerNetworkWildcardBindAndReceivesPayload()
 
 int main()
 {
-    TestGmNodeRejectsMissingControlEndpoint();
-    TestGmNodeRejectsNonGmProcessType();
+    TestGmNodeRejectsMissingControlEndpointConfig();
+    TestGmNodeRejectsNonGmSelector();
     TestInnerNetworkWildcardBindAndReceivesPayload();
 
     if (g_failures != 0)

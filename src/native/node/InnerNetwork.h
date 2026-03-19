@@ -1,6 +1,9 @@
 #pragma once
 
-#include "NodeRuntime.h"
+#include "NodeCommon.h"
+
+#include "Logging.h"
+#include "MainEventLoop.h"
 #include "ZmqListenerMetrics.h"
 #include "ZmqPassiveListener.h"
 
@@ -37,9 +40,9 @@ class InnerNetwork final
     InnerNetwork(InnerNetwork&&) = delete;
     InnerNetwork& operator=(InnerNetwork&&) = delete;
 
-    [[nodiscard]] NodeRuntimeErrorCode Init(std::string* error_message = nullptr);
-    [[nodiscard]] NodeRuntimeErrorCode Run(std::string* error_message = nullptr);
-    void Uninit() noexcept;
+    [[nodiscard]] NodeErrorCode Init();
+    [[nodiscard]] NodeErrorCode Run();
+    [[nodiscard]] NodeErrorCode Uninit();
 
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] InnerNetworkMode mode() const noexcept;

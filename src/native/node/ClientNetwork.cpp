@@ -1,16 +1,33 @@
 #include "ClientNetwork.h"
 
+#include <string>
+#include <utility>
+
 namespace xs::node
 {
 namespace
 {
 
-void ClearError(std::string* error_message)
+void ClearError(std::string& error_message) noexcept
 {
-    if (error_message != nullptr)
+    error_message.clear();
+}
+
+NodeErrorCode SetError(
+    std::string& error_message,
+    NodeErrorCode code,
+    std::string message)
+{
+    if (message.empty())
     {
-        error_message->clear();
+        error_message = std::string(NodeErrorMessage(code));
     }
+    else
+    {
+        error_message = std::move(message);
+    }
+
+    return code;
 }
 
 } // namespace
@@ -23,22 +40,37 @@ class ClientNetwork::Impl final
     {
     }
 
-    [[nodiscard]] NodeRuntimeErrorCode Init(std::string* error_message)
+    [[nodiscard]] NodeErrorCode Init()
     {
+        if (initialized_)
+        {
+            return SetError(last_error_message_, NodeErrorCode::InvalidArgument, "ClientNetwork is already initialized.");
+        }
+
         initialized_ = true;
-        ClearError(error_message);
-        return NodeRuntimeErrorCode::None;
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
     }
 
-    [[nodiscard]] NodeRuntimeErrorCode Run(std::string* error_message)
+    [[nodiscard]] NodeErrorCode Run()
     {
-        ClearError(error_message);
-        return NodeRuntimeErrorCode::None;
+        if (!initialized_)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "ClientNetwork must be initialized before Run().");
+        }
+
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
     }
 
-    void Uninit() noexcept
+    [[nodiscard]] NodeErrorCode Uninit() noexcept
     {
         initialized_ = false;
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
     }
 
     [[nodiscard]] bool initialized() const noexcept
@@ -46,9 +78,15 @@ class ClientNetwork::Impl final
         return initialized_;
     }
 
+    [[nodiscard]] std::string_view last_error_message() const noexcept
+    {
+        return last_error_message_;
+    }
+
   private:
     xs::core::MainEventLoop& event_loop_;
     xs::core::Logger& logger_;
+    std::string last_error_message_{};
     bool initialized_{false};
 };
 
@@ -59,27 +97,34 @@ ClientNetwork::ClientNetwork(xs::core::MainEventLoop& event_loop, xs::core::Logg
 
 ClientNetwork::~ClientNetwork() = default;
 
-NodeRuntimeErrorCode ClientNetwork::Init(std::string* error_message)
+NodeErrorCode ClientNetwork::Init()
 {
-    return impl_->Init(error_message);
+    return impl_->Init();
 }
 
-NodeRuntimeErrorCode ClientNetwork::Run(std::string* error_message)
+NodeErrorCode ClientNetwork::Run()
 {
-    return impl_->Run(error_message);
+    return impl_->Run();
 }
 
-void ClientNetwork::Uninit() noexcept
+NodeErrorCode ClientNetwork::Uninit()
 {
     if (impl_ != nullptr)
     {
-        impl_->Uninit();
+        return impl_->Uninit();
     }
+
+    return NodeErrorCode::None;
 }
 
 bool ClientNetwork::initialized() const noexcept
 {
     return impl_ != nullptr && impl_->initialized();
+}
+
+std::string_view ClientNetwork::last_error_message() const noexcept
+{
+    return impl_ != nullptr ? impl_->last_error_message() : std::string_view{};
 }
 
 } // namespace xs::node

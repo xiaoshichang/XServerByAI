@@ -86,18 +86,18 @@ target_link_libraries(xs_ipc_passive_listener_tests PRIVATE ipc)
 
 add_test(NAME xs_ipc_passive_listener_tests COMMAND xs_ipc_passive_listener_tests)
 
-add_executable(xs_node_runtime_tests
-    node_runtime_tests.cpp
+add_executable(xs_node_create_helper_tests
+    node_create_helper_tests.cpp
 )
 
-target_link_libraries(xs_node_runtime_tests PRIVATE node_runtime)
+target_link_libraries(xs_node_create_helper_tests PRIVATE node)
 
-add_test(NAME xs_node_runtime_tests COMMAND xs_node_runtime_tests)
+add_test(NAME xs_node_create_helper_tests COMMAND xs_node_create_helper_tests)
 
 add_executable(xs_node_gm_node_tests
     node_gm_node_tests.cpp
 )
 
-target_link_libraries(xs_node_gm_node_tests PRIVATE node_runtime ipc)
+target_link_libraries(xs_node_gm_node_tests PRIVATE node ipc)
 
 add_test(NAME xs_node_gm_node_tests COMMAND xs_node_gm_node_tests)

@@ -1,113 +1,74 @@
 #include "GameNode.h"
 
 #include <string>
+#include <utility>
 
 namespace xs::node
 {
-namespace
-{
 
-void ClearError(std::string* error_message)
-{
-    if (error_message != nullptr)
-    {
-        error_message->clear();
-    }
-}
-
-NodeRuntimeErrorCode SetError(
-    NodeRuntimeErrorCode code,
-    std::string message,
-    std::string* error_message)
-{
-    if (error_message != nullptr)
-    {
-        if (message.empty())
-        {
-            *error_message = std::string(NodeRuntimeErrorMessage(code));
-        }
-        else
-        {
-            *error_message = std::move(message);
-        }
-    }
-
-    return code;
-}
-
-} // namespace
-
-GameNode::GameNode(ServerNodeEnvironment environment)
-    : ServerNode(environment)
+GameNode::GameNode(NodeCommandLineArgs args)
+    : ServerNode(std::move(args))
 {
 }
 
 GameNode::~GameNode() = default;
 
-NodeRuntimeErrorCode GameNode::Init(std::string* error_message)
+xs::core::ProcessType GameNode::role_process_type() const noexcept
 {
-    if (initialized_)
-    {
-        return SetError(
-            NodeRuntimeErrorCode::InvalidArgument,
-            "Game node is already initialized.",
-            error_message);
-    }
-
-    if (context().process_type != xs::core::ProcessType::Game)
-    {
-        return SetError(
-            NodeRuntimeErrorCode::InvalidArgument,
-            "Game node requires process_type = Game.",
-            error_message);
-    }
-
-    inner_network_ = std::make_unique<InnerNetwork>(event_loop(), logger(), InnerNetworkOptions{});
-    const NodeRuntimeErrorCode init_result = inner_network_->Init(error_message);
-    if (init_result != NodeRuntimeErrorCode::None)
-    {
-        inner_network_.reset();
-        return init_result;
-    }
-
-    initialized_ = true;
-    ClearError(error_message);
-    return NodeRuntimeErrorCode::None;
+    return xs::core::ProcessType::Game;
 }
 
-NodeRuntimeErrorCode GameNode::Run(std::string* error_message)
+NodeErrorCode GameNode::OnInit()
 {
-    if (!initialized_ || inner_network_ == nullptr)
+    inner_network_ = std::make_unique<InnerNetwork>(event_loop(), logger(), InnerNetworkOptions{});
+    const NodeErrorCode init_result = inner_network_->Init();
+    if (init_result != NodeErrorCode::None)
     {
-        return SetError(
-            NodeRuntimeErrorCode::InvalidArgument,
-            "Game node must be initialized before Run().",
-            error_message);
+        const std::string error_message = std::string(inner_network_->last_error_message());
+        inner_network_.reset();
+        return SetError(init_result, error_message);
     }
 
-    const NodeRuntimeErrorCode inner_result = inner_network_->Run(error_message);
-    if (inner_result != NodeRuntimeErrorCode::None)
+    ClearError();
+    return NodeErrorCode::None;
+}
+
+NodeErrorCode GameNode::OnRun()
+{
+    if (inner_network_ == nullptr)
     {
-        return inner_result;
+        return SetError(NodeErrorCode::InvalidArgument, "Game node must be initialized before Run().");
     }
 
-    const std::string message = "Game node placeholder started for selector '" + context().selector + "'.";
+    const NodeErrorCode inner_result = inner_network_->Run();
+    if (inner_result != NodeErrorCode::None)
+    {
+        return SetError(inner_result, std::string(inner_network_->last_error_message()));
+    }
+
+    const std::string message = "Game node placeholder started for selector '" + std::string(selector()) + "'.";
     logger().Log(xs::core::LogLevel::Info, "runtime", message);
 
     event_loop().RequestStop();
-    ClearError(error_message);
-    return NodeRuntimeErrorCode::None;
+    ClearError();
+    return NodeErrorCode::None;
 }
 
-void GameNode::Uninit() noexcept
+NodeErrorCode GameNode::OnUninit()
 {
     if (inner_network_ != nullptr)
     {
-        inner_network_->Uninit();
+        const NodeErrorCode result = inner_network_->Uninit();
+        const std::string error_message = std::string(inner_network_->last_error_message());
         inner_network_.reset();
+        if (result != NodeErrorCode::None)
+        {
+            return SetError(result, error_message);
+        }
     }
 
-    initialized_ = false;
+    ClearError();
+    return NodeErrorCode::None;
 }
 
 } // namespace xs::node

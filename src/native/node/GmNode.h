@@ -11,16 +11,17 @@ namespace xs::node
 class GmNode final : public ServerNode
 {
   public:
-    explicit GmNode(ServerNodeEnvironment environment);
+    explicit GmNode(NodeCommandLineArgs args);
     ~GmNode() override;
 
-    [[nodiscard]] NodeRuntimeErrorCode Init(std::string* error_message) override;
-    [[nodiscard]] NodeRuntimeErrorCode Run(std::string* error_message) override;
-    void Uninit() noexcept override;
+  protected:
+    [[nodiscard]] xs::core::ProcessType role_process_type() const noexcept override;
+    [[nodiscard]] NodeErrorCode OnInit() override;
+    [[nodiscard]] NodeErrorCode OnRun() override;
+    [[nodiscard]] NodeErrorCode OnUninit() override;
 
   private:
     std::unique_ptr<InnerNetwork> inner_network_{};
-    bool initialized_{false};
 };
 
 } // namespace xs::node
