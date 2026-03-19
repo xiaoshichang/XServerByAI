@@ -3,24 +3,41 @@
 ## 范围
 
 - 分支：`M3-02`
+- 开发提交：
+  - `ba7cbf6`：`developer: fix node runtime stage error mapping`
+  - `82afeb6`：`developer: simplify node lifecycle architecture`
 - 设计依据：`docs/M3-02.md`
-- 验证目标：确认 node 架构已简化为 `NodeCreateHelper + ServerNode`，并验证 GM 节点内部监听骨架、Gate/Game 占位节点骨架与新生命周期接口可正常工作。
+- 验证目标：确认 `NodeCreateHelper + ServerNode` 生命周期骨架、GM 内部控制端口监听、Gate/Game 占位节点入口与节点日志输出满足 M3-02 设计。
 
-## 执行结果
+## 复测结果
 
-- 依赖检查通过：`M3-01`、`M2-08` 已完成，`M3-02` 当前仍为 `开发中`
+- 依赖检查通过：`M3-01`、`M2-08` 已完成，复测前 `M3-02` 状态为 `开发中`
 - Native 全量验证已执行并通过：
   - `cmake -S . -B build -DXS_BUILD_TESTS=ON`
   - `cmake --build build --config Debug`
   - `ctest --test-dir build -C Debug --output-on-failure`
-- 本次变更未触及 `XServerByAI.Managed.sln`、`src/managed/` 或其他 .NET 工程文件，因此未执行 managed build
-- `xs_node_create_helper_tests` 与 `xs_node_gm_node_tests` 均通过，说明：
-  - `NodeCreateHelper` 已接管命令行解析与节点构造
-  - `ServerNode::Init()` 会直接初始化配置、logger、mainloop，并在失败路径保持稳定清理与错误透传
-  - `GmNode` 能基于 GM 配置启动内部被动监听
-  - `InnerNetwork` 的 wildcard bind、收包、状态收敛与日志输出具备基本行为
+  - 结果：`13/13` 测试通过
+- 本次开发提交未触及 `XServerByAI.Managed.sln`、`src/managed/` 或其他 .NET 工程文件，因此未执行 managed build
+- 自动化测试覆盖通过：
+  - `xs_node_create_helper_tests` 验证 CLI 解析、节点构造、生命周期成功/失败路径与清理行为
+  - `xs_node_gm_node_tests` 验证 GM 配置约束、`InnerNetwork` 被动监听、收包、状态收敛与事件循环内运行
+- 代码与行为检查结果：
+  - `NodeCreateHelper` 已接管命令行解析与节点选择，不再依赖额外 runtime 包装层
+  - `ServerNode` 统一承载 `Init()`、`Run()`、`Uninit()` 生命周期，配置、logger、mainloop 与错误文本均在节点自身边界内管理
+  - `GmNode` 通过 `InnerNetwork` 建立 GM 内部控制监听；`GateNode` / `GameNode` 保持可启动的占位骨架，符合当前设计范围
+- 可执行程序 smoke 验证通过：
+  - 缺少参数时进程退出码为 `1`，并输出 usage
+  - 非法 selector 时进程退出码为 `1`，并返回 selector 校验错误
+  - `gate0` 启动后退出码为 `0`
+  - `game0` 启动后退出码为 `0`
+  - `gm` 启动后保持监听运行，手动停止前持续存活，符合 GM 控制面监听节点预期
+  - 已生成角色日志：
+    - `build/test-output/m3-02-smoke/logs/root/GM-2026-03-19.log`
+    - `build/test-output/m3-02-smoke/logs/gate/Gate0-2026-03-19.log`
+    - `build/test-output/m3-02-smoke/logs/game/Game0-2026-03-19.log`
 
-## 结论
+## 最新结论
 
-- 本轮代码与测试结果表明，`ServerNodeEnvironment`、`NodeRuntimeContext`、`NodeRuntime` 已成功移除，`Init()` / `Run()` / `Uninit()` 生命周期边界与 `NodeErrorCode` 返回契约已经落地。
-- `docs/DEVELOPMENT_PLAN.md` 维持 `开发中` 不变，后续可在 `M3-08`、`M3-10`、`M4-02` 继续向 Gate/Game 实现填充真实网络行为。
+- `M3-02` 本轮复测通过。
+- `docs/DEVELOPMENT_PLAN.md` 已将 `M3-02` 从 `开发中` 更新为 `已完成`。
+- `GateNode` / `GameNode` 当前仍是占位骨架，但这属于 `docs/M3-02.md` 明确约束的交付范围；后续真实集群与客户端行为继续由 `M3-08`、`M3-10`、`M4-02` 等条目承接。
