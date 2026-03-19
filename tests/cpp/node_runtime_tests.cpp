@@ -628,7 +628,7 @@ void TestRunNodeProcessPropagatesNodeInitFailure()
     const xs::node::NodeRuntimeErrorCode result =
         xs::node::RunNodeProcess(context, std::move(factory), xs::node::NodeRuntimeRunOptions{}, &error_message);
 
-    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::InvalidArgument);
+    XS_CHECK(result == xs::node::NodeRuntimeErrorCode::NodeInitFailed);
     XS_CHECK_MSG(error_message == "init failed", error_message.c_str());
     XS_CHECK(init_called);
     XS_CHECK(!run_called);
@@ -673,7 +673,7 @@ void TestRunNodeProcessPropagatesNodeRunFailure()
             .event_loop = event_loop,
         };
         TestServerNode::Options options;
-        options.run_result = xs::node::NodeRuntimeErrorCode::NodeRunFailed;
+        options.run_result = xs::node::NodeRuntimeErrorCode::InvalidArgument;
         options.run_error = "run failed";
         return std::make_unique<TestServerNode>(environment, std::move(options), &init_called, &run_called, &uninit_called);
     };

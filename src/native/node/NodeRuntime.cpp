@@ -77,6 +77,21 @@ xs::core::LoggerOptions BuildLoggerOptions(const NodeRuntimeContext& context)
     return options;
 }
 
+std::string BuildStageFailureMessage(
+    NodeRuntimeErrorCode stage_code,
+    NodeRuntimeErrorCode operation_code)
+{
+    std::string message = std::string(NodeRuntimeErrorMessage(stage_code));
+    if (operation_code == NodeRuntimeErrorCode::None || operation_code == stage_code)
+    {
+        return message;
+    }
+
+    message += " Cause: ";
+    message += NodeRuntimeErrorMessage(operation_code);
+    return message;
+}
+
 xs::core::MainEventLoopOptions ResolveEventLoopOptions(
     const NodeRuntimeContext& context,
     const NodeRuntimeRunOptions& options)
@@ -389,7 +404,15 @@ NodeRuntimeErrorCode RunNodeProcess(
         try
         {
             node_error.clear();
-            node_result = server_node->Init(&node_error);
+            const NodeRuntimeErrorCode init_result = server_node->Init(&node_error);
+            if (init_result != NodeRuntimeErrorCode::None)
+            {
+                node_result = NodeRuntimeErrorCode::NodeInitFailed;
+                if (node_error.empty())
+                {
+                    node_error = BuildStageFailureMessage(node_result, init_result);
+                }
+            }
         }
         catch (const std::exception& exception)
         {
@@ -420,7 +443,15 @@ NodeRuntimeErrorCode RunNodeProcess(
         try
         {
             node_error.clear();
-            node_result = server_node->Run(&node_error);
+            const NodeRuntimeErrorCode run_result = server_node->Run(&node_error);
+            if (run_result != NodeRuntimeErrorCode::None)
+            {
+                node_result = NodeRuntimeErrorCode::NodeRunFailed;
+                if (node_error.empty())
+                {
+                    node_error = BuildStageFailureMessage(node_result, run_result);
+                }
+            }
         }
         catch (const std::exception& exception)
         {
