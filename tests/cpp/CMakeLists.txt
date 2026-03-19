@@ -101,3 +101,11 @@ add_executable(xs_node_gm_node_tests
 target_link_libraries(xs_node_gm_node_tests PRIVATE node ipc)
 
 add_test(NAME xs_node_gm_node_tests COMMAND xs_node_gm_node_tests)
+
+add_executable(xs_node_process_registry_tests
+    node_process_registry_tests.cpp
+)
+
+target_link_libraries(xs_node_process_registry_tests PRIVATE node)
+
+add_test(NAME xs_node_process_registry_tests COMMAND xs_node_process_registry_tests)

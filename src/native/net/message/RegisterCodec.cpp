@@ -118,16 +118,6 @@ namespace
     return RegisterCodecErrorCode::None;
 }
 
-[[nodiscard]] RegisterCodecErrorCode ValidateRegistrationId(std::uint64_t registration_id) noexcept
-{
-    if (registration_id == 0u)
-    {
-        return RegisterCodecErrorCode::InvalidRegistrationId;
-    }
-
-    return RegisterCodecErrorCode::None;
-}
-
 [[nodiscard]] RegisterCodecErrorCode ValidateHeartbeatTiming(
     std::uint32_t heartbeat_interval_ms,
     std::uint32_t heartbeat_timeout_ms) noexcept
@@ -171,12 +161,6 @@ namespace
 
 [[nodiscard]] RegisterCodecErrorCode ValidateRegisterSuccessResponse(const RegisterSuccessResponse& message) noexcept
 {
-    const RegisterCodecErrorCode registration_result = ValidateRegistrationId(message.registration_id);
-    if (registration_result != RegisterCodecErrorCode::None)
-    {
-        return registration_result;
-    }
-
     return ValidateHeartbeatTiming(message.heartbeat_interval_ms, message.heartbeat_timeout_ms);
 }
 
@@ -446,8 +430,6 @@ std::string_view RegisterCodecErrorMessage(RegisterCodecErrorCode error_code) no
         return "Register serviceEndpoint.host must not be empty.";
     case RegisterCodecErrorCode::InvalidServiceEndpointPort:
         return "Register serviceEndpoint.port must not be zero.";
-    case RegisterCodecErrorCode::InvalidRegistrationId:
-        return "Register registrationId must not be zero.";
     case RegisterCodecErrorCode::InvalidHeartbeatTiming:
         return "Register heartbeat interval must be less than timeout.";
     case RegisterCodecErrorCode::TooManyCapabilityTags:
@@ -668,8 +650,7 @@ RegisterCodecErrorCode EncodeRegisterSuccessResponse(
     }
 
     BinaryWriter writer(buffer);
-    if (!writer.WriteUInt64(message.registration_id) ||
-        !writer.WriteUInt32(message.heartbeat_interval_ms) ||
+    if (!writer.WriteUInt32(message.heartbeat_interval_ms) ||
         !writer.WriteUInt32(message.heartbeat_timeout_ms) ||
         !writer.WriteUInt64(message.server_now_unix_ms))
     {
@@ -692,8 +673,7 @@ RegisterCodecErrorCode DecodeRegisterSuccessResponse(
 
     BinaryReader reader(buffer);
     RegisterSuccessResponse parsed_message{};
-    if (!reader.ReadUInt64(&parsed_message.registration_id) ||
-        !reader.ReadUInt32(&parsed_message.heartbeat_interval_ms) ||
+    if (!reader.ReadUInt32(&parsed_message.heartbeat_interval_ms) ||
         !reader.ReadUInt32(&parsed_message.heartbeat_timeout_ms) ||
         !reader.ReadUInt64(&parsed_message.server_now_unix_ms))
     {
@@ -760,3 +740,4 @@ RegisterCodecErrorCode DecodeRegisterErrorResponse(
 }
 
 } // namespace xs::net
+

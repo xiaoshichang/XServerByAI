@@ -1,4 +1,4 @@
-# MSG_ID
+﻿# MSG_ID
 
 本文档定义 XServerByAI 当前阶段 `msgId` 的分段方式、规范命名方式与登记规则。所有内部协议、Gate↔Client 协议与后续 C# 实体消息在分配编号前都应先更新本文件。
 
@@ -42,7 +42,7 @@
 
 以上表格只表示“子段预留”，不表示具体消息已经完成分配。后续条目在定义具体消息结构时，应在所属子段内补充精确 `msgId`。
 
-其中会话与路由相关消息在落具体结构时，应复用 `docs/SESSION_ROUTING.md` 中的 `sessionId`、`playerId`、`gameNodeId`、`gameRegistrationId` 与 `routeEpoch` 语义，避免为同一条路由关系创造多套字段命名。
+其中会话与路由相关消息在落具体结构时，应复用 `docs/SESSION_ROUTING.md` 中的 `sessionId`、`playerId`、`gameNodeId` 与 `routeEpoch` 语义，避免为同一条路由关系创造多套字段命名。
 
 其中 `10000-34999` 业务号段的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Space` 等状态型业务消息落在 `ServerEntity` 语义下，`Stub / 全局服务` 号段保留给 `ServerStubEntity` 语义，避免把传输层中继消息与实体业务消息混放。
 
@@ -82,3 +82,4 @@
 | msgId | CanonicalName | Direction | Owner | Status | Description |
 | --- | --- | --- | --- | --- | --- |
 | `<value>` | `<Area>.<Action>` | `<caller -> callee>` | `<owner>` | `<status>` | `<summary>` |
+

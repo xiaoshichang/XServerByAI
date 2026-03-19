@@ -1,4 +1,4 @@
-# ERROR_CODE
+﻿# ERROR_CODE
 
 本文档定义 XServerByAI 当前阶段错误码的取值范围、编码约定与登记规则。所有 native 运行时错误、控制面错误、客户端接入错误与后续 C# 业务错误，在分配正式错误码前都应先更新本文件。
 
@@ -66,7 +66,7 @@
 
 以上表格只表示“子段预留”，不表示具体错误码已经完成分配。后续条目在定义错误返回机制或业务失败场景时，应在所属子段内补充精确错误码。
 
-其中会话与路由相关失败在分配具体错误码时，应复用 `docs/SESSION_ROUTING.md` 对 `sessionId`、`routeState` 与 `gameRegistrationId` 的语义约束，避免把“稳定逻辑身份未变但活跃租约已切换”的场景误编码为普通参数错误。
+其中会话与路由相关失败在分配具体错误码时，应复用 `docs/SESSION_ROUTING.md` 对 `sessionId`、`routeState`、`gameNodeId` 与 `routeEpoch` 的语义约束，避免把“节点目录版本变化或链路失效”误编码为普通参数错误。
 
 其中 `10000-34999` 业务错误码的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Space` 等状态型失败属于 `ServerEntity` 领域，匹配、聊天等 `Stub / 全局服务` 失败属于 `ServerStubEntity` 领域，避免用基础设施错误码承载实体业务语义。
 
@@ -79,8 +79,8 @@
 | `3000` | `Control.ProcessTypeInvalid` | `control` | `Active` | `gm` | `processType` 非法或当前阶段不支持该进程类型 |
 | `3001` | `Control.NodeIdConflict` | `control` | `Active` | `gm` | `nodeId` 已被活动注册占用，当前连接不能重复注册 |
 | `3002` | `Control.ServiceEndpointInvalid` | `control` | `Active` | `gm` | 注册消息缺少可发布服务地址，或端口配置非法 |
-| `3003` | `Control.RegistrationNotFound` | `control` | `Active` | `gm` | 心跳引用未知 `registrationId`，当前连接需要重新注册 |
-| `3004` | `Control.RegistrationExpired` | `control` | `Active` | `gm` | 心跳对应的注册租约已失效，发送方必须重新注册 |
+| `3003` | `Control.NodeNotRegistered` | `control` | `Active` | `gm` | 心跳或其他控制请求没有命中活动节点，当前连接需要重新注册 |
+| `3004` | `Control.ControlChannelInvalid` | `control` | `Active` | `gm` | 当前控制链路已失效或不再拥有该 `nodeId`，发送方必须重新注册 |
 
 **已登记 Relay 错误码**
 
@@ -110,3 +110,4 @@
 | errorCode | CanonicalName | Domain | Status | Owner | Description |
 | --- | --- | --- | --- | --- | --- |
 | `1` | `Common.InvalidArgument` | `common` | `Reserved` | `core` | 非法参数，占位示例 |
+

@@ -26,16 +26,6 @@ namespace
     return HeartbeatCodecErrorCode::InvalidArgument;
 }
 
-[[nodiscard]] HeartbeatCodecErrorCode ValidateRegistrationId(std::uint64_t registration_id) noexcept
-{
-    if (registration_id == 0u)
-    {
-        return HeartbeatCodecErrorCode::InvalidRegistrationId;
-    }
-
-    return HeartbeatCodecErrorCode::None;
-}
-
 [[nodiscard]] HeartbeatCodecErrorCode ValidateStatusFlags(std::uint32_t status_flags) noexcept
 {
     if (status_flags != 0u)
@@ -128,8 +118,6 @@ std::string_view HeartbeatCodecErrorMessage(HeartbeatCodecErrorCode error_code) 
         return "Heartbeat bool field must be encoded as 0 or 1.";
     case HeartbeatCodecErrorCode::InvalidArgument:
         return "Heartbeat codec output argument must not be null.";
-    case HeartbeatCodecErrorCode::InvalidRegistrationId:
-        return "Heartbeat registrationId must not be zero.";
     case HeartbeatCodecErrorCode::InvalidStatusFlags:
         return "Heartbeat statusFlags must be zero.";
     case HeartbeatCodecErrorCode::InvalidHeartbeatTiming:
@@ -145,12 +133,6 @@ HeartbeatCodecErrorCode EncodeHeartbeatRequest(
     const HeartbeatRequest& message,
     std::span<std::byte> buffer) noexcept
 {
-    const HeartbeatCodecErrorCode registration_result = ValidateRegistrationId(message.registration_id);
-    if (registration_result != HeartbeatCodecErrorCode::None)
-    {
-        return registration_result;
-    }
-
     const HeartbeatCodecErrorCode status_result = ValidateStatusFlags(message.status_flags);
     if (status_result != HeartbeatCodecErrorCode::None)
     {
@@ -158,8 +140,7 @@ HeartbeatCodecErrorCode EncodeHeartbeatRequest(
     }
 
     BinaryWriter writer(buffer);
-    if (!writer.WriteUInt64(message.registration_id) ||
-        !writer.WriteUInt64(message.sent_at_unix_ms) ||
+    if (!writer.WriteUInt64(message.sent_at_unix_ms) ||
         !writer.WriteUInt32(message.status_flags))
     {
         return MapSerializationError(writer.error());
@@ -181,8 +162,7 @@ HeartbeatCodecErrorCode DecodeHeartbeatRequest(
 
     BinaryReader reader(buffer);
     HeartbeatRequest parsed_message{};
-    if (!reader.ReadUInt64(&parsed_message.registration_id) ||
-        !reader.ReadUInt64(&parsed_message.sent_at_unix_ms) ||
+    if (!reader.ReadUInt64(&parsed_message.sent_at_unix_ms) ||
         !reader.ReadUInt32(&parsed_message.status_flags))
     {
         return MapSerializationError(reader.error());
@@ -192,12 +172,6 @@ HeartbeatCodecErrorCode DecodeHeartbeatRequest(
     if (load_result != HeartbeatCodecErrorCode::None)
     {
         return load_result;
-    }
-
-    const HeartbeatCodecErrorCode registration_result = ValidateRegistrationId(parsed_message.registration_id);
-    if (registration_result != HeartbeatCodecErrorCode::None)
-    {
-        return registration_result;
     }
 
     const HeartbeatCodecErrorCode status_result = ValidateStatusFlags(parsed_message.status_flags);
@@ -220,12 +194,6 @@ HeartbeatCodecErrorCode EncodeHeartbeatSuccessResponse(
     const HeartbeatSuccessResponse& message,
     std::span<std::byte> buffer) noexcept
 {
-    const HeartbeatCodecErrorCode registration_result = ValidateRegistrationId(message.registration_id);
-    if (registration_result != HeartbeatCodecErrorCode::None)
-    {
-        return registration_result;
-    }
-
     const HeartbeatCodecErrorCode timing_result =
         ValidateHeartbeatTiming(message.heartbeat_interval_ms, message.heartbeat_timeout_ms);
     if (timing_result != HeartbeatCodecErrorCode::None)
@@ -234,8 +202,7 @@ HeartbeatCodecErrorCode EncodeHeartbeatSuccessResponse(
     }
 
     BinaryWriter writer(buffer);
-    if (!writer.WriteUInt64(message.registration_id) ||
-        !writer.WriteUInt32(message.heartbeat_interval_ms) ||
+    if (!writer.WriteUInt32(message.heartbeat_interval_ms) ||
         !writer.WriteUInt32(message.heartbeat_timeout_ms) ||
         !writer.WriteUInt64(message.server_now_unix_ms))
     {
@@ -258,18 +225,11 @@ HeartbeatCodecErrorCode DecodeHeartbeatSuccessResponse(
 
     BinaryReader reader(buffer);
     HeartbeatSuccessResponse parsed_message{};
-    if (!reader.ReadUInt64(&parsed_message.registration_id) ||
-        !reader.ReadUInt32(&parsed_message.heartbeat_interval_ms) ||
+    if (!reader.ReadUInt32(&parsed_message.heartbeat_interval_ms) ||
         !reader.ReadUInt32(&parsed_message.heartbeat_timeout_ms) ||
         !reader.ReadUInt64(&parsed_message.server_now_unix_ms))
     {
         return MapSerializationError(reader.error());
-    }
-
-    const HeartbeatCodecErrorCode registration_result = ValidateRegistrationId(parsed_message.registration_id);
-    if (registration_result != HeartbeatCodecErrorCode::None)
-    {
-        return registration_result;
     }
 
     const HeartbeatCodecErrorCode timing_result =
@@ -335,3 +295,4 @@ HeartbeatCodecErrorCode DecodeHeartbeatErrorResponse(
 }
 
 } // namespace xs::net
+

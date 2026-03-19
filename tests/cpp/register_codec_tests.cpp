@@ -158,7 +158,6 @@ void TestGetWireSizeAndEncodeRequestRoundTrip()
 void TestEncodeSuccessAndErrorResponsesRoundTrip()
 {
     const xs::net::RegisterSuccessResponse success{
-        .registration_id = 0x0102030405060708ull,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 15000u,
         .server_now_unix_ms = 0x2122232425262728ull,
@@ -170,8 +169,6 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
         xs::net::RegisterCodecErrorCode::None);
 
     const std::array<std::byte, xs::net::kRegisterSuccessResponseSize> expected_success{
-        std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
-        std::byte{0x05}, std::byte{0x06}, std::byte{0x07}, std::byte{0x08},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x13}, std::byte{0x88},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x3A}, std::byte{0x98},
         std::byte{0x21}, std::byte{0x22}, std::byte{0x23}, std::byte{0x24},
@@ -183,7 +180,6 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
     XS_CHECK(
         xs::net::DecodeRegisterSuccessResponse(success_buffer, &decoded_success) ==
         xs::net::RegisterCodecErrorCode::None);
-    XS_CHECK(decoded_success.registration_id == success.registration_id);
     XS_CHECK(decoded_success.heartbeat_interval_ms == success.heartbeat_interval_ms);
     XS_CHECK(decoded_success.heartbeat_timeout_ms == success.heartbeat_timeout_ms);
     XS_CHECK(decoded_success.server_now_unix_ms == success.server_now_unix_ms);
@@ -269,7 +265,6 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
         xs::net::RegisterCodecErrorCode::TrailingBytes);
 
     const xs::net::RegisterSuccessResponse success{
-        .registration_id = 0x0102030405060708ull,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 15000u,
         .server_now_unix_ms = 0x2122232425262728ull,
@@ -278,10 +273,10 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
     XS_CHECK(
         xs::net::EncodeRegisterSuccessResponse(success, success_buffer) ==
         xs::net::RegisterCodecErrorCode::None);
-    success_buffer[8] = std::byte{0x00};
-    success_buffer[9] = std::byte{0x00};
-    success_buffer[10] = std::byte{0x3A};
-    success_buffer[11] = std::byte{0x98};
+    success_buffer[0] = std::byte{0x00};
+    success_buffer[1] = std::byte{0x00};
+    success_buffer[2] = std::byte{0x3A};
+    success_buffer[3] = std::byte{0x98};
 
     xs::net::RegisterSuccessResponse decoded_success{};
     XS_CHECK(
@@ -387,15 +382,14 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
         xs::net::RegisterCodecErrorCode::BufferTooSmall);
 
     const xs::net::RegisterSuccessResponse invalid_success{
-        .registration_id = 0u,
         .heartbeat_interval_ms = 5000u,
-        .heartbeat_timeout_ms = 15000u,
+        .heartbeat_timeout_ms = 5000u,
         .server_now_unix_ms = 2u,
     };
     std::array<std::byte, xs::net::kRegisterSuccessResponseSize> success_buffer{};
     XS_CHECK(
         xs::net::EncodeRegisterSuccessResponse(invalid_success, success_buffer) ==
-        xs::net::RegisterCodecErrorCode::InvalidRegistrationId);
+        xs::net::RegisterCodecErrorCode::InvalidHeartbeatTiming);
 
     std::array<std::byte, xs::net::kRegisterErrorResponseSize> error_buffer{};
     XS_CHECK(
@@ -432,3 +426,4 @@ int main()
 
     return EXIT_SUCCESS;
 }
+

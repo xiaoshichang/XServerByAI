@@ -1,4 +1,4 @@
-# PROCESS_CONTROL
+﻿# PROCESS_CONTROL
 
 本文档定义 XServerByAI 当前阶段 GM 与 Gate/Game 之间“进程注册”与“心跳”控制面消息的结构、字段语义与默认时序。当前默认控制面传输承载在 ZeroMQ over TCP 链路上，消息体与状态约定以本文为基线。
 
@@ -31,6 +31,7 @@
 2. `nodeId` 使用区分大小写的 `<ProcessType><index>` 格式，例如 `Gate0`、`Gate1`、`Game0`、`Game1`。
 3. 同一服务器组内 `nodeId` 必须唯一；进程重启后应保留原 `nodeId`。
 4. `GM` 不参与 `nodeId` 编号体系；每个服务器组固定 `1` 个 GM。
+5. 当前阶段 GM 以“稳定 `nodeId` + 当前活动控制链路”识别一个在线节点，不再额外分配单独的活动租约号。
 
 **共享结构：Endpoint**
 
@@ -55,7 +56,7 @@
 
 **Control.ProcessRegister（`msgId = 1000`）**
 1. 发送时机：`Gate`/`Game` 与 GM 的 ZeroMQ over TCP 控制链路可用后，应先发送注册请求，再发送任何其他控制面请求。
-2. 成功语义：GM 接受该节点成为一个新的活动注册，并返回当前租约、心跳参数与服务器时间。
+2. 成功语义：GM 接受该节点成为一个新的活动注册，并返回当前建议的心跳参数与服务器时间。
 3. 失败语义：GM 拒绝当前注册，调用方可根据 `errorCode` 与 `retryAfterMs` 决定是否重试。
 
 注册请求体：
@@ -66,7 +67,7 @@
 | `processFlags` | `uint16` | 当前保留，发送方必须置 `0` |
 | `nodeId` | `string` | 进程在所属服务器组内的稳定逻辑标识 |
 | `pid` | `uint32` | 本地操作系统进程号，用于诊断与管理展示 |
-| `startedAtUnixMs` | `uint64` | 本次启动时间，用于区分同一 `NodeID` 的重启 |
+| `startedAtUnixMs` | `uint64` | 本次启动时间，用于诊断与节点重启识别 |
 | `serviceEndpoint` | `Endpoint` | 该进程对外发布的服务入口，不能为空 |
 | `buildVersion` | `string` | 可读构建版本或 Git 描述字符串 |
 | `capabilityTags` | `string[]` | 能力标签列表；没有时传空数组 |
@@ -76,7 +77,6 @@
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `registrationId` | `uint64` | 由 GM 分配的注册租约标识；后续心跳必须回传该值 |
 | `heartbeatIntervalMs` | `uint32` | 推荐心跳发送间隔，默认 `5000` |
 | `heartbeatTimeoutMs` | `uint32` | GM 判定超时的阈值，默认 `15000` |
 | `serverNowUnixMs` | `uint64` | GM 当前时间戳，用于调试与时钟对齐 |
@@ -90,14 +90,13 @@
 
 **Control.ProcessHeartbeat（`msgId = 1100`）**
 1. 发送前提：只有在收到注册成功响应后，发送方才可发送心跳。
-2. 成功语义：GM 确认当前注册仍然有效，并可在响应中调整后续心跳参数。
-3. 失败语义：GM 认为当前注册不存在或已失效，发送方需要根据错误码判断是否重新注册。
+2. 成功语义：GM 确认当前节点在现有控制链路上的活动注册仍然有效，并可在响应中调整后续心跳参数。
+3. 失败语义：GM 认为当前控制链路不再对应活动节点，发送方需要根据错误码判断是否重新注册。
 
 心跳请求体：
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `registrationId` | `uint64` | 注册成功响应返回的租约标识 |
 | `sentAtUnixMs` | `uint64` | 发送方发送该心跳时的时间戳 |
 | `statusFlags` | `uint32` | 当前保留，发送方必须置 `0` |
 | `load` | `LoadSnapshot` | 最新负载快照；未知时允许全 `0` |
@@ -106,9 +105,8 @@
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `registrationId` | `uint64` | 回显当前有效租约标识 |
 | `heartbeatIntervalMs` | `uint32` | GM 推荐的下一轮心跳间隔 |
-| `heartbeatTimeoutMs` | `uint32` | 当前租约使用的超时阈值 |
+| `heartbeatTimeoutMs` | `uint32` | 当前链路使用的超时阈值 |
 | `serverNowUnixMs` | `uint64` | GM 当前时间戳 |
 
 心跳失败响应体（`Response + Error`）：
@@ -122,9 +120,10 @@
 **时序与校验规则**
 1. ZeroMQ over TCP 控制链路可用后，发送方必须先发送一次 `Control.ProcessRegister`；注册成功前不得发送心跳。
 2. `nodeId` 表示稳定逻辑身份；GM 应拒绝同一时刻重复的活动 `nodeId` 注册，并返回 `3001 Control.NodeIdConflict`。
-3. `registrationId` 只对一次成功注册及其所属链路生命周期有效；重新注册时必须申请新的 `registrationId`。
+3. 当前阶段一次成功注册会把 `nodeId` 绑定到当前控制链路；后续心跳默认依赖该链路定位活动节点，不再额外发放独立租约字段。
 4. 默认心跳间隔为 `5000ms`，默认超时阈值为 `15000ms`；GM 可以在响应中覆盖，但必须保证 `heartbeatIntervalMs < heartbeatTimeoutMs`。
-5. 心跳引用未知租约时返回 `3003 Control.RegistrationNotFound`；引用已过期租约时返回 `3004 Control.RegistrationExpired`。
+5. 心跳来自未知节点或未完成注册的控制链路时返回 `3003 Control.NodeNotRegistered`；心跳来自已被替换、失效或不再拥有该 `nodeId` 的控制链路时返回 `3004 Control.ControlChannelInvalid`。
 6. `serviceEndpoint.port = 0`、`serviceEndpoint.host` 为空或 `processType` 不合法时，GM 应拒绝注册，并返回 `3000` 或 `3002`。
 7. `load` 中无法提供的数据一律填 `0`，禁止使用负值或未初始化内存表达“未知”。
 8. 当前阶段不额外定义显式注销消息；优雅下线可以通过连接关闭表达，后续如需补充单独的注销消息，再在控制面号段中登记新 `msgId`。
+

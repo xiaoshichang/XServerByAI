@@ -13,12 +13,14 @@ add_library(node STATIC
     NodeCommon.h
     NodeCreateHelper.cpp
     NodeCreateHelper.h
+    ProcessRegistry.cpp
+    ProcessRegistry.h
     ServerNode.cpp
     ServerNode.h
 )
 
 target_include_directories(node PUBLIC ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(node PUBLIC core ipc)
+target_link_libraries(node PUBLIC core ipc net)
 
 add_executable(xserver_node
     node_main.cpp

@@ -79,7 +79,6 @@ void CheckLoadSnapshotEquals(const xs::net::LoadSnapshot& actual, const xs::net:
 void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
 {
     const xs::net::HeartbeatRequest request{
-        .registration_id = 0x0102030405060708ull,
         .sent_at_unix_ms = 0x1112131415161718ull,
         .status_flags = 0u,
         .load = MakeLoadSnapshot(1u, 2u, 3u, 4u, 5u),
@@ -89,8 +88,6 @@ void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
     XS_CHECK(xs::net::EncodeHeartbeatRequest(request, buffer) == xs::net::HeartbeatCodecErrorCode::None);
 
     const std::array<std::byte, xs::net::kHeartbeatRequestSize> expected{
-        std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
-        std::byte{0x05}, std::byte{0x06}, std::byte{0x07}, std::byte{0x08},
         std::byte{0x11}, std::byte{0x12}, std::byte{0x13}, std::byte{0x14},
         std::byte{0x15}, std::byte{0x16}, std::byte{0x17}, std::byte{0x18},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
@@ -104,7 +101,6 @@ void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
 
     xs::net::HeartbeatRequest decoded{};
     XS_CHECK(xs::net::DecodeHeartbeatRequest(buffer, &decoded) == xs::net::HeartbeatCodecErrorCode::None);
-    XS_CHECK(decoded.registration_id == request.registration_id);
     XS_CHECK(decoded.sent_at_unix_ms == request.sent_at_unix_ms);
     XS_CHECK(decoded.status_flags == 0u);
     CheckLoadSnapshotEquals(decoded.load, request.load);
@@ -113,7 +109,6 @@ void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
 void TestEncodeSuccessAndErrorResponsesRoundTrip()
 {
     const xs::net::HeartbeatSuccessResponse success{
-        .registration_id = 0x0102030405060708ull,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 15000u,
         .server_now_unix_ms = 0x2122232425262728ull,
@@ -125,8 +120,6 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
         xs::net::HeartbeatCodecErrorCode::None);
 
     const std::array<std::byte, xs::net::kHeartbeatSuccessResponseSize> expected_success{
-        std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04},
-        std::byte{0x05}, std::byte{0x06}, std::byte{0x07}, std::byte{0x08},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x13}, std::byte{0x88},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x3A}, std::byte{0x98},
         std::byte{0x21}, std::byte{0x22}, std::byte{0x23}, std::byte{0x24},
@@ -138,7 +131,6 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
     XS_CHECK(
         xs::net::DecodeHeartbeatSuccessResponse(success_buffer, &decoded_success) ==
         xs::net::HeartbeatCodecErrorCode::None);
-    XS_CHECK(decoded_success.registration_id == success.registration_id);
     XS_CHECK(decoded_success.heartbeat_interval_ms == success.heartbeat_interval_ms);
     XS_CHECK(decoded_success.heartbeat_timeout_ms == success.heartbeat_timeout_ms);
     XS_CHECK(decoded_success.server_now_unix_ms == success.server_now_unix_ms);
@@ -173,7 +165,6 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
 void TestRejectsSemanticViolationsAndMalformedBuffers()
 {
     const xs::net::HeartbeatRequest request{
-        .registration_id = 0x0102030405060708ull,
         .sent_at_unix_ms = 0x1112131415161718ull,
         .status_flags = 0u,
         .load = MakeLoadSnapshot(1u, 2u, 3u, 4u, 5u),
@@ -183,20 +174,11 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
     XS_CHECK(xs::net::EncodeHeartbeatRequest(request, request_buffer) == xs::net::HeartbeatCodecErrorCode::None);
 
     auto invalid_status = request_buffer;
-    invalid_status[19] = std::byte{0x01};
+    invalid_status[11] = std::byte{0x01};
     xs::net::HeartbeatRequest decoded_request{};
     XS_CHECK(
         xs::net::DecodeHeartbeatRequest(invalid_status, &decoded_request) ==
         xs::net::HeartbeatCodecErrorCode::InvalidStatusFlags);
-
-    auto invalid_registration = request_buffer;
-    for (std::size_t index = 0; index < 8u; ++index)
-    {
-        invalid_registration[index] = std::byte{0x00};
-    }
-    XS_CHECK(
-        xs::net::DecodeHeartbeatRequest(invalid_registration, &decoded_request) ==
-        xs::net::HeartbeatCodecErrorCode::InvalidRegistrationId);
 
     const std::span<const std::byte> truncated_request(request_buffer.data(), request_buffer.size() - 1u);
     XS_CHECK(
@@ -210,7 +192,6 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
         xs::net::HeartbeatCodecErrorCode::TrailingBytes);
 
     const xs::net::HeartbeatSuccessResponse success{
-        .registration_id = 0x0102030405060708ull,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 15000u,
         .server_now_unix_ms = 0x2122232425262728ull,
@@ -219,10 +200,10 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
     XS_CHECK(
         xs::net::EncodeHeartbeatSuccessResponse(success, success_buffer) ==
         xs::net::HeartbeatCodecErrorCode::None);
-    success_buffer[8] = std::byte{0x00};
-    success_buffer[9] = std::byte{0x00};
-    success_buffer[10] = std::byte{0x3A};
-    success_buffer[11] = std::byte{0x98};
+    success_buffer[0] = std::byte{0x00};
+    success_buffer[1] = std::byte{0x00};
+    success_buffer[2] = std::byte{0x3A};
+    success_buffer[3] = std::byte{0x98};
 
     xs::net::HeartbeatSuccessResponse decoded_success{};
     XS_CHECK(
@@ -249,18 +230,16 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
 void TestRejectsInvalidArgumentsAndSmallBuffers()
 {
     const xs::net::HeartbeatRequest invalid_request{
-        .registration_id = 0u,
         .sent_at_unix_ms = 1u,
-        .status_flags = 0u,
+        .status_flags = 1u,
         .load = MakeLoadSnapshot(0u, 0u, 0u, 0u, 0u),
     };
     std::array<std::byte, xs::net::kHeartbeatRequestSize> request_buffer{};
     XS_CHECK(
         xs::net::EncodeHeartbeatRequest(invalid_request, request_buffer) ==
-        xs::net::HeartbeatCodecErrorCode::InvalidRegistrationId);
+        xs::net::HeartbeatCodecErrorCode::InvalidStatusFlags);
 
     const xs::net::HeartbeatSuccessResponse invalid_success{
-        .registration_id = 1u,
         .heartbeat_interval_ms = 5000u,
         .heartbeat_timeout_ms = 5000u,
         .server_now_unix_ms = 2u,
@@ -272,7 +251,6 @@ void TestRejectsInvalidArgumentsAndSmallBuffers()
 
     std::array<std::byte, xs::net::kHeartbeatRequestSize - 1> short_request_buffer{};
     const xs::net::HeartbeatRequest valid_request{
-        .registration_id = 1u,
         .sent_at_unix_ms = 2u,
         .status_flags = 0u,
         .load = MakeLoadSnapshot(3u, 4u, 5u, 6u, 7u),
@@ -313,3 +291,4 @@ int main()
 
     return EXIT_SUCCESS;
 }
+

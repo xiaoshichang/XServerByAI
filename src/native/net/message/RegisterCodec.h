@@ -13,7 +13,7 @@ namespace xs::net
 {
 
 inline constexpr std::uint32_t kControlRegisterMsgId = 1000u;
-inline constexpr std::size_t kRegisterSuccessResponseSize = sizeof(std::uint64_t) + sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
+inline constexpr std::size_t kRegisterSuccessResponseSize = sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kRegisterErrorResponseSize = sizeof(std::int32_t) + sizeof(std::uint32_t);
 inline constexpr std::size_t kRegisterMaxCapabilityTagCount = 32u;
 
@@ -28,10 +28,9 @@ enum class RegisterCodecErrorCode : std::uint8_t
     InvalidNodeId = 6,
     InvalidServiceEndpointHost = 7,
     InvalidServiceEndpointPort = 8,
-    InvalidRegistrationId = 9,
-    InvalidHeartbeatTiming = 10,
-    TooManyCapabilityTags = 11,
-    TrailingBytes = 12,
+    InvalidHeartbeatTiming = 9,
+    TooManyCapabilityTags = 10,
+    TrailingBytes = 11,
 };
 
 [[nodiscard]] std::string_view RegisterCodecErrorMessage(RegisterCodecErrorCode error_code) noexcept;
@@ -51,7 +50,6 @@ struct RegisterRequest
 
 struct RegisterSuccessResponse
 {
-    std::uint64_t registration_id{0};
     std::uint32_t heartbeat_interval_ms{0};
     std::uint32_t heartbeat_timeout_ms{0};
     std::uint64_t server_now_unix_ms{0};
@@ -88,3 +86,4 @@ struct RegisterErrorResponse
     RegisterErrorResponse* message) noexcept;
 
 } // namespace xs::net
+
