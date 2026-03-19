@@ -1,8 +1,8 @@
 #include "NodeRuntime.h"
 
-#include "GameNodeRunner.h"
-#include "GateNodeRunner.h"
-#include "GmNodeRunner.h"
+#include "NodeGameRunner.h"
+#include "NodeGateRunner.h"
+#include "NodeGmRunner.h"
 
 #include <exception>
 #include <memory>
@@ -205,9 +205,9 @@ std::string_view NodeRuntimeErrorMessage(NodeRuntimeErrorCode code) noexcept
 NodeRoleRunners DefaultNodeRoleRunners()
 {
     NodeRoleRunners role_runners;
-    role_runners.gm = xs::gm::RunGmNode;
-    role_runners.gate = xs::gate::RunGateNode;
-    role_runners.game = xs::game::RunGameNode;
+    role_runners.gm = RunGmNode;
+    role_runners.gate = RunGateNode;
+    role_runners.game = RunGameNode;
     return role_runners;
 }
 

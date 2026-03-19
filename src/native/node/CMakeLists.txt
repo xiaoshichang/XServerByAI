@@ -1,10 +1,16 @@
 add_library(node_runtime STATIC
+    NodeGameRunner.cpp
+    NodeGameRunner.h
+    NodeGateRunner.cpp
+    NodeGateRunner.h
+    NodeGmRunner.cpp
+    NodeGmRunner.h
     NodeRuntime.cpp
     NodeRuntime.h
 )
 
 target_include_directories(node_runtime PUBLIC ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(node_runtime PUBLIC core gm gate game)
+target_link_libraries(node_runtime PUBLIC core)
 
 add_executable(xserver_node
     node_main.cpp

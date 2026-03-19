@@ -25,7 +25,7 @@
 **Native 目录与命名规则**
 1. `src/native` 下的库模块目录使用全小写名称，必要时使用 `lower_snake_case`，例如 `core`、`net`、`ipc`、`host`。
 2. 统一节点入口固定放在 `src/native/node/`，生成单个 `xserver-node` 可执行文件。
-3. `src/native/gm`、`src/native/gate`、`src/native/game` 可用于承载进程专属实现代码，但不再各自生成独立可执行目标。
+3. GM、Gate、Game 进程专属实现统一放在 `src/native/node/` 内，与统一入口共享运行时与角色分派层；不再拆成独立静态库或独立可执行目标。
 4. 每个 native 子目录都应有独立的 `CMakeLists.txt`；可执行目标的文件名与输出名可以按职责命名，不强制与目录同名。
 5. 统一入口文件采用 `node_main.cpp` 命名；占位或模块聚合实现文件可使用与目录同名的文件，例如 `core.cpp`、`net.cpp`。
 6. 当模块进入类型化实现阶段，类或结构体主文件优先采用 `PascalCase` 文件名，并与主类型同名。
@@ -58,7 +58,7 @@
 **C++ 命名空间规则**
 1. 所有项目内 C++ 代码以 `xs` 作为根命名空间。
 2. 第二层命名空间默认与模块目录对应，例如 `xs::core`、`xs::net`、`xs::ipc`、`xs::host`。
-3. 进程内专用类型可使用 `xs::gm`、`xs::gate`、`xs::game` 等子命名空间。
+3. 进程内专用类型默认收敛在所属模块子命名空间内；当前 GM、Gate、Game 节点角色占位实现统一放在 `xs::node`。
 4. 除进程入口 `main` 与必须暴露给外部工具链的符号外，不应向全局命名空间暴露项目类型。
 5. 新增更细粒度的命名空间时，继续使用小写或 `lower_snake_case`，避免混入 `PascalCase`。
 

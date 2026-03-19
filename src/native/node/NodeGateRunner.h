@@ -4,13 +4,13 @@
 
 #include <string>
 
-namespace xs::gm
+namespace xs::node
 {
 
-[[nodiscard]] node::NodeRuntimeErrorCode RunGmNode(
-    const node::NodeRuntimeContext& context,
+[[nodiscard]] NodeRuntimeErrorCode RunGateNode(
+    const NodeRuntimeContext& context,
     core::Logger& logger,
     core::MainEventLoop& event_loop,
     std::string* error_message);
 
-} // namespace xs::gm
+} // namespace xs::node

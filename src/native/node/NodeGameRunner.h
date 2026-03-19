@@ -4,13 +4,13 @@
 
 #include <string>
 
-namespace xs::game
+namespace xs::node
 {
 
-[[nodiscard]] node::NodeRuntimeErrorCode RunGameNode(
-    const node::NodeRuntimeContext& context,
+[[nodiscard]] NodeRuntimeErrorCode RunGameNode(
+    const NodeRuntimeContext& context,
     core::Logger& logger,
     core::MainEventLoop& event_loop,
     std::string* error_message);
 
-} // namespace xs::game
+} // namespace xs::node

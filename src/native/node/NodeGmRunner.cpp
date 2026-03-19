@@ -1,8 +1,8 @@
-#include "GmNodeRunner.h"
+#include "NodeGmRunner.h"
 
 #include <string>
 
-namespace xs::gm
+namespace xs::node
 {
 namespace
 {
@@ -17,8 +17,8 @@ void ClearError(std::string* error_message)
 
 } // namespace
 
-node::NodeRuntimeErrorCode RunGmNode(
-    const node::NodeRuntimeContext& context,
+NodeRuntimeErrorCode RunGmNode(
+    const NodeRuntimeContext& context,
     core::Logger& logger,
     core::MainEventLoop& event_loop,
     std::string* error_message)
@@ -29,7 +29,7 @@ node::NodeRuntimeErrorCode RunGmNode(
     logger.Log(core::LogLevel::Info, "runtime", message);
 
     event_loop.RequestStop();
-    return node::NodeRuntimeErrorCode::None;
+    return NodeRuntimeErrorCode::None;
 }
 
-} // namespace xs::gm
+} // namespace xs::node
