@@ -9,6 +9,7 @@
 #include <asio/ip/address_v4.hpp>
 #include <asio/ip/tcp.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +48,7 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 #define XS_CHECK(expr) Check((expr), #expr)
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
 
+inline constexpr std::int32_t kControlProcessTypeInvalid = 3000;
 inline constexpr std::int32_t kControlNodeIdConflict = 3001;
 inline constexpr std::int32_t kControlServiceEndpointInvalid = 3002;
 inline constexpr std::int32_t kControlRegisterPayloadInvalid = 3005;
@@ -554,6 +556,228 @@ void TestGmNodeRejectsDuplicateNodeId()
     CleanupTestDirectory(base_path);
 }
 
+void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-sequential-success");
+    const std::uint16_t control_port = AcquireLoopbackPort();
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGmNode gm_node(config_path);
+    if (!gm_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    asio::io_context io_context;
+    xs::ipc::ZmqContext context;
+    XS_CHECK(context.IsValid());
+
+    std::vector<std::vector<std::byte>> gate_responses;
+    std::vector<std::vector<std::byte>> game_responses;
+
+    xs::ipc::ZmqActiveConnector gate_connector(
+        io_context,
+        context,
+        {
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .routing_id = "gm-route-gate-success",
+            .poll_interval = std::chrono::milliseconds(2),
+            .send_high_water_mark = 16,
+            .receive_high_water_mark = 16,
+            .reconnect_interval_ms = 25,
+            .reconnect_interval_max_ms = 50,
+            .handshake_interval_ms = 1000,
+        });
+    gate_connector.SetMessageHandler([&gate_responses](std::vector<std::byte> payload) {
+        gate_responses.push_back(std::move(payload));
+    });
+
+    xs::ipc::ZmqActiveConnector game_connector(
+        io_context,
+        context,
+        {
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .routing_id = "gm-route-game-success",
+            .poll_interval = std::chrono::milliseconds(2),
+            .send_high_water_mark = 16,
+            .receive_high_water_mark = 16,
+            .reconnect_interval_ms = 25,
+            .reconnect_interval_max_ms = 50,
+            .handshake_interval_ms = 1000,
+        });
+    game_connector.SetMessageHandler([&game_responses](std::vector<std::byte> payload) {
+        game_responses.push_back(std::move(payload));
+    });
+
+    std::string error_message;
+    XS_CHECK(gate_connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(game_connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+
+    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
+        return gate_connector.state() == xs::ipc::ZmqConnectionState::Connected &&
+               game_connector.state() == xs::ipc::ZmqConnectionState::Connected;
+    }));
+
+    const xs::net::RegisterRequest gate_request =
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", 3101u, 4101u, 7000u);
+    const xs::net::RegisterRequest game_request =
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Game), "Game0", 3102u, 4102u, 7100u);
+
+    XS_CHECK(gate_connector.Send(BuildControlRegisterPacket(EncodeRegisterPayload(gate_request), 31u), &error_message) ==
+             xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(game_connector.Send(BuildControlRegisterPacket(EncodeRegisterPayload(game_request), 32u), &error_message) ==
+             xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+
+    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
+        return gate_responses.size() == 1u && game_responses.size() == 1u;
+    }));
+
+    const xs::net::PacketView gate_packet = DecodeResponsePacket(gate_responses.front());
+    XS_CHECK(gate_packet.header.msg_id == xs::net::kControlRegisterMsgId);
+    XS_CHECK(gate_packet.header.seq == 31u);
+    XS_CHECK(gate_packet.header.flags == static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
+
+    const xs::net::PacketView game_packet = DecodeResponsePacket(game_responses.front());
+    XS_CHECK(game_packet.header.msg_id == xs::net::kControlRegisterMsgId);
+    XS_CHECK(game_packet.header.seq == 32u);
+    XS_CHECK(game_packet.header.flags == static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
+
+    xs::net::RegisterSuccessResponse gate_response{};
+    xs::net::RegisterSuccessResponse game_response{};
+    XS_CHECK(xs::net::DecodeRegisterSuccessResponse(gate_packet.payload, &gate_response) ==
+             xs::net::RegisterCodecErrorCode::None);
+    XS_CHECK(xs::net::DecodeRegisterSuccessResponse(game_packet.payload, &game_response) ==
+             xs::net::RegisterCodecErrorCode::None);
+    XS_CHECK(gate_response.heartbeat_interval_ms == 5000u);
+    XS_CHECK(gate_response.heartbeat_timeout_ms == 15000u);
+    XS_CHECK(game_response.heartbeat_interval_ms == 5000u);
+    XS_CHECK(game_response.heartbeat_timeout_ms == 15000u);
+
+    gate_connector.Stop();
+    game_connector.Stop();
+    gm_node.StopAndJoin();
+    XS_CHECK_MSG(gm_node.run_result() == xs::node::NodeErrorCode::None, gm_node.run_error().data());
+
+    const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
+    XS_CHECK(snapshot.size() == 2u);
+
+    const auto gate_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::ProcessRegistryEntry& entry) {
+        return entry.node_id == "Gate0";
+    });
+    XS_CHECK(gate_entry != snapshot.end());
+    if (gate_entry != snapshot.end())
+    {
+        XS_CHECK(gate_entry->process_type == xs::net::ControlProcessType::Gate);
+        XS_CHECK(gate_entry->service_endpoint.port == 7000u);
+        XS_CHECK(ByteSpanEqualsText(gate_entry->routing_id, "gm-route-gate-success"));
+    }
+
+    const auto game_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::ProcessRegistryEntry& entry) {
+        return entry.node_id == "Game0";
+    });
+    XS_CHECK(game_entry != snapshot.end());
+    if (game_entry != snapshot.end())
+    {
+        XS_CHECK(game_entry->process_type == xs::net::ControlProcessType::Game);
+        XS_CHECK(game_entry->service_endpoint.port == 7100u);
+        XS_CHECK(ByteSpanEqualsText(game_entry->routing_id, "gm-route-game-success"));
+    }
+
+    XS_CHECK(gm_node.Uninit());
+    CleanupTestDirectory(base_path);
+}
+
+void TestGmNodeRejectsInvalidProcessType()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-process-type");
+    const std::uint16_t control_port = AcquireLoopbackPort();
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGmNode gm_node(config_path);
+    if (!gm_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    asio::io_context io_context;
+    xs::ipc::ZmqContext context;
+    XS_CHECK(context.IsValid());
+
+    std::vector<std::vector<std::byte>> responses;
+    xs::ipc::ZmqActiveConnector connector(
+        io_context,
+        context,
+        {
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .routing_id = "gm-route-invalid-process-type",
+            .poll_interval = std::chrono::milliseconds(2),
+            .send_high_water_mark = 16,
+            .receive_high_water_mark = 16,
+            .reconnect_interval_ms = 25,
+            .reconnect_interval_max_ms = 50,
+            .handshake_interval_ms = 1000,
+        });
+    connector.SetMessageHandler([&responses](std::vector<std::byte> payload) {
+        responses.push_back(std::move(payload));
+    });
+
+    std::string error_message;
+    XS_CHECK(connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&connector]() {
+        return connector.state() == xs::ipc::ZmqConnectionState::Connected;
+    }));
+
+    std::vector<std::byte> payload = EncodeRegisterPayload(
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate3", 2401u, 3401u, 7003u));
+    // `processType` lives at bytes [0..1] in the stable M2-12 register payload layout.
+    payload[0] = std::byte{0x00};
+    payload[1] = std::byte{0x00};
+
+    const std::vector<std::byte> packet = BuildControlRegisterPacket(payload, 23u);
+    XS_CHECK(connector.Send(packet, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&responses]() {
+        return responses.size() == 1u;
+    }));
+
+    const xs::net::PacketView error_packet = DecodeResponsePacket(responses.front());
+    XS_CHECK(error_packet.header.seq == 23u);
+    XS_CHECK(
+        error_packet.header.flags ==
+        (static_cast<std::uint16_t>(xs::net::PacketFlag::Response) |
+         static_cast<std::uint16_t>(xs::net::PacketFlag::Error)));
+
+    xs::net::RegisterErrorResponse response{};
+    const xs::net::RegisterCodecErrorCode decode_result =
+        xs::net::DecodeRegisterErrorResponse(error_packet.payload, &response);
+    XS_CHECK(decode_result == xs::net::RegisterCodecErrorCode::None);
+    XS_CHECK(response.error_code == kControlProcessTypeInvalid);
+    XS_CHECK(response.retry_after_ms == 0u);
+
+    connector.Stop();
+    gm_node.StopAndJoin();
+    XS_CHECK(gm_node.node().registry_snapshot().empty());
+    XS_CHECK(gm_node.Uninit());
+    CleanupTestDirectory(base_path);
+}
+
 void TestGmNodeRejectsInvalidServiceEndpoint()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-endpoint");
@@ -785,6 +1009,8 @@ int main()
 {
     TestGmNodeAcceptsRegisterRequestAndStoresEntry();
     TestGmNodeRejectsDuplicateNodeId();
+    TestGmNodeAcceptsGateAndGameRegistrationsSequentially();
+    TestGmNodeRejectsInvalidProcessType();
     TestGmNodeRejectsInvalidServiceEndpoint();
     TestGmNodeRejectsInvalidRegisterPayload();
     TestGmNodeDropsMalformedPacketWithoutResponse();
