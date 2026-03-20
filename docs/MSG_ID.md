@@ -14,7 +14,7 @@
 | 范围 | 类别 | 用途 |
 | --- | --- | --- |
 | `1-999` | 协议保留 | 协议层公共语义、基础兼容控制、通用保留位配套消息 |
-| `1000-1999` | 控制面 | GM ↔ Gate/Game 的注册、心跳、配置、路由与集群控制消息 |
+| `1000-1999` | 控制面 | GM ↔ Gate/Game 的注册、心跳、Stub ownership、ready 上报、路由与集群控制消息 |
 | `2000-3999` | 内部中转 | Gate ↔ Game 封装、会话事件、内部 RPC 与转发消息 |
 | `4000-9999` | 客户端接入 | Gate ↔ Client 的鉴权、会话、基础服务与通用推送 |
 | `10000-19999` | Player 业务 | 玩家实体与玩家域业务消息 |
@@ -31,7 +31,7 @@
 | --- | --- | --- | --- |
 | `1000-1099` | 进程注册 / 注销 | GM 控制面的进程生命周期消息 | `M1-09`, `M3-04` |
 | `1100-1199` | 心跳 / 健康检查 | 心跳、超时探测、状态上报 | `M1-09`, `M3-05` |
-| `1200-1299` | 配置 / 路由下发 | GM 下发配置、Game 节点路由目录、节点列表快照与路由变更 | `M3-06`, `M3-12`, `M3-15` |
+| `1200-1299` | 启动控制 / 路由下发 | GM 下发集群就绪状态、Stub ownership、Game 服务 ready 聚合结果关联消息、Game 节点路由目录与路由变更 | `M3-06`, `M3-12`, `M3-14`, `M3-15` |
 | `2000-2099` | Gate↔Game 封装 | 请求转发、响应回传、内部 RPC 信封 | `M1-10`, `M4-06`, `M4-07` |
 | `2100-2199` | 会话事件 | 绑定、关闭、路由丢失、踢出、重连等会话与路由状态变化 | `M1-12`, `M4-10`, `M4-16`, `M5-08` |
 | `4000-4199` | 客户端会话基础 | 鉴权、客户端心跳、基础 Push | `M4-03`, `M4-15` |
@@ -54,6 +54,11 @@
 | --- | --- | --- | --- | --- | --- |
 | `1000` | `Control.ProcessRegister` | `Gate/Game -> GM` | `gm` | `Active` | 进程注册请求；成功或失败响应都复用同一 `msgId` |
 | `1100` | `Control.ProcessHeartbeat` | `Gate/Game -> GM` | `gm` | `Active` | 注册后的周期心跳与轻量负载上报；响应复用同一 `msgId` |
+| `1201` | `Control.ClusterReadyNotify` | `GM -> Gate/Game` | `gm` | `Active` | GM 下发集群 ready 结论；单向通知，无响应 `msgId` |
+| `1202` | `Control.ServerStubOwnershipSync` | `GM -> Game` | `gm` | `Active` | GM 下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照 |
+| `1203` | `Control.GameServiceReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `assignmentEpoch` 下的本地 assigned `ServerStubEntity` ready 聚合结果 |
+| `1204` | `Control.GameDirectoryQuery` | `Gate -> GM` | `gate` | `Active` | `Gate` 查询当前 `Game` 路由目录，并可请求建立后续变化订阅；响应复用同一 `msgId` |
+| `1205` | `Control.GameDirectoryNotify` | `GM -> Gate` | `gm` | `Active` | GM 向已订阅 `Gate` 推送新的全量 `Game` 路由目录快照 |
 
 **已登记 Relay 消息**
 

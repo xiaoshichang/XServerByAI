@@ -16,7 +16,7 @@
 | `MobilityType` | 实体迁移属性，取值为 `Migratable` 或 `Pinned`。只有 `Migratable` 实体允许显式切换 `OwnerGameNodeId`。 |
 | `OwnerGameNodeId` | 当前持有该实体活动实例的 Game `NodeID`。它表达单活 ownership，而不是网络连接句柄或注册租约。 |
 | `Activation` | 某个逻辑实体在 Game 进程内被装载后的内存实例。一个 `EntityKey` 在任意时刻最多只能存在一个活动 `Activation`。 |
-| `Mailbox` | 静态实体地址。适用于 `Pinned` 实体或启动时已经固定归属的 `ServerStubEntity`；调用方无需经 Gate 做动态 owner 查询即可确定目标实体。 |
+| `Mailbox` | 静态实体地址。适用于 `Pinned` 实体或已经由 `GM` 在启动阶段完成归属分配的 `ServerStubEntity`；调用方无需经 Gate 做动态 owner 查询即可确定目标实体。 |
 | `Proxy` | 动态实体引用。适用于 `Migratable` 实体；调用时需要先转发到 Gate，再由 Gate 按当前 ownership 解析到所在 Game。 |
 | `ExecutionLane` | 实体的串行执行上下文。来自客户端消息、内部事件、Tick 与异步回调都应先进入实体所属的串行调度，再修改实体状态。 |
 | `RouteHint` | 上游路由提供的实体定位线索，例如 `playerId`、`spaceId`、服务名或 shard key。它只负责帮助定位目标实体，不直接替代实体状态。 |
@@ -26,18 +26,18 @@
 | 类型 | 典型示例 | 所属进程 | 主要职责 |
 | --- | --- | --- | --- |
 | `ServerEntity` | `PlayerEntity`、`SpaceEntity`、`NpcEntity` | `Game` | 承载具备稳定业务身份的权威状态，维护属性、生命周期、状态同步与持久化边界；可再细分为 `Migratable` 与 `Pinned`。 |
-| `ServerStubEntity` | `MatchService`、`ChatService`、`LeaderboardService` | `Game` | 承载全局服务语义或共享业务入口；其承载 Game 在服务器启动流程中已经确定，之后不发生迁移。 |
+| `ServerStubEntity` | `MatchService`、`ChatService`、`LeaderboardService` | `Game` | 承载全局服务语义或共享业务入口；其承载 Game 由 `GM` 在所有 `Game` 注册完成后的启动阶段统一决定，之后不发生迁移。 |
 
-`ServerStubEntity` 继承自 `ServerEntity`，但语义上不是“玩家/场景这类有天然业务归属的实体”，而是“集群内可被消息寻址的服务实体”。是否采用单实例还是按 shard 部署，由具体业务决定；无论采用哪种方式，每个 Stub 实例都应有独立的 `EntityKey`，并在服务器启动或部署时固定 `OwnerGameNodeId`。
+`ServerStubEntity` 继承自 `ServerEntity`，但语义上不是“玩家/场景这类有天然业务归属的实体”，而是“集群内可被消息寻址的服务实体”。是否采用单实例还是按 shard 部署，由具体业务决定；无论采用哪种方式，每个 Stub 实例都应有独立的 `EntityKey`，并由 `GM` 在所有 `Game` 注册完成后的启动阶段统一决定其 `OwnerGameNodeId`。
 
-`ServerStubEntity` 的 ready 还承担启动阶段的集群控制语义。每个 Game 只负责判定本地要求的 Stub 是否全部 ready，并向 GM 上报本地结果；GM 负责聚合整个服务器组的 ready 状态，再将集群是否可对外提供服务的结论下发给 Gate。Gate 不得根据本地静态配置、单个节点注册成功或局部链路可用性，自行推断“客户端连接入口已经可以开放”。
+`ServerStubEntity` 的 ready 还承担启动阶段的集群控制语义。`GM` 先在所有 `Game` 注册完成后决定每一个 `ServerStubEntity` 应该分配给哪个 `GameNodeId`，再把该 ownership 结果下发给各个 `Game`。每个 `Game` 只负责初始化并判定“分配给自己承载的 Stub 是否全部 ready”，随后向 `GM` 上报本地结果；`GM` 负责聚合整个服务器组的 ready 状态，再将集群是否可对外提供服务的结论下发给 `Gate`。`Gate` 不得根据本地静态配置、单个节点注册成功或局部链路可用性，自行推断“客户端连接入口已经可以开放”。
 
 本文中的 `Space` 表示“场景”概念，用于维护场景内的玩家集合与场景状态；在房间类型游戏中，也可以将 `Space` 理解为房间概念。
 
 **迁移性分类**
 1. `Migratable ServerEntity` 允许显式迁移到新的 `OwnerGameNodeId`；典型示例是 `PlayerEntity`。迁移完成后，原 owner 必须失效，新的 owner 成为唯一活动实例。
 2. `Pinned ServerEntity` 不允许在生命周期内切换承载 Game；典型示例是 `SpaceEntity`。这类实体应通过静态 `Mailbox` 寻址，而不是通过动态 `Proxy`。
-3. `ServerStubEntity` 默认属于 `Pinned` 语义。其承载 Game 在服务器启动流程中已经决定，运行期不会因为负载均衡或普通路由调整而迁移。
+3. `ServerStubEntity` 默认属于 `Pinned` 语义。其承载 Game 由 `GM` 在所有 `Game` 注册完成后的启动阶段统一决定，运行期不会因为负载均衡或普通路由调整而迁移。
 4. 迁移是业务框架的显式操作，而不是传输层的静默副作用；是否支持某个实体类型迁移，应由框架层和实体类型共同声明。
 
 **职责边界**
@@ -45,13 +45,13 @@
 2. `GM` 负责控制面、注册表、配置、节点目录与集群 ready 聚合；它不直接承载业务实体，不参与实体 Tick，也不作为业务消息的执行方。
 3. `Game` 负责持有实体活动实例、维护实体注册表、执行消息分发、推进 Tick、驱动脏标记与衔接持久化接口，是业务状态的唯一运行时宿主；同时负责本地 `ServerStubEntity` 初始化完成后的 ready 判定与上报。
 4. `ServerEntity` 负责封装本实体的领域不变量、属性更新、状态同步钩子与保存/装载边界；框架层不应把这些规则散落到传输层或外部工具类。
-5. `ServerStubEntity` 负责封装全局服务的领域语义，例如匹配、聊天或排行榜；它不是一个“随手可调的工具单例”，仍应通过实体注册表、消息分发与统一生命周期被管理。
+5. `ServerStubEntity` 负责封装全局服务的领域语义，例如匹配、聊天或排行榜；它不是一个“随手可调的工具单例”，仍应通过实体注册表、消息分发与统一生命周期被管理。其承载归属来自 `GM` 的启动阶段统一分配，而不是由单个 `Game` 自行决定。
 6. 任何共享可变业务状态都应归属于某个实体实例；禁止通过进程级静态单例、裸全局字典或 Gate 连接对象持有与实体重复的权威状态。
 
 **路由与消息分发模型**
 1. 默认业务链路为 `client session -> Gate -> PlayerEntity Proxy -> current PlayerEntity -> SpaceEntity Mailbox / other ServerEntity / ServerStubEntity Mailbox`。Gate 负责把客户端请求转发到入口 Game，并为动态 `Proxy` 提供当前 owner 解析。
 2. 面向玩家的客户端请求应优先落到 `PlayerEntity`；`PlayerEntity` 作为玩家上下文入口，再决定是否转发给 `SpaceEntity`、其他 `ServerEntity` 或 `ServerStubEntity`。不要让客户端直接绕过玩家上下文操纵场景或其他业务实体。
-3. `Mailbox` 只用于不可迁移实体：例如 `SpaceEntity` 以及启动时已经固定归属的 `ServerStubEntity`。调用侧必须把 `Mailbox` 视为静态地址，而不是可被迁移后的软引用。
+3. `Mailbox` 只用于不可迁移实体：例如 `SpaceEntity` 以及已经由 `GM` 在启动阶段完成归属分配的 `ServerStubEntity`。调用侧必须把 `Mailbox` 视为静态地址，而不是可被迁移后的软引用。
 4. `Proxy` 只用于可迁移实体：例如 `PlayerEntity`。调用侧不得把某次解析得到的 `OwnerGameNodeId` 当作长期真值；跨节点调用时应重新经 Gate 解析当前 owner。
 5. 若调用方与目标实体恰好位于同一个 Game，运行时可以做本地短路调用；但语义层面仍应保持 `Mailbox` 与 `Proxy` 的区分，避免把本地优化误当成地址模型。
 6. 跨节点 `Mailbox` 调用可以直接按已知目标 `GameNodeId` 组织内部 RPC，不需要 Gate 做动态定位；底层是否复用统一中转链路不影响其静态寻址语义。跨节点 `Proxy` 调用则必须先经 Gate，再由 Gate 按当前 owner 转发到所在 Game。
@@ -75,7 +75,7 @@
 **对后续条目的约束**
 1. `M5-03` 应建立以 `ServerEntity` / `ServerStubEntity` 为核心的基础项目与公共抽象，避免后续业务类型各自定义不兼容基类。
 2. `M5-04` 的 `ServerEntity` 基类至少应承载稳定身份、生命周期入口、属性容器、迁移属性与框架上下文，不应直接耦合网络传输细节。
-3. `M5-05` 的 `ServerStubEntity` 基类应在 `ServerEntity` 之上补充“全局服务 / 共享服务语义”，并显式声明“启动时固定承载 Game、运行期不可迁移”的约束，而不是退化成普通工具类。
+3. `M5-05` 的 `ServerStubEntity` 基类应在 `ServerEntity` 之上补充“全局服务 / 共享服务语义”，并显式声明“由 `GM` 在所有 `Game` 注册完成后的启动阶段统一分配承载 Game、运行期不可迁移”的约束，而不是退化成普通工具类。
 4. `M5-06` 的实体注册表与查找索引应围绕 `EntityKey`、`MobilityType`、`OwnerGameNodeId`、`Mailbox` 与 `Proxy` 建立，保证单活实例查找与生命周期管理一致。
 5. `M5-07` 的实体消息分发应先按 `msgId` 归属决定目标实体家族，再结合 `sessionId`、`playerId`、`spaceId`、服务键等路由线索，选择走静态 `Mailbox` 还是动态 `Proxy`。
 6. `M5-08` 的实体路由必须建立在 `docs/SESSION_ROUTING.md` 的会话语义之上，默认链路为 `session -> PlayerEntity Proxy -> SpaceEntity Mailbox / ServerStubEntity Mailbox`，禁止直接把客户端连接句柄作为实体身份。

@@ -21,7 +21,7 @@
 
 **进程角色**
 1. `GM` 进程  
-每个服务器组固定 `1` 个，负责该组的控制面，包括启动/关闭流程、注册表、健康检查、配置分发与路由目录维护。
+每个服务器组固定 `1` 个，负责该组的控制面，包括启动/关闭流程、注册表、健康检查、`ServerStubEntity` ownership 分配、路由目录维护与集群 ready 聚合。
 2. `Gate` 进程  
 每个服务器组部署 `N` 个（`N >= 1`），负责客户端连接维护、KCP 会话管理、鉴权与路由转发，不承载业务逻辑。
 3. `Game` 进程  
@@ -47,12 +47,8 @@
 7. 同一服务器组内的节点可以部署在同一台机器，也可以拆分到多台机器；协议、NodeID 与路由模型不依赖单机假设。
 
 **启动与注册流程（建议）**
-1. GM 启动，监听控制端口并加载配置。
-2. Game 启动后向 GM 注册，初始化托管层与本地 `ServerStubEntity`；只有当本进程要求的 `ServerStubEntity` 全部 ready 后，才向 GM 上报本地服务就绪。
-3. Gate 启动后向 GM 注册，并拉取 Game 路由目录或订阅变更；在收到 GM 的集群就绪放行指令前，必须保持客户端连接入口关闭。
-4. GM 聚合各 Game 上报的 `ServerStubEntity ready` 状态；只有当服务器组内要求的 `ServerStubEntity` 全部 ready 后，才向 Gate 下发开放客户端入口的控制消息。
-5. 客户端连接 Gate，完成鉴权后建立会话，Gate 将会话绑定到目标 Game 节点。
-6. 注册、心跳、服务就绪与入口开放控制消息的结构、字段含义与默认时序约定见 `docs/PROCESS_CONTROL.md`。
+1. 完整启动顺序、每一步的节点方向以及“谁向谁发送什么消息”的清单见 `docs/STARTUP_FLOW.md`。
+2. 注册、心跳、Stub ownership、Game 服务 ready、路由目录与集群就绪控制消息的结构、字段含义与默认时序约定见 `docs/PROCESS_CONTROL.md`。
 
 **进程间二进制协议**
 1. 节点间业务消息体统一使用网络字节序（大端）编码的固定包头与二进制 body。
@@ -77,13 +73,13 @@
 **会话与路由**
 1. Gate 维护 `sessionId -> SessionRecord` 主表，以及按 `playerId`、`gameNodeId` 反查的索引；字段语义见 `docs/SESSION_ROUTING.md`。
 2. 当前默认采用“Gate 会话固定绑定入站 Game 节点”的传输路由模型；若目标 Game 失效，会话进入 `RouteLost`，不做静默迁移。
-3. GM 维护 Game 节点注册表、租约与负载信息，供 Gate 生成本地 `GameDirectoryEntry` 路由目录。
+3. GM 维护 Game 节点注册表、活动状态与负载信息，供 Gate 生成本地 `GameDirectoryEntry` 路由目录。
 
 **分布式实体架构**
 1. C# 业务层采用 `ServerEntity` / `ServerStubEntity` 两级模型，完整语义见 `docs/DISTRIBUTED_ENTITY.md`。
 2. Gate 只负责客户端连接、会话与转发，不持有业务实体状态；GM 只负责控制面与路由目录；业务实体统一由 Game 承载。
-3. `PlayerEntity` 可迁移，`SpaceEntity` 不可迁移；`ServerStubEntity` 的承载 Game 在启动时确定，运行期不迁移。
-4. `ServerStubEntity ready` 是集群级启动门闩：Game 负责本地 ready 判定并上报 GM，GM 聚合后再通知 Gate 开放客户端入口；Gate 不得自行推断集群是否已 ready。
+3. `PlayerEntity` 可迁移，`SpaceEntity` 不可迁移；`ServerStubEntity` 的承载 Game 由 `GM` 在所有 `Game` 注册完成后的启动阶段统一决定，运行期不迁移。
+4. `ServerStubEntity ready` 是集群级启动门闩：`GM` 先在所有 `Game` 注册完成后统一决定 Stub 承载归属，`Game` 再按分配结果做本地 ready 判定并上报 `GM`，`GM` 聚合后再通知 `Gate` 开放客户端入口；`Gate` 不得自行推断集群是否已 ready。
 5. 实体间 RPC 默认分为两种寻址方式：静态 `Mailbox` 用于不可迁移实体，动态 `Proxy` 用于可迁移实体。
 6. 当前默认业务链路为 `session -> PlayerEntity Proxy -> SpaceEntity Mailbox / other server entity / ServerStubEntity Mailbox`。
 7. 当前阶段不定义 active-active 多写，也不定义跨 Game 直接业务通信。
