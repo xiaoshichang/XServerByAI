@@ -81,6 +81,7 @@
 | `3002` | `Control.ServiceEndpointInvalid` | `control` | `Active` | `gm` | 注册消息缺少可发布服务地址，或端口配置非法 |
 | `3003` | `Control.NodeNotRegistered` | `control` | `Active` | `gm` | 心跳或其他控制请求没有命中活动节点，当前连接需要重新注册 |
 | `3004` | `Control.ControlChannelInvalid` | `control` | `Active` | `gm` | 当前控制链路已失效或不再拥有该 `nodeId`，发送方必须重新注册 |
+| `3005` | `Control.HeartbeatRequestInvalid` | `control` | `Active` | `gm` | 心跳请求包头或消息体不符合控制面约束，发送方应修正请求后重试 |
 
 **已登记 Relay 错误码**
 

@@ -59,13 +59,24 @@ NodeErrorCode GmNode::OnInit()
         return SetError(init_result, error_message);
     }
 
+    control_service_ = std::make_unique<GmControlService>(event_loop(), logger(), *inner_network_);
+    const NodeErrorCode control_init_result = control_service_->Init();
+    if (control_init_result != NodeErrorCode::None)
+    {
+        const std::string error_message = std::string(control_service_->last_error_message());
+        control_service_.reset();
+        (void)inner_network_->Uninit();
+        inner_network_.reset();
+        return SetError(control_init_result, error_message);
+    }
+
     ClearError();
     return NodeErrorCode::None;
 }
 
 NodeErrorCode GmNode::OnRun()
 {
-    if (inner_network_ == nullptr)
+    if (inner_network_ == nullptr || control_service_ == nullptr)
     {
         return SetError(NodeErrorCode::InvalidArgument, "GM node must be initialized before Run().");
     }
@@ -74,6 +85,14 @@ NodeErrorCode GmNode::OnRun()
     if (run_result != NodeErrorCode::None)
     {
         return SetError(run_result, std::string(inner_network_->last_error_message()));
+    }
+
+    const NodeErrorCode control_run_result = control_service_->Run();
+    if (control_run_result != NodeErrorCode::None)
+    {
+        const std::string error_message = std::string(control_service_->last_error_message());
+        (void)inner_network_->Uninit();
+        return SetError(control_run_result, error_message);
     }
 
     const std::array<xs::core::LogContextField, 3> runtime_context{
@@ -89,6 +108,17 @@ NodeErrorCode GmNode::OnRun()
 
 NodeErrorCode GmNode::OnUninit()
 {
+    if (control_service_ != nullptr)
+    {
+        const NodeErrorCode result = control_service_->Uninit();
+        const std::string error_message = std::string(control_service_->last_error_message());
+        control_service_.reset();
+        if (result != NodeErrorCode::None)
+        {
+            return SetError(result, error_message);
+        }
+    }
+
     if (inner_network_ != nullptr)
     {
         const NodeErrorCode result = inner_network_->Uninit();

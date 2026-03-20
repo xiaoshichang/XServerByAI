@@ -180,6 +180,7 @@ class InnerNetwork::Impl final
             context_.reset();
             listener_.reset();
             bound_endpoint_.clear();
+            message_handler_ = {};
             ClearError(last_error_message_);
             return NodeErrorCode::None;
         }
@@ -222,9 +223,49 @@ class InnerNetwork::Impl final
         listener_.reset();
         context_.reset();
         bound_endpoint_.clear();
+        message_handler_ = {};
         initialized_ = false;
         ClearError(last_error_message_);
         return NodeErrorCode::None;
+    }
+
+    [[nodiscard]] NodeErrorCode Send(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload)
+    {
+        if (!initialized_)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork must be initialized before Send().");
+        }
+
+        if (options_.mode != InnerNetworkMode::PassiveListener || listener_ == nullptr)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork Send() requires passive-listener mode.");
+        }
+
+        std::string listener_error;
+        const ipc::ZmqSocketErrorCode send_result = listener_->Send(routing_id, payload, &listener_error);
+        if (send_result != ipc::ZmqSocketErrorCode::None)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::NodeRunFailed,
+                "Failed to send inner network payload: " + listener_error);
+        }
+
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
+    }
+
+    void SetMessageHandler(InnerNetworkMessageHandler handler)
+    {
+        message_handler_ = std::move(handler);
     }
 
     [[nodiscard]] bool IsRunning() const noexcept
@@ -296,6 +337,11 @@ class InnerNetwork::Impl final
             xs::core::LogContextField{"boundEndpoint", bound_endpoint_},
         };
         LogInfo("Inner network listener received payload.", context);
+
+        if (message_handler_)
+        {
+            message_handler_(std::move(routing_id), std::move(payload));
+        }
     }
 
     template <std::size_t N>
@@ -313,6 +359,7 @@ class InnerNetwork::Impl final
     std::string last_error_message_{};
     std::unique_ptr<ipc::ZmqContext> context_{};
     std::unique_ptr<ipc::ZmqPassiveListener> listener_{};
+    InnerNetworkMessageHandler message_handler_{};
     bool initialized_{false};
 };
 
@@ -344,6 +391,26 @@ NodeErrorCode InnerNetwork::Uninit()
     }
 
     return NodeErrorCode::None;
+}
+
+NodeErrorCode InnerNetwork::Send(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
+    if (impl_ != nullptr)
+    {
+        return impl_->Send(routing_id, payload);
+    }
+
+    return NodeErrorCode::InvalidArgument;
+}
+
+void InnerNetwork::SetMessageHandler(InnerNetworkMessageHandler handler)
+{
+    if (impl_ != nullptr)
+    {
+        impl_->SetMessageHandler(std::move(handler));
+    }
 }
 
 bool InnerNetwork::IsRunning() const noexcept

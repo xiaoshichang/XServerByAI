@@ -7,9 +7,12 @@
 #include "ZmqListenerMetrics.h"
 #include "ZmqPassiveListener.h"
 
+#include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace xs::node
 {
@@ -25,6 +28,8 @@ struct InnerNetworkOptions
     InnerNetworkMode mode{InnerNetworkMode::Disabled};
     std::string local_endpoint{};
 };
+
+using InnerNetworkMessageHandler = std::function<void(std::vector<std::byte>, std::vector<std::byte>)>;
 
 class InnerNetwork final
 {
@@ -43,6 +48,11 @@ class InnerNetwork final
     [[nodiscard]] NodeErrorCode Init();
     [[nodiscard]] NodeErrorCode Run();
     [[nodiscard]] NodeErrorCode Uninit();
+    [[nodiscard]] NodeErrorCode Send(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
+
+    void SetMessageHandler(InnerNetworkMessageHandler handler);
 
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] InnerNetworkMode mode() const noexcept;

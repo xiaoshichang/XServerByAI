@@ -113,9 +113,9 @@
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `errorCode` | `int32` | 失败原因，常见值为 `3003` 或 `3004` |
+| `errorCode` | `int32` | 失败原因，常见值为 `3003`、`3004`；请求格式非法时可返回 `3005` |
 | `retryAfterMs` | `uint32` | 建议重试等待时间；要求立即重注册时可为 `0` |
-| `requireFullRegister` | `bool` | `1` 表示发送方必须重新走完整注册流程 |
+| `requireFullRegister` | `bool` | `1` 表示发送方必须重新走完整注册流程；仅请求格式非法时可为 `0` |
 
 **时序与校验规则**
 1. ZeroMQ over TCP 控制链路可用后，发送方必须先发送一次 `Control.ProcessRegister`；注册成功前不得发送心跳。
@@ -123,7 +123,8 @@
 3. 当前阶段一次成功注册会把 `nodeId` 绑定到当前控制链路；后续心跳默认依赖该链路定位活动节点，不再额外发放独立租约字段。
 4. 默认心跳间隔为 `5000ms`，默认超时阈值为 `15000ms`；GM 可以在响应中覆盖，但必须保证 `heartbeatIntervalMs < heartbeatTimeoutMs`。
 5. 心跳来自未知节点或未完成注册的控制链路时返回 `3003 Control.NodeNotRegistered`；心跳来自已被替换、失效或不再拥有该 `nodeId` 的控制链路时返回 `3004 Control.ControlChannelInvalid`。
-6. `serviceEndpoint.port = 0`、`serviceEndpoint.host` 为空或 `processType` 不合法时，GM 应拒绝注册，并返回 `3000` 或 `3002`。
-7. `load` 中无法提供的数据一律填 `0`，禁止使用负值或未初始化内存表达“未知”。
-8. 当前阶段不额外定义显式注销消息；优雅下线可以通过连接关闭表达，后续如需补充单独的注销消息，再在控制面号段中登记新 `msgId`。
+6. 心跳请求若 `PacketHeader.flags` 非请求语义、`seq = 0`、payload 截断或 `statusFlags` 非 `0`，GM 可返回 `3005 Control.HeartbeatRequestInvalid`；该场景默认不要求完整重注册。
+7. `serviceEndpoint.port = 0`、`serviceEndpoint.host` 为空或 `processType` 不合法时，GM 应拒绝注册，并返回 `3000` 或 `3002`。
+8. `load` 中无法提供的数据一律填 `0`，禁止使用负值或未初始化内存表达“未知”。
+9. 当前阶段不额外定义显式注销消息；优雅下线可以通过连接关闭表达，后续如需补充单独的注销消息，再在控制面号段中登记新 `msgId`。
 
