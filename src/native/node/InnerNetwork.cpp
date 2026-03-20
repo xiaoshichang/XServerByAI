@@ -49,6 +49,44 @@ std::string ToString(std::uint64_t value)
     return std::to_string(value);
 }
 
+NodeErrorCode MapSocketErrorToNodeError(ipc::ZmqSocketErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case ipc::ZmqSocketErrorCode::None:
+        return NodeErrorCode::None;
+    case ipc::ZmqSocketErrorCode::InvalidState:
+    case ipc::ZmqSocketErrorCode::AlreadyRunning:
+    case ipc::ZmqSocketErrorCode::ContextNotInitialized:
+    case ipc::ZmqSocketErrorCode::EndpointEmpty:
+    case ipc::ZmqSocketErrorCode::PollIntervalMustBePositive:
+    case ipc::ZmqSocketErrorCode::HighWaterMarkNegative:
+    case ipc::ZmqSocketErrorCode::TimingOptionNegative:
+    case ipc::ZmqSocketErrorCode::NotStarted:
+    case ipc::ZmqSocketErrorCode::EmptyRoutingId:
+        return NodeErrorCode::InvalidArgument;
+    case ipc::ZmqSocketErrorCode::SocketCreateFailed:
+    case ipc::ZmqSocketErrorCode::SocketOptionFailed:
+    case ipc::ZmqSocketErrorCode::MonitorEnableFailed:
+    case ipc::ZmqSocketErrorCode::MonitorSocketCreateFailed:
+    case ipc::ZmqSocketErrorCode::MonitorSocketConnectFailed:
+    case ipc::ZmqSocketErrorCode::ConnectFailed:
+    case ipc::ZmqSocketErrorCode::BindFailed:
+    case ipc::ZmqSocketErrorCode::LastEndpointQueryFailed:
+    case ipc::ZmqSocketErrorCode::RoutingIdSendFailed:
+    case ipc::ZmqSocketErrorCode::PayloadSendFailed:
+    case ipc::ZmqSocketErrorCode::MessageSendFailed:
+    case ipc::ZmqSocketErrorCode::ReceiveFailed:
+    case ipc::ZmqSocketErrorCode::MonitorReceiveFailed:
+    case ipc::ZmqSocketErrorCode::MultipartNotSupported:
+    case ipc::ZmqSocketErrorCode::PayloadMissing:
+    case ipc::ZmqSocketErrorCode::TimerPumpFailed:
+        return NodeErrorCode::NodeRunFailed;
+    }
+
+    return NodeErrorCode::NodeRunFailed;
+}
+
 } // namespace
 
 class InnerNetwork::Impl final

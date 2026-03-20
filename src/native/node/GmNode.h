@@ -2,9 +2,12 @@
 
 #include "GmControlService.h"
 #include "InnerNetwork.h"
+#include "ProcessRegistry.h"
 #include "ServerNode.h"
 
 #include <memory>
+#include <span>
+#include <vector>
 
 namespace xs::node
 {
@@ -15,6 +18,8 @@ class GmNode final : public ServerNode
     explicit GmNode(NodeCommandLineArgs args);
     ~GmNode() override;
 
+    [[nodiscard]] std::vector<ProcessRegistryEntry> registry_snapshot() const;
+
   protected:
     [[nodiscard]] xs::core::ProcessType role_process_type() const noexcept override;
     [[nodiscard]] NodeErrorCode OnInit() override;
@@ -22,8 +27,13 @@ class GmNode final : public ServerNode
     [[nodiscard]] NodeErrorCode OnUninit() override;
 
   private:
+    void HandleControlMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
+
     std::unique_ptr<InnerNetwork> inner_network_{};
     std::unique_ptr<GmControlService> control_service_{};
+    ProcessRegistry process_registry_{};
 };
 
 } // namespace xs::node

@@ -51,7 +51,6 @@ class InnerNetwork final
     [[nodiscard]] NodeErrorCode Send(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
-
     void SetMessageHandler(InnerNetworkMessageHandler handler);
 
     [[nodiscard]] bool IsRunning() const noexcept;

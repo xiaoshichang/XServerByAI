@@ -1,5 +1,7 @@
 #include "ServerNode.h"
 
+#include <asio/post.hpp>
+
 #include <exception>
 #include <string>
 #include <utility>
@@ -299,6 +301,33 @@ NodeErrorCode ServerNode::Uninit()
     }
 
     return result;
+}
+
+void ServerNode::RequestStop() noexcept
+{
+    if (event_loop_ != nullptr)
+    {
+        try
+        {
+            xs::core::MainEventLoop* loop = event_loop_.get();
+            asio::post(event_loop_->executor(), [loop]() {
+                if (loop != nullptr)
+                {
+                    loop->RequestStop();
+                }
+            });
+        }
+        catch (...)
+        {
+            try
+            {
+                event_loop_->RequestStop();
+            }
+            catch (...)
+            {
+            }
+        }
+    }
 }
 
 const std::filesystem::path& ServerNode::config_path() const noexcept
