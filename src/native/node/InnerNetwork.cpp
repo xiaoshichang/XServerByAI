@@ -49,6 +49,44 @@ std::string ToString(std::uint64_t value)
     return std::to_string(value);
 }
 
+NodeErrorCode MapSocketErrorToNodeError(ipc::ZmqSocketErrorCode code) noexcept
+{
+    switch (code)
+    {
+    case ipc::ZmqSocketErrorCode::None:
+        return NodeErrorCode::None;
+    case ipc::ZmqSocketErrorCode::InvalidState:
+    case ipc::ZmqSocketErrorCode::AlreadyRunning:
+    case ipc::ZmqSocketErrorCode::ContextNotInitialized:
+    case ipc::ZmqSocketErrorCode::EndpointEmpty:
+    case ipc::ZmqSocketErrorCode::PollIntervalMustBePositive:
+    case ipc::ZmqSocketErrorCode::HighWaterMarkNegative:
+    case ipc::ZmqSocketErrorCode::TimingOptionNegative:
+    case ipc::ZmqSocketErrorCode::NotStarted:
+    case ipc::ZmqSocketErrorCode::EmptyRoutingId:
+        return NodeErrorCode::InvalidArgument;
+    case ipc::ZmqSocketErrorCode::SocketCreateFailed:
+    case ipc::ZmqSocketErrorCode::SocketOptionFailed:
+    case ipc::ZmqSocketErrorCode::MonitorEnableFailed:
+    case ipc::ZmqSocketErrorCode::MonitorSocketCreateFailed:
+    case ipc::ZmqSocketErrorCode::MonitorSocketConnectFailed:
+    case ipc::ZmqSocketErrorCode::ConnectFailed:
+    case ipc::ZmqSocketErrorCode::BindFailed:
+    case ipc::ZmqSocketErrorCode::LastEndpointQueryFailed:
+    case ipc::ZmqSocketErrorCode::RoutingIdSendFailed:
+    case ipc::ZmqSocketErrorCode::PayloadSendFailed:
+    case ipc::ZmqSocketErrorCode::MessageSendFailed:
+    case ipc::ZmqSocketErrorCode::ReceiveFailed:
+    case ipc::ZmqSocketErrorCode::MonitorReceiveFailed:
+    case ipc::ZmqSocketErrorCode::MultipartNotSupported:
+    case ipc::ZmqSocketErrorCode::PayloadMissing:
+    case ipc::ZmqSocketErrorCode::TimerPumpFailed:
+        return NodeErrorCode::NodeRunFailed;
+    }
+
+    return NodeErrorCode::NodeRunFailed;
+}
+
 } // namespace
 
 class InnerNetwork::Impl final
@@ -227,6 +265,50 @@ class InnerNetwork::Impl final
         return NodeErrorCode::None;
     }
 
+    [[nodiscard]] NodeErrorCode Send(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload)
+    {
+        if (!initialized_)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork must be initialized before Send().");
+        }
+
+        if (options_.mode == InnerNetworkMode::Disabled)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork send requires passive-listener mode.");
+        }
+
+        if (listener_ == nullptr)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork listener is not configured.");
+        }
+
+        std::string listener_error;
+        const ipc::ZmqSocketErrorCode send_result = listener_->Send(routing_id, payload, &listener_error);
+        if (send_result != ipc::ZmqSocketErrorCode::None)
+        {
+            return SetError(last_error_message_, MapSocketErrorToNodeError(send_result), std::move(listener_error));
+        }
+
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
+    }
+
+    void SetMessageHandler(InnerNetworkMessageHandler handler)
+    {
+        message_handler_ = std::move(handler);
+    }
+
     [[nodiscard]] bool IsRunning() const noexcept
     {
         return listener_ != nullptr && listener_->IsRunning();
@@ -296,6 +378,11 @@ class InnerNetwork::Impl final
             xs::core::LogContextField{"boundEndpoint", bound_endpoint_},
         };
         LogInfo("Inner network listener received payload.", context);
+
+        if (message_handler_)
+        {
+            message_handler_(routing_id, payload);
+        }
     }
 
     template <std::size_t N>
@@ -313,6 +400,7 @@ class InnerNetwork::Impl final
     std::string last_error_message_{};
     std::unique_ptr<ipc::ZmqContext> context_{};
     std::unique_ptr<ipc::ZmqPassiveListener> listener_{};
+    InnerNetworkMessageHandler message_handler_{};
     bool initialized_{false};
 };
 
@@ -344,6 +432,26 @@ NodeErrorCode InnerNetwork::Uninit()
     }
 
     return NodeErrorCode::None;
+}
+
+NodeErrorCode InnerNetwork::Send(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
+    if (impl_ != nullptr)
+    {
+        return impl_->Send(routing_id, payload);
+    }
+
+    return NodeErrorCode::InvalidArgument;
+}
+
+void InnerNetwork::SetMessageHandler(InnerNetworkMessageHandler handler)
+{
+    if (impl_ != nullptr)
+    {
+        impl_->SetMessageHandler(std::move(handler));
+    }
 }
 
 bool InnerNetwork::IsRunning() const noexcept

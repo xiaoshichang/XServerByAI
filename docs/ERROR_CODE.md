@@ -80,7 +80,8 @@
 | `3001` | `Control.NodeIdConflict` | `control` | `Active` | `gm` | `nodeId` 已被活动注册占用，当前连接不能重复注册 |
 | `3002` | `Control.ServiceEndpointInvalid` | `control` | `Active` | `gm` | 注册消息缺少可发布服务地址，或端口配置非法 |
 | `3003` | `Control.NodeNotRegistered` | `control` | `Active` | `gm` | 心跳或其他控制请求没有命中活动节点，当前连接需要重新注册 |
-| `3004` | `Control.ControlChannelInvalid` | `control` | `Active` | `gm` | 当前控制链路已失效或不再拥有该 `nodeId`，发送方必须重新注册 |
+| `3004` | `Control.ControlChannelInvalid` | `control` | `Active` | `gm` | 当前控制链路已失效、已绑定其他活动节点，或不再拥有该 `nodeId`，发送方必须重新注册 |
+| `3005` | `Control.RegisterPayloadInvalid` | `control` | `Active` | `gm` | 注册请求体损坏、缺少必填语义字段，或包含当前阶段不支持的保留字段/扩展内容 |
 
 **已登记 Relay 错误码**
 

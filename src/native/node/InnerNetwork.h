@@ -8,6 +8,8 @@
 #include "ZmqPassiveListener.h"
 
 #include <memory>
+#include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -26,6 +28,8 @@ struct InnerNetworkOptions
     std::string local_endpoint{};
 };
 
+using InnerNetworkMessageHandler = std::function<void(std::span<const std::byte>, std::span<const std::byte>)>;
+
 class InnerNetwork final
 {
   public:
@@ -43,6 +47,10 @@ class InnerNetwork final
     [[nodiscard]] NodeErrorCode Init();
     [[nodiscard]] NodeErrorCode Run();
     [[nodiscard]] NodeErrorCode Uninit();
+    [[nodiscard]] NodeErrorCode Send(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
+    void SetMessageHandler(InnerNetworkMessageHandler handler);
 
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] InnerNetworkMode mode() const noexcept;

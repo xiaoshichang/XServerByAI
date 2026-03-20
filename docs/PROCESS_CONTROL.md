@@ -124,6 +124,8 @@
 4. 默认心跳间隔为 `5000ms`，默认超时阈值为 `15000ms`；GM 可以在响应中覆盖，但必须保证 `heartbeatIntervalMs < heartbeatTimeoutMs`。
 5. 心跳来自未知节点或未完成注册的控制链路时返回 `3003 Control.NodeNotRegistered`；心跳来自已被替换、失效或不再拥有该 `nodeId` 的控制链路时返回 `3004 Control.ControlChannelInvalid`。
 6. `serviceEndpoint.port = 0`、`serviceEndpoint.host` 为空或 `processType` 不合法时，GM 应拒绝注册，并返回 `3000` 或 `3002`。
-7. `load` 中无法提供的数据一律填 `0`，禁止使用负值或未初始化内存表达“未知”。
-8. 当前阶段不额外定义显式注销消息；优雅下线可以通过连接关闭表达，后续如需补充单独的注销消息，再在控制面号段中登记新 `msgId`。
+7. `processFlags` 非零、`nodeId` 为空、`capabilityTags` 超上限、注册消息体截断或尾部残留等“请求体语义或结构非法”场景，GM 应拒绝注册，并返回 `3005 Control.RegisterPayloadInvalid`。
+8. 当前阶段同一 ZeroMQ over TCP 控制链路只允许绑定一个活动节点；如果发送方试图在已绑定活动节点的链路上重新注册其他节点，GM 应返回 `3004 Control.ControlChannelInvalid`。
+9. `load` 中无法提供的数据一律填 `0`，禁止使用负值或未初始化内存表达“未知”。
+10. 当前阶段不额外定义显式注销消息；优雅下线可以通过连接关闭表达，后续如需补充单独的注销消息，再在控制面号段中登记新 `msgId`。
 

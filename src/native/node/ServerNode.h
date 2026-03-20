@@ -28,6 +28,7 @@ class ServerNode
     [[nodiscard]] NodeErrorCode Init();
     [[nodiscard]] NodeErrorCode Run();
     [[nodiscard]] NodeErrorCode Uninit();
+    void RequestStop() noexcept;
 
     [[nodiscard]] const std::filesystem::path& config_path() const noexcept;
     [[nodiscard]] std::string_view selector() const noexcept;
