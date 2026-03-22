@@ -9,9 +9,8 @@
 
 ## 执行命令
 
-- `cmake -S . -B build -DXS_BUILD_TESTS=ON`
-- `cmd /c "set Path=& cmake --build build --config Debug"`
-- `cmd /c "set Path=& ctest --test-dir build -C Debug --output-on-failure"`
+- `cmd /v:on /c "set XS_OLDPATH=%PATH%&& set PATH=& set Path=!XS_OLDPATH!&& C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File .agents\skills\test-feature\scripts\build-native.ps1"`
+- `build-native.ps1` 内部执行 `cmake -S . -B build -DXS_BUILD_TESTS=ON`、`cmake --build build --config Debug` 与 `ctest --test-dir build -C Debug --output-on-failure` 全量 native 验证流程。
 
 ## 结果
 
@@ -24,4 +23,4 @@
 
 ## 备注
 
-- 当前 Windows/MSBuild 环境同时暴露了 `Path` 和 `PATH` 两个环境变量键，直接执行 `cmake --build` 会触发工具链环境冲突；测试记录中的 `cmd /c "set Path=& ..."` 仅用于在子进程中消除该冲突，不影响仓库代码行为。
+- 当前 Windows/MSBuild 环境同时暴露了 `Path` 和 `PATH` 两个环境变量键，直接执行 `build-native.ps1` 内部的 `cmake --build` 会触发工具链环境冲突；本次测试通过 `cmd /v:on /c "set XS_OLDPATH=%PATH%&& set PATH=& set Path=!XS_OLDPATH!&& ..."` 在子进程中归一化 PATH 后执行原始技能脚本，不影响仓库代码行为。
