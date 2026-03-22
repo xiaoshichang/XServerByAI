@@ -91,34 +91,64 @@ xs::core::Json MakeClusterConfigJson(
     const std::filesystem::path& base_path,
     std::uint16_t gm_control_port)
 {
-    const std::string root_log_dir = (base_path / "logs" / "root").string();
-    const std::string gate_log_dir = (base_path / "logs" / "gate").string();
-    const std::string game_log_dir = (base_path / "logs" / "game").string();
+    const std::string root_log_dir = (base_path / "logs").string();
 
     return xs::core::Json{
-        {"serverGroup", {{"id", "local-dev"}, {"environment", "dev"}}},
+        {"env", xs::core::Json{{"id", "local-dev"}, {"environment", "dev"}}},
         {"logging",
-         {{"rootDir", root_log_dir},
-          {"minLevel", "Info"},
-          {"flushIntervalMs", 1000},
-          {"rotateDaily", true},
-          {"maxFileSizeMB", 64},
-          {"maxRetainedFiles", 10}}},
+         xs::core::Json{
+             {"rootDir", root_log_dir},
+             {"minLevel", "Info"},
+             {"flushIntervalMs", 1000},
+             {"rotateDaily", true},
+             {"maxFileSizeMB", 64},
+             {"maxRetainedFiles", 10},
+         }},
+        {"kcp",
+         xs::core::Json{
+             {"mtu", 1200},
+             {"sndwnd", 256},
+             {"rcvwnd", 128},
+             {"nodelay", true},
+             {"intervalMs", 10},
+             {"fastResend", 2},
+             {"noCongestionWindow", false},
+             {"minRtoMs", 30},
+             {"deadLinkCount", 20},
+             {"streamMode", false},
+         }},
         {"gm",
-         {{"control",
-           {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", gm_control_port}}}}}}},
+         xs::core::Json{
+             {"control",
+              xs::core::Json{
+                  {"listenEndpoint",
+                   xs::core::Json{{"host", "127.0.0.1"}, {"port", gm_control_port}}},
+              }},
+         }},
         {"gate",
-         {{"gate0",
-           {{"nodeId", "Gate0"},
-            {"service", {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 7000}}}}},
-            {"kcp", {{"sndwnd", 256}}},
-            {"logging", {{"minLevel", "Debug"}, {"rootDir", gate_log_dir}}}}}}},
+         xs::core::Json{
+             {"Gate0",
+              xs::core::Json{
+                  {"service",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "127.0.0.1"}, {"port", 7000}}},
+                   }},
+              }},
+         }},
         {"game",
-         {{"game0",
-           {{"nodeId", "Game0"},
-            {"service", {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 7100}}}}},
-            {"managed", {{"assemblyName", "XServer.Managed.GameLogic"}}},
-            {"logging", {{"rootDir", game_log_dir}}}}}}},
+         xs::core::Json{
+             {"Game0",
+              xs::core::Json{
+                  {"service",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
+                   }},
+                  {"managed",
+                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
+              }},
+         }},
     };
 }
 
@@ -264,7 +294,7 @@ class RunningGmNode final
     explicit RunningGmNode(const std::filesystem::path& config_path)
         : node_({
               .config_path = config_path,
-              .selector = "gm",
+              .node_id = "GM",
           })
     {
     }

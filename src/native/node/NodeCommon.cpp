@@ -5,7 +5,7 @@ namespace xs::node
 
 std::string_view NodeUsage() noexcept
 {
-    return "Usage: xserver-node <configPath> <gm|gateN|gameN>";
+    return "Usage: xserver-node <configPath> <GM|GateN|GameN>";
 }
 
 std::string_view NodeErrorMessage(NodeErrorCode code) noexcept
@@ -20,10 +20,10 @@ std::string_view NodeErrorMessage(NodeErrorCode code) noexcept
         return "xserver-node requires exactly 2 arguments.";
     case NodeErrorCode::EmptyConfigPath:
         return "configPath must not be empty.";
-    case NodeErrorCode::EmptySelector:
-        return "selector must not be empty.";
-    case NodeErrorCode::InvalidSelector:
-        return "Node selector is invalid.";
+    case NodeErrorCode::EmptyNodeId:
+        return "nodeId must not be empty.";
+    case NodeErrorCode::InvalidNodeId:
+        return "Node ID is invalid.";
     case NodeErrorCode::ConfigLoadFailed:
         return "Failed to load node configuration.";
     case NodeErrorCode::LoggerInitFailed:

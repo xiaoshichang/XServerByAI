@@ -62,31 +62,74 @@ bool WriteJsonFile(const std::filesystem::path& path, const xs::core::Json& valu
     return result == xs::core::JsonErrorCode::None;
 }
 
+bool LoadClusterConfigForTest(
+    const std::filesystem::path& path,
+    xs::core::ClusterConfig* output,
+    std::string* error_message)
+{
+    const xs::core::ConfigErrorCode result = xs::core::LoadClusterConfigFile(path, output, error_message);
+    XS_CHECK_MSG(result == xs::core::ConfigErrorCode::None, error_message != nullptr ? error_message->c_str() : "");
+    return result == xs::core::ConfigErrorCode::None;
+}
+
 xs::core::Json MakeValidClusterConfigJson()
 {
     return xs::core::Json{
-        {"serverGroup", {{"id", "local-dev"}, {"environment", "dev"}}},
+        {"env", xs::core::Json{{"id", "local-dev"}, {"environment", "dev"}}},
         {"logging",
-         {{"rootDir", "logs"},
-          {"minLevel", "Info"},
-          {"flushIntervalMs", 1000},
-          {"rotateDaily", true},
-          {"maxFileSizeMB", 64},
-          {"maxRetainedFiles", 10}}},
+         xs::core::Json{
+             {"rootDir", "logs"},
+             {"minLevel", "Info"},
+             {"flushIntervalMs", 1000},
+             {"rotateDaily", true},
+             {"maxFileSizeMB", 64},
+             {"maxRetainedFiles", 10},
+         }},
+        {"kcp",
+         xs::core::Json{
+             {"mtu", 1200},
+             {"sndwnd", 256},
+             {"rcvwnd", 128},
+             {"nodelay", true},
+             {"intervalMs", 10},
+             {"fastResend", 2},
+             {"noCongestionWindow", false},
+             {"minRtoMs", 30},
+             {"deadLinkCount", 20},
+             {"streamMode", false},
+         }},
         {"gm",
-         {{"control",
-           {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 5000}}}}}}},
+         xs::core::Json{
+             {"control",
+              xs::core::Json{
+                  {"listenEndpoint",
+                   xs::core::Json{{"host", "127.0.0.1"}, {"port", 5000}}},
+              }},
+         }},
         {"gate",
-         {{"gate0",
-           {{"nodeId", "Gate0"},
-            {"service", {{"listenEndpoint", {{"host", "0.0.0.0"}, {"port", 7000}}}}},
-            {"kcp", {{"sndwnd", 256}}},
-            {"logging", {{"minLevel", "Debug"}, {"rootDir", "logs/gate"}}}}}}},
+         xs::core::Json{
+             {"Gate0",
+              xs::core::Json{
+                  {"service",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 7000}}},
+                   }},
+              }},
+         }},
         {"game",
-         {{"game0",
-           {{"nodeId", "Game0"},
-            {"service", {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 7100}}}}},
-            {"logging", {{"rootDir", "logs/game"}}}}}}},
+         xs::core::Json{
+             {"Game0",
+              xs::core::Json{
+                  {"service",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
+                   }},
+                  {"managed",
+                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
+              }},
+         }},
     };
 }
 
@@ -179,14 +222,36 @@ void TestSaveJsonFileRejectsInvalidIndent()
         error_message.c_str());
 }
 
-void TestParseNodeSelector()
+void TestSelectNodeConfigRejectsInvalidNodeId()
 {
-    const auto gate_selector = xs::core::ParseNodeSelector("gate12");
-    XS_CHECK(gate_selector.has_value());
-    XS_CHECK(gate_selector->kind == xs::core::NodeSelectorKind::Gate);
-    XS_CHECK(xs::core::SelectorCanonicalNodeId(*gate_selector) == "Gate12");
-    XS_CHECK(!xs::core::ParseNodeSelector("gate").has_value());
-    XS_CHECK(!xs::core::ParseNodeSelector("bad-selector").has_value());
+    const std::filesystem::path base_path = PrepareTestDirectory("config-invalid-node-id");
+    const std::filesystem::path file_path = base_path / "config.json";
+    const xs::core::Json config_json = MakeValidClusterConfigJson();
+    if (!WriteJsonFile(file_path, config_json))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    xs::core::ClusterConfig cluster_config;
+    std::string error_message;
+    if (!LoadClusterConfigForTest(file_path, &cluster_config, &error_message))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::unique_ptr<xs::core::NodeConfig> node_config;
+    const xs::core::ConfigErrorCode result =
+        xs::core::SelectNodeConfig(cluster_config, "bad-node-id", &node_config, &error_message);
+
+    XS_CHECK(result == xs::core::ConfigErrorCode::InvalidNodeId);
+    XS_CHECK(node_config == nullptr);
+    XS_CHECK_MSG(
+        error_message.find("nodeId must be one of GM, Gate<index>, or Game<index>.") != std::string::npos,
+        error_message.c_str());
+
+    CleanupTestDirectory(base_path);
 }
 
 void TestLoadNodeConfigForGm()
@@ -200,22 +265,34 @@ void TestLoadNodeConfigForGm()
         return;
     }
 
-    xs::core::NodeConfig node_config;
+    xs::core::ClusterConfig cluster_config;
     std::string error_message;
-    const xs::core::ConfigErrorCode success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
+    if (!LoadClusterConfigForTest(file_path, &cluster_config, &error_message))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::unique_ptr<xs::core::NodeConfig> node_config;
+    const xs::core::ConfigErrorCode success =
+        xs::core::SelectNodeConfig(cluster_config, "GM", &node_config, &error_message);
 
     XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
-    XS_CHECK(node_config.process_type == xs::core::ProcessType::Gm);
-    XS_CHECK(node_config.selector == "gm");
-    XS_CHECK(node_config.instance_id == "GM");
-    XS_CHECK(node_config.server_group.id == "local-dev");
-    XS_CHECK(node_config.server_group.environment == "dev");
-    XS_CHECK(node_config.control_listen_endpoint.has_value());
-    XS_CHECK(node_config.control_listen_endpoint->host == "127.0.0.1");
-    XS_CHECK(node_config.control_listen_endpoint->port == 5000);
-    XS_CHECK(!node_config.service_listen_endpoint.has_value());
-    XS_CHECK(node_config.logging.root_dir == "logs");
-    XS_CHECK(node_config.logging.min_level == xs::core::LogLevel::Info);
+    XS_CHECK(node_config != nullptr);
+    XS_CHECK(node_config->process_type == xs::core::ProcessType::Gm);
+    XS_CHECK(node_config->node_id == "GM");
+    XS_CHECK(cluster_config.env.id == "local-dev");
+    XS_CHECK(cluster_config.env.environment == "dev");
+    XS_CHECK(cluster_config.logging.root_dir == "logs");
+    XS_CHECK(cluster_config.logging.min_level == xs::core::LogLevel::Info);
+
+    const auto* gm_node_config = dynamic_cast<const xs::core::GmNodeConfig*>(node_config.get());
+    XS_CHECK(gm_node_config != nullptr);
+    if (gm_node_config != nullptr)
+    {
+        XS_CHECK(gm_node_config->control_listen_endpoint.host == "127.0.0.1");
+        XS_CHECK(gm_node_config->control_listen_endpoint.port == 5000);
+    }
 
     CleanupTestDirectory(base_path);
 }
@@ -231,24 +308,35 @@ void TestLoadNodeConfigForGate()
         return;
     }
 
-    xs::core::NodeConfig node_config;
+    xs::core::ClusterConfig cluster_config;
     std::string error_message;
+    if (!LoadClusterConfigForTest(file_path, &cluster_config, &error_message))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::unique_ptr<xs::core::NodeConfig> node_config;
     const xs::core::ConfigErrorCode success =
-        xs::core::LoadNodeConfigFile(file_path, "gate0", &node_config, &error_message);
+        xs::core::SelectNodeConfig(cluster_config, "Gate0", &node_config, &error_message);
 
     XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
-    XS_CHECK(node_config.process_type == xs::core::ProcessType::Gate);
-    XS_CHECK(node_config.selector == "gate0");
-    XS_CHECK(node_config.instance_id == "Gate0");
-    XS_CHECK(node_config.service_listen_endpoint.has_value());
-    XS_CHECK(node_config.service_listen_endpoint->host == "0.0.0.0");
-    XS_CHECK(node_config.service_listen_endpoint->port == 7000);
-    XS_CHECK(node_config.kcp.has_value());
-    XS_CHECK(node_config.kcp->sndwnd == 256);
-    XS_CHECK(node_config.kcp->mtu == 1200);
-    XS_CHECK(node_config.kcp->interval_ms == 10);
-    XS_CHECK(node_config.logging.root_dir == "logs/gate");
-    XS_CHECK(node_config.logging.min_level == xs::core::LogLevel::Debug);
+    XS_CHECK(node_config != nullptr);
+    XS_CHECK(node_config->process_type == xs::core::ProcessType::Gate);
+    XS_CHECK(node_config->node_id == "Gate0");
+    XS_CHECK(cluster_config.logging.root_dir == "logs");
+    XS_CHECK(cluster_config.logging.min_level == xs::core::LogLevel::Info);
+
+    const auto* gate_node_config = dynamic_cast<const xs::core::GateNodeConfig*>(node_config.get());
+    XS_CHECK(gate_node_config != nullptr);
+    if (gate_node_config != nullptr)
+    {
+        XS_CHECK(gate_node_config->service_listen_endpoint.host == "0.0.0.0");
+        XS_CHECK(gate_node_config->service_listen_endpoint.port == 7000);
+    }
+    XS_CHECK(cluster_config.kcp.sndwnd == 256);
+    XS_CHECK(cluster_config.kcp.mtu == 1200);
+    XS_CHECK(cluster_config.kcp.interval_ms == 10);
 
     CleanupTestDirectory(base_path);
 }
@@ -264,22 +352,33 @@ void TestLoadNodeConfigForGame()
         return;
     }
 
-    xs::core::NodeConfig node_config;
+    xs::core::ClusterConfig cluster_config;
     std::string error_message;
+    if (!LoadClusterConfigForTest(file_path, &cluster_config, &error_message))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::unique_ptr<xs::core::NodeConfig> node_config;
     const xs::core::ConfigErrorCode success =
-        xs::core::LoadNodeConfigFile(file_path, "game0", &node_config, &error_message);
+        xs::core::SelectNodeConfig(cluster_config, "Game0", &node_config, &error_message);
 
     XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
-    XS_CHECK(node_config.process_type == xs::core::ProcessType::Game);
-    XS_CHECK(node_config.selector == "game0");
-    XS_CHECK(node_config.instance_id == "Game0");
-    XS_CHECK(node_config.service_listen_endpoint.has_value());
-    XS_CHECK(node_config.service_listen_endpoint->host == "127.0.0.1");
-    XS_CHECK(node_config.service_listen_endpoint->port == 7100);
-    XS_CHECK(node_config.managed.has_value());
-    XS_CHECK(node_config.managed->assembly_name == "XServer.Managed.GameLogic");
-    XS_CHECK(node_config.logging.root_dir == "logs/game");
-    XS_CHECK(node_config.logging.min_level == xs::core::LogLevel::Info);
+    XS_CHECK(node_config != nullptr);
+    XS_CHECK(node_config->process_type == xs::core::ProcessType::Game);
+    XS_CHECK(node_config->node_id == "Game0");
+    XS_CHECK(cluster_config.logging.root_dir == "logs");
+    XS_CHECK(cluster_config.logging.min_level == xs::core::LogLevel::Info);
+
+    const auto* game_node_config = dynamic_cast<const xs::core::GameNodeConfig*>(node_config.get());
+    XS_CHECK(game_node_config != nullptr);
+    if (game_node_config != nullptr)
+    {
+        XS_CHECK(game_node_config->service_listen_endpoint.host == "127.0.0.1");
+        XS_CHECK(game_node_config->service_listen_endpoint.port == 7100);
+        XS_CHECK(game_node_config->managed.assembly_name == "XServer.Managed.GameLogic");
+    }
 
     CleanupTestDirectory(base_path);
 }
@@ -296,9 +395,10 @@ void TestLoadNodeConfigRejectsUnknownTopLevelField()
         return;
     }
 
-    xs::core::NodeConfig node_config;
+    xs::core::ClusterConfig cluster_config;
     std::string error_message;
-    const xs::core::ConfigErrorCode success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadClusterConfigFile(file_path, &cluster_config, &error_message);
 
     XS_CHECK(success == xs::core::ConfigErrorCode::UnknownField);
     XS_CHECK_MSG(error_message.find("unexpected") != std::string::npos, error_message.c_str());
@@ -318,9 +418,10 @@ void TestLoadNodeConfigRejectsUnknownLoggingField()
         return;
     }
 
-    xs::core::NodeConfig node_config;
+    xs::core::ClusterConfig cluster_config;
     std::string error_message;
-    const xs::core::ConfigErrorCode success = xs::core::LoadNodeConfigFile(file_path, "gm", &node_config, &error_message);
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadClusterConfigFile(file_path, &cluster_config, &error_message);
 
     XS_CHECK(success == xs::core::ConfigErrorCode::UnknownField);
     XS_CHECK_MSG(error_message.find("unexpectedField") != std::string::npos, error_message.c_str());
@@ -328,25 +429,26 @@ void TestLoadNodeConfigRejectsUnknownLoggingField()
     CleanupTestDirectory(base_path);
 }
 
-void TestLoadNodeConfigRejectsMismatchedNodeId()
+void TestLoadNodeConfigRejectsInvalidGateNodeId()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("config-mismatched-node-id");
+    const std::filesystem::path base_path = PrepareTestDirectory("config-invalid-gate-node-id");
     const std::filesystem::path file_path = base_path / "config.json";
     xs::core::Json config_json = MakeValidClusterConfigJson();
-    config_json["gate"]["gate0"]["nodeId"] = "Gate7";
+    config_json["gate"]["gate0"] = config_json["gate"]["Gate0"];
+    config_json["gate"].erase("Gate0");
     if (!WriteJsonFile(file_path, config_json))
     {
         CleanupTestDirectory(base_path);
         return;
     }
 
-    xs::core::NodeConfig node_config;
+    xs::core::ClusterConfig cluster_config;
     std::string error_message;
     const xs::core::ConfigErrorCode success =
-        xs::core::LoadNodeConfigFile(file_path, "gate0", &node_config, &error_message);
+        xs::core::LoadClusterConfigFile(file_path, &cluster_config, &error_message);
 
     XS_CHECK(success == xs::core::ConfigErrorCode::InvalidNodeId);
-    XS_CHECK_MSG(error_message.find("Gate0") != std::string::npos, error_message.c_str());
+    XS_CHECK_MSG(error_message.find("gate.gate0") != std::string::npos, error_message.c_str());
 
     CleanupTestDirectory(base_path);
 }
@@ -360,13 +462,13 @@ int main()
     TestDeserializeTypedConfig();
     TestSaveAndLoadJsonFileRoundTrip();
     TestSaveJsonFileRejectsInvalidIndent();
-    TestParseNodeSelector();
+    TestSelectNodeConfigRejectsInvalidNodeId();
     TestLoadNodeConfigForGm();
     TestLoadNodeConfigForGate();
     TestLoadNodeConfigForGame();
     TestLoadNodeConfigRejectsUnknownTopLevelField();
     TestLoadNodeConfigRejectsUnknownLoggingField();
-    TestLoadNodeConfigRejectsMismatchedNodeId();
+    TestLoadNodeConfigRejectsInvalidGateNodeId();
 
     if (g_failures != 0)
     {

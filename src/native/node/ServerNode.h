@@ -31,7 +31,6 @@ class ServerNode
     void RequestStop() noexcept;
 
     [[nodiscard]] const std::filesystem::path& config_path() const noexcept;
-    [[nodiscard]] std::string_view selector() const noexcept;
     [[nodiscard]] xs::core::ProcessType process_type() const noexcept;
     [[nodiscard]] std::string_view node_id() const noexcept;
     [[nodiscard]] std::uint32_t pid() const noexcept;
@@ -40,6 +39,7 @@ class ServerNode
     [[nodiscard]] std::string_view last_error_message() const noexcept;
 
   protected:
+    [[nodiscard]] const xs::core::ClusterConfig& cluster_config() const noexcept;
     [[nodiscard]] xs::core::Logger& logger() const noexcept;
     [[nodiscard]] xs::core::MainEventLoop& event_loop() const noexcept;
     [[nodiscard]] NodeErrorCode SetError(NodeErrorCode code, std::string message = {});
@@ -54,10 +54,11 @@ class ServerNode
     void ReleaseCoreState() noexcept;
 
     NodeCommandLineArgs args_{};
+    xs::core::ClusterConfig cluster_config_{};
     xs::core::ProcessType process_type_{xs::core::ProcessType::Gm};
     std::string node_id_{};
     std::uint32_t pid_{0U};
-    xs::core::NodeConfig node_config_{};
+    std::unique_ptr<xs::core::NodeConfig> node_config_{};
     std::unique_ptr<xs::core::Logger> logger_{};
     std::unique_ptr<xs::core::MainEventLoop> event_loop_{};
     std::string last_error_message_{};

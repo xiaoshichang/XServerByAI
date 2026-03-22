@@ -26,30 +26,32 @@ std::uint32_t GetCurrentProcessIdValue() noexcept
 #endif
 }
 
-std::string BuildDefaultThreadName(std::string_view selector)
+std::string BuildDefaultThreadName(std::string_view node_id)
 {
-    if (selector.empty())
+    if (node_id.empty())
     {
         return "xs-node";
     }
 
-    return "xs-" + std::string(selector);
+    return "xs-" + std::string(node_id);
 }
 
-xs::core::LoggerOptions BuildLoggerOptions(const xs::core::NodeConfig& node_config)
+xs::core::LoggerOptions BuildLoggerOptions(
+    const xs::core::ClusterConfig& cluster_config,
+    const xs::core::NodeConfig& node_config)
 {
     xs::core::LoggerOptions options;
     options.process_type = node_config.process_type;
-    options.instance_id = node_config.instance_id;
-    options.config = node_config.logging;
+    options.instance_id = node_config.node_id;
+    options.config = cluster_config.logging;
     return options;
 }
 
 NodeErrorCode MapConfigError(xs::core::ConfigErrorCode code) noexcept
 {
-    if (code == xs::core::ConfigErrorCode::InvalidSelector)
+    if (code == xs::core::ConfigErrorCode::InvalidNodeId)
     {
-        return NodeErrorCode::InvalidSelector;
+        return NodeErrorCode::InvalidNodeId;
     }
 
     return NodeErrorCode::ConfigLoadFailed;
@@ -82,28 +84,41 @@ NodeErrorCode ServerNode::Init()
         return SetError(NodeErrorCode::EmptyConfigPath, "configPath must not be empty.");
     }
 
-    if (args_.selector.empty())
+    if (args_.node_id.empty())
     {
-        return SetError(NodeErrorCode::EmptySelector, "selector must not be empty.");
+        return SetError(NodeErrorCode::EmptyNodeId, "nodeId must not be empty.");
     }
 
-    node_config_ = xs::core::NodeConfig{};
+    node_config_.reset();
+    cluster_config_ = xs::core::ClusterConfig{};
 
     std::string detail_error;
-    const xs::core::ConfigErrorCode load_result =
-        xs::core::LoadNodeConfigFile(args_.config_path, args_.selector, &node_config_, &detail_error);
-    if (load_result != xs::core::ConfigErrorCode::None)
+    const xs::core::ConfigErrorCode load_cluster_result =
+        xs::core::LoadClusterConfigFile(args_.config_path, &cluster_config_, &detail_error);
+    if (load_cluster_result != xs::core::ConfigErrorCode::None)
     {
         if (detail_error.empty())
         {
-            detail_error = std::string(xs::core::ConfigErrorMessage(load_result));
+            detail_error = std::string(NodeErrorMessage(MapConfigError(load_cluster_result)));
         }
 
-        return SetError(MapConfigError(load_result), std::move(detail_error));
+        return SetError(MapConfigError(load_cluster_result), std::move(detail_error));
     }
 
-    process_type_ = node_config_.process_type;
-    node_id_ = node_config_.instance_id;
+    const xs::core::ConfigErrorCode select_result =
+        xs::core::SelectNodeConfig(cluster_config_, args_.node_id, &node_config_, &detail_error);
+    if (select_result != xs::core::ConfigErrorCode::None)
+    {
+        if (detail_error.empty())
+        {
+            detail_error = std::string(NodeErrorMessage(MapConfigError(select_result)));
+        }
+
+        return SetError(MapConfigError(select_result), std::move(detail_error));
+    }
+
+    process_type_ = node_config_->process_type;
+    node_id_ = node_config_->node_id;
     pid_ = GetCurrentProcessIdValue();
 
     const xs::core::ProcessType expected_process_type = role_process_type();
@@ -115,7 +130,7 @@ NodeErrorCode ServerNode::Init()
 
     try
     {
-        logger_ = std::make_unique<xs::core::Logger>(BuildLoggerOptions(node_config_));
+        logger_ = std::make_unique<xs::core::Logger>(BuildLoggerOptions(cluster_config_, *node_config_));
     }
     catch (const std::exception& exception)
     {
@@ -133,7 +148,7 @@ NodeErrorCode ServerNode::Init()
     try
     {
         xs::core::MainEventLoopOptions options;
-        options.thread_name = BuildDefaultThreadName(selector());
+        options.thread_name = BuildDefaultThreadName(node_id());
         event_loop_ = std::make_unique<xs::core::MainEventLoop>(std::move(options));
     }
     catch (const std::exception& exception)
@@ -335,11 +350,6 @@ const std::filesystem::path& ServerNode::config_path() const noexcept
     return args_.config_path;
 }
 
-std::string_view ServerNode::selector() const noexcept
-{
-    return args_.selector;
-}
-
 xs::core::ProcessType ServerNode::process_type() const noexcept
 {
     return process_type_;
@@ -357,7 +367,7 @@ std::uint32_t ServerNode::pid() const noexcept
 
 const xs::core::NodeConfig& ServerNode::node_config() const noexcept
 {
-    return node_config_;
+    return *node_config_;
 }
 
 bool ServerNode::initialized() const noexcept
@@ -368,6 +378,11 @@ bool ServerNode::initialized() const noexcept
 std::string_view ServerNode::last_error_message() const noexcept
 {
     return last_error_message_;
+}
+
+const xs::core::ClusterConfig& ServerNode::cluster_config() const noexcept
+{
+    return cluster_config_;
 }
 
 xs::core::Logger& ServerNode::logger() const noexcept
@@ -414,7 +429,8 @@ void ServerNode::ReleaseCoreState() noexcept
 
     event_loop_.reset();
     logger_.reset();
-    node_config_ = xs::core::NodeConfig{};
+    node_config_.reset();
+    cluster_config_ = xs::core::ClusterConfig{};
     process_type_ = xs::core::ProcessType::Gm;
     node_id_.clear();
     pid_ = 0U;

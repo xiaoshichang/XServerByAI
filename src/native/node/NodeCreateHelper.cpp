@@ -4,16 +4,65 @@
 #include "GateNode.h"
 #include "GmNode.h"
 
-#include "Config.h"
-
 #include <exception>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace xs::node
 {
+namespace
+{
+
+enum class ParsedNodeKind : std::uint8_t
+{
+    Gm,
+    Gate,
+    Game,
+};
+
+bool HasDigitsSuffix(std::string_view value, std::size_t prefix_length) noexcept
+{
+    if (value.size() <= prefix_length)
+    {
+        return false;
+    }
+
+    for (std::size_t index = prefix_length; index < value.size(); ++index)
+    {
+        const char ch = value[index];
+        if (ch < '0' || ch > '9')
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::optional<ParsedNodeKind> ParseNodeKind(std::string_view node_id) noexcept
+{
+    if (node_id == "GM")
+    {
+        return ParsedNodeKind::Gm;
+    }
+
+    if (node_id.starts_with("Gate") && HasDigitsSuffix(node_id, 4U))
+    {
+        return ParsedNodeKind::Gate;
+    }
+
+    if (node_id.starts_with("Game") && HasDigitsSuffix(node_id, 4U))
+    {
+        return ParsedNodeKind::Game;
+    }
+
+    return std::nullopt;
+}
+
+} // namespace
 
 NodeCreateHelper::NodeCreateHelper(NodeCommandLineArgs args)
     : args_(std::move(args))
@@ -34,16 +83,16 @@ NodeErrorCode NodeCreateHelper::ParseCommandLine(int argc, char* argv[])
 
     NodeCommandLineArgs parsed_args;
     parsed_args.config_path = argv[1];
-    parsed_args.selector = argv[2];
+    parsed_args.node_id = argv[2];
 
     if (parsed_args.config_path.empty())
     {
         return SetError(NodeErrorCode::EmptyConfigPath, "configPath must not be empty.");
     }
 
-    if (parsed_args.selector.empty())
+    if (parsed_args.node_id.empty())
     {
-        return SetError(NodeErrorCode::EmptySelector, "selector must not be empty.");
+        return SetError(NodeErrorCode::EmptyNodeId, "nodeId must not be empty.");
     }
 
     args_ = std::move(parsed_args);
@@ -65,32 +114,32 @@ NodeErrorCode NodeCreateHelper::CreateNode(ServerNodePtr* output)
         return SetError(NodeErrorCode::EmptyConfigPath, "configPath must not be empty.");
     }
 
-    if (args_.selector.empty())
+    if (args_.node_id.empty())
     {
-        return SetError(NodeErrorCode::EmptySelector, "selector must not be empty.");
+        return SetError(NodeErrorCode::EmptyNodeId, "nodeId must not be empty.");
     }
 
-    const std::optional<xs::core::NodeSelector> parsed_selector = xs::core::ParseNodeSelector(args_.selector);
-    if (!parsed_selector.has_value())
+    const std::optional<ParsedNodeKind> parsed_node = ParseNodeKind(args_.node_id);
+    if (!parsed_node.has_value())
     {
         return SetError(
-            NodeErrorCode::InvalidSelector,
-            "selector must be one of gm, gate<index>, or game<index>.");
+            NodeErrorCode::InvalidNodeId,
+            "nodeId must be one of GM, Gate<index>, or Game<index>.");
     }
 
     try
     {
-        switch (parsed_selector->kind)
+        switch (*parsed_node)
         {
-        case xs::core::NodeSelectorKind::Gm:
+        case ParsedNodeKind::Gm:
             *output = std::make_unique<GmNode>(args_);
             break;
 
-        case xs::core::NodeSelectorKind::Gate:
+        case ParsedNodeKind::Gate:
             *output = std::make_unique<GateNode>(args_);
             break;
 
-        case xs::core::NodeSelectorKind::Game:
+        case ParsedNodeKind::Game:
             *output = std::make_unique<GameNode>(args_);
             break;
         }

@@ -65,7 +65,7 @@ NodeErrorCode GateNode::OnRun()
         return SetError(client_result, std::string(client_network_->last_error_message()));
     }
 
-    const std::string message = "Gate node placeholder started for selector '" + std::string(selector()) + "'.";
+    const std::string message = "Gate node placeholder started for nodeId '" + std::string(node_id()) + "'.";
     logger().Log(xs::core::LogLevel::Info, "runtime", message);
 
     event_loop().RequestStop();

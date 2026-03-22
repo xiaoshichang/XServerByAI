@@ -62,34 +62,64 @@ bool WriteJsonFile(const std::filesystem::path& path, const xs::core::Json& valu
 
 xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path)
 {
-    const std::string root_log_dir = (base_path / "logs" / "root").string();
-    const std::string gate_log_dir = (base_path / "logs" / "gate").string();
-    const std::string game_log_dir = (base_path / "logs" / "game").string();
+    const std::string root_log_dir = (base_path / "logs").string();
 
     return xs::core::Json{
-        {"serverGroup", {{"id", "local-dev"}, {"environment", "dev"}}},
+        {"env", xs::core::Json{{"id", "local-dev"}, {"environment", "dev"}}},
         {"logging",
-         {{"rootDir", root_log_dir},
-          {"minLevel", "Info"},
-          {"flushIntervalMs", 1000},
-          {"rotateDaily", true},
-          {"maxFileSizeMB", 64},
-          {"maxRetainedFiles", 10}}},
+         xs::core::Json{
+             {"rootDir", root_log_dir},
+             {"minLevel", "Info"},
+             {"flushIntervalMs", 1000},
+             {"rotateDaily", true},
+             {"maxFileSizeMB", 64},
+             {"maxRetainedFiles", 10},
+         }},
+        {"kcp",
+         xs::core::Json{
+             {"mtu", 1200},
+             {"sndwnd", 256},
+             {"rcvwnd", 128},
+             {"nodelay", true},
+             {"intervalMs", 10},
+             {"fastResend", 2},
+             {"noCongestionWindow", false},
+             {"minRtoMs", 30},
+             {"deadLinkCount", 20},
+             {"streamMode", false},
+         }},
         {"gm",
-         {{"control",
-           {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 5000}}}}}}},
+         xs::core::Json{
+             {"control",
+              xs::core::Json{
+                  {"listenEndpoint",
+                   xs::core::Json{{"host", "127.0.0.1"}, {"port", 5000}}},
+              }},
+         }},
         {"gate",
-         {{"gate0",
-           {{"nodeId", "Gate0"},
-            {"service", {{"listenEndpoint", {{"host", "0.0.0.0"}, {"port", 7000}}}}},
-            {"kcp", {{"sndwnd", 256}}},
-            {"logging", {{"minLevel", "Debug"}, {"rootDir", gate_log_dir}}}}}}},
+         xs::core::Json{
+             {"Gate0",
+              xs::core::Json{
+                  {"service",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 7000}}},
+                   }},
+              }},
+         }},
         {"game",
-         {{"game0",
-           {{"nodeId", "Game0"},
-            {"service", {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 7100}}}}},
-            {"managed", {{"assemblyName", "XServer.Managed.GameLogic"}}},
-            {"logging", {{"rootDir", game_log_dir}}}}}}},
+         xs::core::Json{
+             {"Game0",
+              xs::core::Json{
+                  {"service",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
+                   }},
+                  {"managed",
+                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
+              }},
+         }},
     };
 }
 
@@ -263,8 +293,8 @@ void TestNodeCreateHelperParsesCommandLineSuccess()
 {
     char program[] = "xserver-node";
     char config_path[] = "configs/local-dev.json";
-    char selector[] = "gate0";
-    char* argv[] = {program, config_path, selector};
+    char node_id[] = "Gate0";
+    char* argv[] = {program, config_path, node_id};
 
     xs::node::NodeCreateHelper create_helper;
     const xs::node::NodeErrorCode result = create_helper.ParseCommandLine(3, argv);
@@ -272,7 +302,7 @@ void TestNodeCreateHelperParsesCommandLineSuccess()
     XS_CHECK(result == xs::node::NodeErrorCode::None);
     XS_CHECK(create_helper.last_error_message().empty());
     XS_CHECK(create_helper.args().config_path == std::filesystem::path(config_path));
-    XS_CHECK(create_helper.args().selector == "gate0");
+    XS_CHECK(create_helper.args().node_id == "Gate0");
 }
 
 void TestNodeCreateHelperRejectsInvalidArgumentCount()
@@ -292,8 +322,8 @@ void TestNodeCreateHelperRejectsEmptyConfigPath()
 {
     char program[] = "xserver-node";
     char config_path[] = "";
-    char selector[] = "gm";
-    char* argv[] = {program, config_path, selector};
+    char node_id[] = "GM";
+    char* argv[] = {program, config_path, node_id};
 
     xs::node::NodeCreateHelper create_helper;
     const xs::node::NodeErrorCode result = create_helper.ParseCommandLine(3, argv);
@@ -304,48 +334,48 @@ void TestNodeCreateHelperRejectsEmptyConfigPath()
         create_helper.last_error_message().data());
 }
 
-void TestNodeCreateHelperRejectsEmptySelector()
+void TestNodeCreateHelperRejectsEmptyNodeId()
 {
     char program[] = "xserver-node";
     char config_path[] = "configs/local-dev.json";
-    char selector[] = "";
-    char* argv[] = {program, config_path, selector};
+    char node_id[] = "";
+    char* argv[] = {program, config_path, node_id};
 
     xs::node::NodeCreateHelper create_helper;
     const xs::node::NodeErrorCode result = create_helper.ParseCommandLine(3, argv);
 
-    XS_CHECK(result == xs::node::NodeErrorCode::EmptySelector);
+    XS_CHECK(result == xs::node::NodeErrorCode::EmptyNodeId);
     XS_CHECK_MSG(
-        std::string(create_helper.last_error_message()).find("selector") != std::string::npos,
+        std::string(create_helper.last_error_message()).find("nodeId") != std::string::npos,
         create_helper.last_error_message().data());
 }
 
-void TestNodeCreateHelperRejectsInvalidSelector()
+void TestNodeCreateHelperRejectsInvalidNodeId()
 {
     xs::node::NodeCreateHelper create_helper({
         .config_path = "configs/local-dev.json",
-        .selector = "bad",
+        .node_id = "bad",
     });
 
     xs::node::ServerNodePtr node;
     const xs::node::NodeErrorCode result = create_helper.CreateNode(&node);
 
-    XS_CHECK(result == xs::node::NodeErrorCode::InvalidSelector);
+    XS_CHECK(result == xs::node::NodeErrorCode::InvalidNodeId);
     XS_CHECK(node == nullptr);
     XS_CHECK_MSG(
-        std::string(create_helper.last_error_message()).find("selector") != std::string::npos,
+        std::string(create_helper.last_error_message()).find("nodeId") != std::string::npos,
         create_helper.last_error_message().data());
 }
 
 void VerifyDefaultNodeCreation(
-    std::string_view selector,
+    std::string_view node_id,
     bool expect_gm,
     bool expect_gate,
     bool expect_game)
 {
     xs::node::NodeCreateHelper create_helper({
         .config_path = "configs/local-dev.json",
-        .selector = std::string(selector),
+        .node_id = std::string(node_id),
     });
 
     xs::node::ServerNodePtr node;
@@ -360,17 +390,17 @@ void VerifyDefaultNodeCreation(
 
 void TestNodeCreateHelperDispatchesGm()
 {
-    VerifyDefaultNodeCreation("gm", true, false, false);
+    VerifyDefaultNodeCreation("GM", true, false, false);
 }
 
 void TestNodeCreateHelperDispatchesGate()
 {
-    VerifyDefaultNodeCreation("gate0", false, true, false);
+    VerifyDefaultNodeCreation("Gate0", false, true, false);
 }
 
 void TestNodeCreateHelperDispatchesGame()
 {
-    VerifyDefaultNodeCreation("game0", false, false, true);
+    VerifyDefaultNodeCreation("Game0", false, false, true);
 }
 
 void TestServerNodeLifecycleLoadsConfigAndRunsEventLoop()
@@ -393,7 +423,7 @@ void TestServerNodeLifecycleLoadsConfigAndRunsEventLoop()
 
     TestServerNode node({
                             .config_path = config_path,
-                            .selector = "gate0",
+                            .node_id = "Gate0",
                         },
                         std::move(options),
                         &init_called,
@@ -437,7 +467,7 @@ void TestServerNodeRejectsProcessTypeMismatch()
 
     TestServerNode node({
                             .config_path = config_path,
-                            .selector = "gate0",
+                            .node_id = "Gate0",
                         },
                         std::move(options),
                         &init_called,
@@ -476,7 +506,7 @@ void TestServerNodePropagatesInitFailureAndCleansUp()
 
     TestServerNode node({
                             .config_path = config_path,
-                            .selector = "gate0",
+                            .node_id = "Gate0",
                         },
                         std::move(options),
                         &init_called,
@@ -516,7 +546,7 @@ void TestServerNodePropagatesRunFailure()
 
     TestServerNode node({
                             .config_path = config_path,
-                            .selector = "gate0",
+                            .node_id = "Gate0",
                         },
                         std::move(options),
                         &init_called,
@@ -552,7 +582,7 @@ void TestDefaultNodeLifecycleUsesCreateHelper()
 
     xs::node::NodeCreateHelper create_helper({
         .config_path = config_path,
-        .selector = "gate0",
+        .node_id = "Gate0",
     });
 
     xs::node::ServerNodePtr node;
@@ -568,7 +598,7 @@ void TestDefaultNodeLifecycleUsesCreateHelper()
 
     const xs::node::NodeErrorCode uninit_result = node->Uninit();
     XS_CHECK_MSG(uninit_result == xs::node::NodeErrorCode::None, node->last_error_message().data());
-    XS_CHECK(DirectoryContainsRegularFile(base_path / "logs" / "gate"));
+    XS_CHECK(DirectoryContainsRegularFile(base_path / "logs"));
 
     CleanupTestDirectory(base_path);
 }
@@ -580,8 +610,8 @@ int main()
     TestNodeCreateHelperParsesCommandLineSuccess();
     TestNodeCreateHelperRejectsInvalidArgumentCount();
     TestNodeCreateHelperRejectsEmptyConfigPath();
-    TestNodeCreateHelperRejectsEmptySelector();
-    TestNodeCreateHelperRejectsInvalidSelector();
+    TestNodeCreateHelperRejectsEmptyNodeId();
+    TestNodeCreateHelperRejectsInvalidNodeId();
     TestNodeCreateHelperDispatchesGm();
     TestNodeCreateHelperDispatchesGate();
     TestNodeCreateHelperDispatchesGame();

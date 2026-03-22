@@ -4,21 +4,13 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <functional>
 #include <map>
-#include <optional>
+#include <memory>
 #include <string>
 #include <string_view>
 
 namespace xs::core
 {
-
-enum class NodeSelectorKind : std::uint8_t
-{
-    Gm,
-    Gate,
-    Game,
-};
 
 enum class ConfigErrorCode : std::uint8_t
 {
@@ -35,18 +27,11 @@ enum class ConfigErrorCode : std::uint8_t
     ValueOutOfRange,
     InvalidLogLevel,
     InvalidEndpointPort,
-    InvalidSelector,
-    MissingInstance,
     InvalidNodeId,
+    MissingInstance,
     EmptyCollection,
     LoggingConfigInvalid,
     Unknown,
-};
-
-struct NodeSelector
-{
-    NodeSelectorKind kind{NodeSelectorKind::Gm};
-    std::string value{"gm"};
 };
 
 struct EndpointConfig
@@ -55,7 +40,7 @@ struct EndpointConfig
     std::uint16_t port{};
 };
 
-struct ServerGroupConfig
+struct EnvConfig
 {
     std::string id;
     std::string environment;
@@ -83,31 +68,24 @@ struct ManagedConfig
 struct GmConfig
 {
     EndpointConfig control_listen_endpoint;
-    LoggingConfig logging{};
 };
 
 struct GateConfig
 {
-    std::string selector;
-    std::string node_id;
     EndpointConfig service_listen_endpoint;
-    KcpConfig kcp{};
-    LoggingConfig logging{};
 };
 
 struct GameConfig
 {
-    std::string selector;
-    std::string node_id;
     EndpointConfig service_listen_endpoint;
     ManagedConfig managed{};
-    LoggingConfig logging{};
 };
 
 struct ClusterConfig
 {
-    ServerGroupConfig server_group;
-    LoggingConfig logging_defaults{};
+    EnvConfig env;
+    LoggingConfig logging{};
+    KcpConfig kcp{};
     GmConfig gm{};
     std::map<std::string, GateConfig, std::less<>> gates;
     std::map<std::string, GameConfig, std::less<>> games;
@@ -115,34 +93,36 @@ struct ClusterConfig
 
 struct NodeConfig
 {
+    virtual ~NodeConfig() = default;
+
     ProcessType process_type{ProcessType::Gm};
-    std::string selector{"gm"};
-    std::string instance_id{"GM"};
-    std::filesystem::path source_path;
-    ServerGroupConfig server_group{};
-    LoggingConfig logging{};
-    std::optional<EndpointConfig> control_listen_endpoint;
-    std::optional<EndpointConfig> service_listen_endpoint;
-    std::optional<KcpConfig> kcp;
-    std::optional<ManagedConfig> managed;
+    std::string node_id{"GM"};
 };
 
-[[nodiscard]] std::optional<NodeSelector> ParseNodeSelector(std::string_view selector) noexcept;
-[[nodiscard]] std::string SelectorCanonicalNodeId(const NodeSelector& selector);
-[[nodiscard]] std::string_view ConfigErrorMessage(ConfigErrorCode code) noexcept;
+struct GmNodeConfig final : NodeConfig
+{
+    EndpointConfig control_listen_endpoint{};
+};
+
+struct GateNodeConfig final : NodeConfig
+{
+    EndpointConfig service_listen_endpoint{};
+};
+
+struct GameNodeConfig final : NodeConfig
+{
+    EndpointConfig service_listen_endpoint{};
+    ManagedConfig managed{};
+};
+
 [[nodiscard]] ConfigErrorCode LoadClusterConfigFile(
     const std::filesystem::path& path,
     ClusterConfig* output,
     std::string* error_message = nullptr);
 [[nodiscard]] ConfigErrorCode SelectNodeConfig(
     const ClusterConfig& cluster_config,
-    std::string_view selector,
-    NodeConfig* output,
-    std::string* error_message = nullptr);
-[[nodiscard]] ConfigErrorCode LoadNodeConfigFile(
-    const std::filesystem::path& path,
-    std::string_view selector,
-    NodeConfig* output,
+    std::string_view node_id,
+    std::unique_ptr<NodeConfig>* output,
     std::string* error_message = nullptr);
 
 } // namespace xs::core

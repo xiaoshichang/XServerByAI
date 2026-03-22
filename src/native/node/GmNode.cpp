@@ -185,12 +185,13 @@ xs::core::ProcessType GmNode::role_process_type() const noexcept
 
 NodeErrorCode GmNode::OnInit()
 {
-    if (!node_config().control_listen_endpoint.has_value())
+    const auto* config = dynamic_cast<const xs::core::GmNodeConfig*>(&node_config());
+    if (config == nullptr)
     {
-        return SetError(NodeErrorCode::ConfigLoadFailed, "GM node configuration must define control.listenEndpoint.");
+        return SetError(NodeErrorCode::ConfigLoadFailed, "GM node requires a GM-specific node configuration.");
     }
 
-    const xs::core::EndpointConfig& endpoint = *node_config().control_listen_endpoint;
+    const xs::core::EndpointConfig& endpoint = config->control_listen_endpoint;
     if (endpoint.host.empty())
     {
         return SetError(NodeErrorCode::ConfigLoadFailed, "GM control.listenEndpoint.host must not be empty.");
@@ -255,8 +256,7 @@ NodeErrorCode GmNode::OnRun()
         return SetError(control_run_result, error_message);
     }
 
-    const std::array<xs::core::LogContextField, 3> runtime_context{
-        xs::core::LogContextField{"selector", std::string(selector())},
+    const std::array<xs::core::LogContextField, 2> runtime_context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"controlEndpoint", std::string(inner_network_->bound_endpoint())},
     };

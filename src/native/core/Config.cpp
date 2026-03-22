@@ -4,14 +4,31 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
 
 namespace xs::core
 {
+
+std::string_view ConfigErrorMessage(ConfigErrorCode code) noexcept;
+
 namespace
 {
+
+enum class ParsedNodeKind : std::uint8_t
+{
+    Gm,
+    Gate,
+    Game,
+};
+
+struct ParsedNodeId
+{
+    ParsedNodeKind kind{ParsedNodeKind::Gm};
+    std::string value{"GM"};
+};
 
 void ClearError(std::string* error_message)
 {
@@ -68,21 +85,16 @@ ConfigErrorCode ClassifyConfigError(std::string_view message) noexcept
         return ConfigErrorCode::MissingRequiredField;
     }
 
-    if (message.find(" has invalid selector '") != std::string_view::npos ||
-        message == "selector must be one of gm, gate<index>, or game<index>.")
-    {
-        return ConfigErrorCode::InvalidSelector;
-    }
-
-    if (message.starts_with("Missing gate instance for selector '") ||
-        message.starts_with("Missing game instance for selector '"))
-    {
-        return ConfigErrorCode::MissingInstance;
-    }
-
-    if (message.find(" must equal '") != std::string_view::npos)
+    if (message.find(" has invalid nodeId '") != std::string_view::npos ||
+        message == "nodeId must be one of GM, Gate<index>, or Game<index>.")
     {
         return ConfigErrorCode::InvalidNodeId;
+    }
+
+    if (message.starts_with("Missing gate instance for nodeId '") ||
+        message.starts_with("Missing game instance for nodeId '"))
+    {
+        return ConfigErrorCode::MissingInstance;
     }
 
     if (message.find("must contain at least one instance.") != std::string_view::npos)
@@ -166,6 +178,43 @@ bool HasDigitsSuffix(std::string_view value, std::size_t prefix_length) noexcept
     }
 
     return true;
+}
+
+std::optional<ParsedNodeId> ParseNodeId(std::string_view node_id) noexcept
+{
+    if (node_id == "GM")
+    {
+        return ParsedNodeId{ParsedNodeKind::Gm, std::string(node_id)};
+    }
+
+    if (node_id.starts_with("Gate") && HasDigitsSuffix(node_id, 4U))
+    {
+        return ParsedNodeId{ParsedNodeKind::Gate, std::string(node_id)};
+    }
+
+    if (node_id.starts_with("Game") && HasDigitsSuffix(node_id, 4U))
+    {
+        return ParsedNodeId{ParsedNodeKind::Game, std::string(node_id)};
+    }
+
+    return std::nullopt;
+}
+
+bool ValidateNodeIdKind(
+    std::string_view node_id,
+    ParsedNodeKind expected_kind,
+    std::string_view path,
+    std::string* error_message)
+{
+    const auto parsed_node_id = ParseNodeId(node_id);
+    if (parsed_node_id.has_value() && parsed_node_id->kind == expected_kind)
+    {
+        return true;
+    }
+
+    std::ostringstream stream;
+    stream << path << " has invalid nodeId '" << node_id << "'.";
+    return SetError(stream.str(), error_message);
 }
 
 template <std::size_t N>
@@ -539,9 +588,9 @@ bool ParseListenEndpointContainer(
     return ParseEndpointConfig(*endpoint_value, output, JoinPath(path, "listenEndpoint"), error_message);
 }
 
-bool ParseServerGroupConfig(
+bool ParseEnvConfig(
     const Json& value,
-    ServerGroupConfig* output,
+    EnvConfig* output,
     std::string_view path,
     std::string* error_message)
 {
@@ -552,7 +601,7 @@ bool ParseServerGroupConfig(
 
     if (output == nullptr)
     {
-        return SetError("Server group output must not be null.", error_message);
+        return SetError("Env config output must not be null.", error_message);
     }
 
     if (!ExpectObject(value, path, error_message))
@@ -573,7 +622,7 @@ bool ParseServerGroupConfig(
         return false;
     }
 
-    ServerGroupConfig config;
+    EnvConfig config;
     if (!ParseNonEmptyString(*id_value, JoinPath(path, "id"), &config.id, error_message) ||
         !ParseNonEmptyString(*environment_value, JoinPath(path, "environment"), &config.environment, error_message))
     {
@@ -788,14 +837,12 @@ bool ParseManagedConfig(const Json& value, ManagedConfig* output, std::string_vi
 
 bool ParseGmConfig(
     const Json& value,
-    const LoggingConfig& default_logging,
     GmConfig* output,
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 2> kAllowedFields{
+    static constexpr std::array<std::string_view, 1> kAllowedFields{
         "control",
-        "logging",
     };
 
     if (output == nullptr)
@@ -814,16 +861,6 @@ bool ParseGmConfig(
     }
 
     GmConfig config;
-    config.logging = default_logging;
-
-    const Json* logging = nullptr;
-    if (TryGetMember(value, "logging", &logging))
-    {
-        if (!ParseLoggingBlock(*logging, default_logging, &config.logging, JoinPath(path, "logging"), error_message))
-        {
-            return false;
-        }
-    }
 
     const Json* control = nullptr;
     if (!GetRequiredMember(value, "control", &control, path, error_message))
@@ -843,17 +880,13 @@ bool ParseGmConfig(
 
 bool ParseGateConfig(
     const Json& value,
-    std::string_view selector,
-    const LoggingConfig& default_logging,
+    std::string_view node_id,
     GateConfig* output,
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 4> kAllowedFields{
-        "nodeId",
+    static constexpr std::array<std::string_view, 1> kAllowedFields{
         "service",
-        "kcp",
-        "logging",
     };
 
     if (output == nullptr)
@@ -871,60 +904,21 @@ bool ParseGateConfig(
         return false;
     }
 
-    const auto parsed_selector = ParseNodeSelector(selector);
-    if (!parsed_selector.has_value() || parsed_selector->kind != NodeSelectorKind::Gate)
+    if (!ValidateNodeIdKind(node_id, ParsedNodeKind::Gate, path, error_message))
     {
-        std::ostringstream stream;
-        stream << path << " has invalid selector '" << selector << "'.";
-        return SetError(stream.str(), error_message);
+        return false;
     }
 
     GateConfig config;
-    config.selector = std::string(selector);
-    config.logging = default_logging;
-
-    const Json* logging = nullptr;
-    if (TryGetMember(value, "logging", &logging))
-    {
-        if (!ParseLoggingBlock(*logging, default_logging, &config.logging, JoinPath(path, "logging"), error_message))
-        {
-            return false;
-        }
-    }
-
-    const Json* node_id = nullptr;
     const Json* service = nullptr;
-    if (!GetRequiredMember(value, "nodeId", &node_id, path, error_message) ||
-        !GetRequiredMember(value, "service", &service, path, error_message))
+    if (!GetRequiredMember(value, "service", &service, path, error_message))
     {
         return false;
-    }
-
-    if (!ParseNonEmptyString(*node_id, JoinPath(path, "nodeId"), &config.node_id, error_message))
-    {
-        return false;
-    }
-
-    const std::string expected_node_id = SelectorCanonicalNodeId(*parsed_selector);
-    if (config.node_id != expected_node_id)
-    {
-        std::ostringstream stream;
-        stream << JoinPath(path, "nodeId") << " must equal '" << expected_node_id << "'.";
-        return SetError(stream.str(), error_message);
     }
 
     if (!ParseListenEndpointContainer(*service, &config.service_listen_endpoint, JoinPath(path, "service"), error_message))
     {
         return false;
-    }
-
-    const Json* kcp = nullptr;
-    if (TryGetMember(value, "kcp", &kcp))
-    {
-        if (!ParseKcpConfig(*kcp, &config.kcp, JoinPath(path, "kcp"), error_message))
-        {
-            return false;
-        }
     }
 
     *output = std::move(config);
@@ -934,17 +928,14 @@ bool ParseGateConfig(
 
 bool ParseGameConfig(
     const Json& value,
-    std::string_view selector,
-    const LoggingConfig& default_logging,
+    std::string_view node_id,
     GameConfig* output,
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 4> kAllowedFields{
-        "nodeId",
+    static constexpr std::array<std::string_view, 2> kAllowedFields{
         "service",
         "managed",
-        "logging",
     };
 
     if (output == nullptr)
@@ -962,46 +953,16 @@ bool ParseGameConfig(
         return false;
     }
 
-    const auto parsed_selector = ParseNodeSelector(selector);
-    if (!parsed_selector.has_value() || parsed_selector->kind != NodeSelectorKind::Game)
+    if (!ValidateNodeIdKind(node_id, ParsedNodeKind::Game, path, error_message))
     {
-        std::ostringstream stream;
-        stream << path << " has invalid selector '" << selector << "'.";
-        return SetError(stream.str(), error_message);
+        return false;
     }
 
     GameConfig config;
-    config.selector = std::string(selector);
-    config.logging = default_logging;
-
-    const Json* logging = nullptr;
-    if (TryGetMember(value, "logging", &logging))
-    {
-        if (!ParseLoggingBlock(*logging, default_logging, &config.logging, JoinPath(path, "logging"), error_message))
-        {
-            return false;
-        }
-    }
-
-    const Json* node_id = nullptr;
     const Json* service = nullptr;
-    if (!GetRequiredMember(value, "nodeId", &node_id, path, error_message) ||
-        !GetRequiredMember(value, "service", &service, path, error_message))
+    if (!GetRequiredMember(value, "service", &service, path, error_message))
     {
         return false;
-    }
-
-    if (!ParseNonEmptyString(*node_id, JoinPath(path, "nodeId"), &config.node_id, error_message))
-    {
-        return false;
-    }
-
-    const std::string expected_node_id = SelectorCanonicalNodeId(*parsed_selector);
-    if (config.node_id != expected_node_id)
-    {
-        std::ostringstream stream;
-        stream << JoinPath(path, "nodeId") << " must equal '" << expected_node_id << "'.";
-        return SetError(stream.str(), error_message);
     }
 
     if (!ParseListenEndpointContainer(*service, &config.service_listen_endpoint, JoinPath(path, "service"), error_message))
@@ -1025,7 +986,6 @@ bool ParseGameConfig(
 
 bool ParseGateCollection(
     const Json& value,
-    const LoggingConfig& default_logging,
     std::map<std::string, GateConfig, std::less<>>* output,
     std::string_view path,
     std::string* error_message)
@@ -1052,7 +1012,7 @@ bool ParseGateCollection(
     {
         GateConfig config;
         const std::string instance_path = JoinPath(path, iterator.key());
-        if (!ParseGateConfig(iterator.value(), iterator.key(), default_logging, &config, instance_path, error_message))
+        if (!ParseGateConfig(iterator.value(), iterator.key(), &config, instance_path, error_message))
         {
             return false;
         }
@@ -1066,7 +1026,6 @@ bool ParseGateCollection(
 
 bool ParseGameCollection(
     const Json& value,
-    const LoggingConfig& default_logging,
     std::map<std::string, GameConfig, std::less<>>* output,
     std::string_view path,
     std::string* error_message)
@@ -1093,7 +1052,7 @@ bool ParseGameCollection(
     {
         GameConfig config;
         const std::string instance_path = JoinPath(path, iterator.key());
-        if (!ParseGameConfig(iterator.value(), iterator.key(), default_logging, &config, instance_path, error_message))
+        if (!ParseGameConfig(iterator.value(), iterator.key(), &config, instance_path, error_message))
         {
             return false;
         }
@@ -1137,12 +1096,10 @@ std::string_view ConfigErrorMessage(ConfigErrorCode code) noexcept
         return "Configuration log level is invalid.";
     case ConfigErrorCode::InvalidEndpointPort:
         return "Configuration endpoint port is invalid.";
-    case ConfigErrorCode::InvalidSelector:
-        return "Node selector is invalid.";
+    case ConfigErrorCode::InvalidNodeId:
+        return "Node ID is invalid.";
     case ConfigErrorCode::MissingInstance:
         return "Selected node instance is missing.";
-    case ConfigErrorCode::InvalidNodeId:
-        return "Node ID does not match selector.";
     case ConfigErrorCode::EmptyCollection:
         return "Configuration collection must not be empty.";
     case ConfigErrorCode::LoggingConfigInvalid:
@@ -1154,49 +1111,15 @@ std::string_view ConfigErrorMessage(ConfigErrorCode code) noexcept
     return "Unknown configuration error.";
 }
 
-std::optional<NodeSelector> ParseNodeSelector(std::string_view selector) noexcept
-{
-    if (selector == "gm")
-    {
-        return NodeSelector{NodeSelectorKind::Gm, std::string(selector)};
-    }
-
-    if (selector.starts_with("gate") && HasDigitsSuffix(selector, 4U))
-    {
-        return NodeSelector{NodeSelectorKind::Gate, std::string(selector)};
-    }
-
-    if (selector.starts_with("game") && HasDigitsSuffix(selector, 4U))
-    {
-        return NodeSelector{NodeSelectorKind::Game, std::string(selector)};
-    }
-
-    return std::nullopt;
-}
-
-std::string SelectorCanonicalNodeId(const NodeSelector& selector)
-{
-    switch (selector.kind)
-    {
-    case NodeSelectorKind::Gm:
-        return "GM";
-    case NodeSelectorKind::Gate:
-        return "Gate" + selector.value.substr(4);
-    case NodeSelectorKind::Game:
-        return "Game" + selector.value.substr(4);
-    }
-
-    return "GM";
-}
-
 ConfigErrorCode LoadClusterConfigFile(
     const std::filesystem::path& path,
     ClusterConfig* output,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 5> kAllowedRootFields{
-        "serverGroup",
+    static constexpr std::array<std::string_view, 6> kAllowedRootFields{
+        "env",
         "logging",
+        "kcp",
         "gm",
         "gate",
         "game",
@@ -1227,13 +1150,15 @@ ConfigErrorCode LoadClusterConfigFile(
         return SetConfigError(classified_error, std::move(detail_error), error_message);
     }
 
-    const Json* server_group = nullptr;
+    const Json* env = nullptr;
     const Json* logging = nullptr;
+    const Json* kcp = nullptr;
     const Json* gm = nullptr;
     const Json* gate = nullptr;
     const Json* game = nullptr;
-    if (!GetRequiredMember(document, "serverGroup", &server_group, "root", &detail_error) ||
+    if (!GetRequiredMember(document, "env", &env, "root", &detail_error) ||
         !GetRequiredMember(document, "logging", &logging, "root", &detail_error) ||
+        !GetRequiredMember(document, "kcp", &kcp, "root", &detail_error) ||
         !GetRequiredMember(document, "gm", &gm, "root", &detail_error) ||
         !GetRequiredMember(document, "gate", &gate, "root", &detail_error) ||
         !GetRequiredMember(document, "game", &game, "root", &detail_error))
@@ -1243,11 +1168,12 @@ ConfigErrorCode LoadClusterConfigFile(
     }
 
     ClusterConfig cluster_config;
-    if (!ParseServerGroupConfig(*server_group, &cluster_config.server_group, "serverGroup", &detail_error) ||
-        !ParseLoggingBlock(*logging, LoggingConfig{}, &cluster_config.logging_defaults, "logging", &detail_error) ||
-        !ParseGmConfig(*gm, cluster_config.logging_defaults, &cluster_config.gm, "gm", &detail_error) ||
-        !ParseGateCollection(*gate, cluster_config.logging_defaults, &cluster_config.gates, "gate", &detail_error) ||
-        !ParseGameCollection(*game, cluster_config.logging_defaults, &cluster_config.games, "game", &detail_error))
+    if (!ParseEnvConfig(*env, &cluster_config.env, "env", &detail_error) ||
+        !ParseLoggingBlock(*logging, LoggingConfig{}, &cluster_config.logging, "logging", &detail_error) ||
+        !ParseKcpConfig(*kcp, &cluster_config.kcp, "kcp", &detail_error) ||
+        !ParseGmConfig(*gm, &cluster_config.gm, "gm", &detail_error) ||
+        !ParseGateCollection(*gate, &cluster_config.gates, "gate", &detail_error) ||
+        !ParseGameCollection(*game, &cluster_config.games, "game", &detail_error))
     {
         const ConfigErrorCode classified_error = ClassifyConfigError(detail_error);
         return SetConfigError(classified_error, std::move(detail_error), error_message);
@@ -1260,8 +1186,8 @@ ConfigErrorCode LoadClusterConfigFile(
 
 ConfigErrorCode SelectNodeConfig(
     const ClusterConfig& cluster_config,
-    std::string_view selector,
-    NodeConfig* output,
+    std::string_view node_id,
+    std::unique_ptr<NodeConfig>* output,
     std::string* error_message)
 {
     if (output == nullptr)
@@ -1269,96 +1195,67 @@ ConfigErrorCode SelectNodeConfig(
         return SetConfigError(ConfigErrorCode::InvalidArgument, "Node config output must not be null.", error_message);
     }
 
-    const auto parsed_selector = ParseNodeSelector(selector);
-    if (!parsed_selector.has_value())
+    *output = nullptr;
+
+    const auto parsed_node_id = ParseNodeId(node_id);
+    if (!parsed_node_id.has_value())
     {
         return SetConfigError(
-            ConfigErrorCode::InvalidSelector,
-            "selector must be one of gm, gate<index>, or game<index>.",
+            ConfigErrorCode::InvalidNodeId,
+            "nodeId must be one of GM, Gate<index>, or Game<index>.",
             error_message);
     }
 
-    NodeConfig node_config;
-    node_config.selector = parsed_selector->value;
-    node_config.server_group = cluster_config.server_group;
-
-    switch (parsed_selector->kind)
+    switch (parsed_node_id->kind)
     {
-    case NodeSelectorKind::Gm:
-        node_config.process_type = ProcessType::Gm;
-        node_config.instance_id = "GM";
-        node_config.logging = cluster_config.gm.logging;
-        node_config.control_listen_endpoint = cluster_config.gm.control_listen_endpoint;
+    case ParsedNodeKind::Gm:
+    {
+        auto node_config = std::make_unique<GmNodeConfig>();
+        node_config->process_type = ProcessType::Gm;
+        node_config->node_id = "GM";
+        node_config->control_listen_endpoint = cluster_config.gm.control_listen_endpoint;
+        *output = std::move(node_config);
         break;
+    }
 
-    case NodeSelectorKind::Gate:
+    case ParsedNodeKind::Gate:
     {
-        const auto iterator = cluster_config.gates.find(parsed_selector->value);
+        const auto iterator = cluster_config.gates.find(node_id);
         if (iterator == cluster_config.gates.end())
         {
             std::ostringstream stream;
-            stream << "Missing gate instance for selector '" << parsed_selector->value << "'.";
+            stream << "Missing gate instance for nodeId '" << node_id << "'.";
             return SetConfigError(ConfigErrorCode::MissingInstance, stream.str(), error_message);
         }
 
-        node_config.process_type = ProcessType::Gate;
-        node_config.instance_id = iterator->second.node_id;
-        node_config.logging = iterator->second.logging;
-        node_config.service_listen_endpoint = iterator->second.service_listen_endpoint;
-        node_config.kcp = iterator->second.kcp;
+        auto node_config = std::make_unique<GateNodeConfig>();
+        node_config->process_type = ProcessType::Gate;
+        node_config->node_id = std::string(node_id);
+        node_config->service_listen_endpoint = iterator->second.service_listen_endpoint;
+        *output = std::move(node_config);
         break;
     }
 
-    case NodeSelectorKind::Game:
+    case ParsedNodeKind::Game:
     {
-        const auto iterator = cluster_config.games.find(parsed_selector->value);
+        const auto iterator = cluster_config.games.find(node_id);
         if (iterator == cluster_config.games.end())
         {
             std::ostringstream stream;
-            stream << "Missing game instance for selector '" << parsed_selector->value << "'.";
+            stream << "Missing game instance for nodeId '" << node_id << "'.";
             return SetConfigError(ConfigErrorCode::MissingInstance, stream.str(), error_message);
         }
 
-        node_config.process_type = ProcessType::Game;
-        node_config.instance_id = iterator->second.node_id;
-        node_config.logging = iterator->second.logging;
-        node_config.service_listen_endpoint = iterator->second.service_listen_endpoint;
-        node_config.managed = iterator->second.managed;
+        auto node_config = std::make_unique<GameNodeConfig>();
+        node_config->process_type = ProcessType::Game;
+        node_config->node_id = std::string(node_id);
+        node_config->service_listen_endpoint = iterator->second.service_listen_endpoint;
+        node_config->managed = iterator->second.managed;
+        *output = std::move(node_config);
         break;
     }
     }
 
-    *output = std::move(node_config);
-    ClearError(error_message);
-    return ConfigErrorCode::None;
-}
-
-ConfigErrorCode LoadNodeConfigFile(
-    const std::filesystem::path& path,
-    std::string_view selector,
-    NodeConfig* output,
-    std::string* error_message)
-{
-    if (output == nullptr)
-    {
-        return SetConfigError(ConfigErrorCode::InvalidArgument, "Node config output must not be null.", error_message);
-    }
-
-    ClusterConfig cluster_config;
-    std::string detail_error;
-    const ConfigErrorCode load_cluster_result = LoadClusterConfigFile(path, &cluster_config, &detail_error);
-    if (load_cluster_result != ConfigErrorCode::None)
-    {
-        return SetConfigError(load_cluster_result, std::move(detail_error), error_message);
-    }
-
-    const ConfigErrorCode select_result = SelectNodeConfig(cluster_config, selector, output, &detail_error);
-    if (select_result != ConfigErrorCode::None)
-    {
-        return SetConfigError(select_result, std::move(detail_error), error_message);
-    }
-
-    output->source_path = path;
     ClearError(error_message);
     return ConfigErrorCode::None;
 }

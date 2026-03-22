@@ -11,7 +11,7 @@ namespace xs::node
 struct NodeCommandLineArgs
 {
     std::filesystem::path config_path{};
-    std::string selector{};
+    std::string node_id{};
 };
 
 enum class NodeErrorCode : std::uint8_t
@@ -20,8 +20,8 @@ enum class NodeErrorCode : std::uint8_t
     InvalidArgument,
     InvalidArgumentCount,
     EmptyConfigPath,
-    EmptySelector,
-    InvalidSelector,
+    EmptyNodeId,
+    InvalidNodeId,
     ConfigLoadFailed,
     LoggerInitFailed,
     NodeCreateFailed,

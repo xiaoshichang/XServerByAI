@@ -1,0 +1,57 @@
+{
+  "env": {
+    "id": "local-dev",
+    "environment": "dev"
+  },
+  "logging": {
+    "rootDir": "logs",
+    "minLevel": "Info",
+    "flushIntervalMs": 1000,
+    "rotateDaily": true,
+    "maxFileSizeMB": 64,
+    "maxRetainedFiles": 10
+  },
+  "kcp": {
+    "mtu": 1200,
+    "sndwnd": 128,
+    "rcvwnd": 128,
+    "nodelay": true,
+    "intervalMs": 10,
+    "fastResend": 2,
+    "noCongestionWindow": false,
+    "minRtoMs": 30,
+    "deadLinkCount": 20,
+    "streamMode": false
+  },
+  "gm": {
+    "control": {
+      "listenEndpoint": {
+        "host": "127.0.0.1",
+        "port": 5000
+      }
+    }
+  },
+  "gate": {
+    "Gate0": {
+      "service": {
+        "listenEndpoint": {
+          "host": "0.0.0.0",
+          "port": 7000
+        }
+      }
+    }
+  },
+  "game": {
+    "Game0": {
+      "service": {
+        "listenEndpoint": {
+          "host": "127.0.0.1",
+          "port": 7100
+        }
+      },
+      "managed": {
+        "assemblyName": "XServer.Managed.GameLogic"
+      }
+    }
+  }
+}
