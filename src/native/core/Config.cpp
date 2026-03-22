@@ -841,8 +841,9 @@ bool ParseGmConfig(
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 1> kAllowedFields{
+    static constexpr std::array<std::string_view, 2> kAllowedFields{
         "innerNetwork",
+        "controlNetwork",
     };
 
     if (output == nullptr)
@@ -863,7 +864,13 @@ bool ParseGmConfig(
     GmConfig config;
 
     const Json* inner_network = nullptr;
+    const Json* control_network = nullptr;
     if (!GetRequiredMember(value, "innerNetwork", &inner_network, path, error_message))
+    {
+        return false;
+    }
+
+    if (!GetRequiredMember(value, "controlNetwork", &control_network, path, error_message))
     {
         return false;
     }
@@ -872,6 +879,15 @@ bool ParseGmConfig(
             *inner_network,
             &config.inner_network_listen_endpoint,
             JoinPath(path, "innerNetwork"),
+            error_message))
+    {
+        return false;
+    }
+
+    if (!ParseListenEndpointContainer(
+            *control_network,
+            &config.control_network_listen_endpoint,
+            JoinPath(path, "controlNetwork"),
             error_message))
     {
         return false;
@@ -1240,6 +1256,7 @@ ConfigErrorCode SelectNodeConfig(
     {
         auto node_config = std::make_unique<GmNodeConfig>();
         node_config->inner_network_listen_endpoint = cluster_config.gm.inner_network_listen_endpoint;
+        node_config->control_network_listen_endpoint = cluster_config.gm.control_network_listen_endpoint;
         *output = std::move(node_config);
         break;
     }

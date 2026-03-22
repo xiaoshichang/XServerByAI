@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GmControlHttpService.h"
 #include "GmInnerService.h"
 #include "InnerNetwork.h"
 #include "ProcessRegistry.h"
@@ -33,6 +34,7 @@ class GmNode final : public ServerNode
 
     std::unique_ptr<InnerNetwork> inner_network_{};
     std::unique_ptr<GmInnerService> inner_service_{};
+    std::unique_ptr<GmControlHttpService> control_http_service_{};
 };
 
 } // namespace xs::node

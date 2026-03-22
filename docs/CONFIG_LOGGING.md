@@ -4,7 +4,7 @@
 
 **网络命名规范**
 1. `Inner` 表示节点与节点之间的内部网络，例如 `InnerNetwork`、`innerNetwork.listenEndpoint`、`innerNetworkEndpoint`。
-2. `Control` 表示 ctrl 工具与 `GM` 之间的管理网络。当前阶段尚未落地独立 `ControlNetwork` 配置块，但后续新增字段、函数和文档都必须沿用该命名。
+2. `Control` 表示 ctrl 工具与 `GM` 之间的管理网络。当前阶段已落地 `GM` 本地 HTTP 管理接口配置块，统一使用 `ControlNetwork`、`controlNetwork.listenEndpoint` 等命名。
 3. `Client` 表示 `Gate` 与客户端之间的网络，例如 `ClientNetwork`、`clientNetwork.listenEndpoint`。
 4. 不再使用历史遗留术语去表达节点间链路或实例选择。
 
@@ -34,19 +34,20 @@
 
 **节点配置要求**
 1. `gm.innerNetwork.listenEndpoint` 必填，表示 `GM` 的 `InnerNetwork` 监听地址。
-2. `gate.<NodeID>.innerNetwork.listenEndpoint` 必填，表示该 Gate 的 `InnerNetwork` 监听地址。
-3. `gate.<NodeID>.clientNetwork.listenEndpoint` 必填，表示该 Gate 的 `ClientNetwork` 监听地址。
-4. `game.<NodeID>.innerNetwork.listenEndpoint` 必填，表示该 Game 的 `InnerNetwork` 监听地址。
-5. `game.<NodeID>.managed.assemblyName` 可选，缺失时回退到 `XServer.Managed.GameLogic`。
-6. `logging` 与 `kcp` 已移动到集群层；不再在 `NodeConfig` 内重复存放这些公共字段。
-7. `NodeConfig` 不再显式保存历史的进程类型字段与节点标识字段；节点角色由派生类型体现，实例由 `ClusterConfig` 中 `gm` / `gate` / `game` 的键值体现。
+2. `gm.controlNetwork.listenEndpoint` 必填，表示 `GM` 的本地 HTTP 管理接口监听地址。
+3. `gate.<NodeID>.innerNetwork.listenEndpoint` 必填，表示该 Gate 的 `InnerNetwork` 监听地址。
+4. `gate.<NodeID>.clientNetwork.listenEndpoint` 必填，表示该 Gate 的 `ClientNetwork` 监听地址。
+5. `game.<NodeID>.innerNetwork.listenEndpoint` 必填，表示该 Game 的 `InnerNetwork` 监听地址。
+6. `game.<NodeID>.managed.assemblyName` 可选，缺失时回退到 `XServer.Managed.GameLogic`。
+7. `logging` 与 `kcp` 已移动到集群层；不再在 `NodeConfig` 内重复存放这些公共字段。
+8. `NodeConfig` 不再显式保存历史的进程类型字段与节点标识字段；节点角色由派生类型体现，实例由 `ClusterConfig` 中 `gm` / `gate` / `game` 的键值体现。
 
 **命名与解析约束**
 1. JSON 键统一使用 `lowerCamelCase`。
 2. 时长字段统一使用 `*Ms` 后缀。
 3. 端点字段统一使用 `*Endpoint` 命名，并采用 `{ "host": string, "port": uint16 }` 结构。
 4. 顶层未知配置块与已建模对象中的未知字段默认视为配置错误。
-5. 当前实现对 `env`、`logging`、`kcp`、`gm.innerNetwork`、`gate.*.innerNetwork`、`gate.*.clientNetwork`、`game.*.innerNetwork` 与 `game.*.managed` 都执行显式字段校验。
+5. 当前实现对 `env`、`logging`、`kcp`、`gm.innerNetwork`、`gm.controlNetwork`、`gate.*.innerNetwork`、`gate.*.clientNetwork`、`game.*.innerNetwork` 与 `game.*.managed` 都执行显式字段校验。
 
 **最小配置示例**
 
@@ -81,6 +82,12 @@
       "listenEndpoint": {
         "host": "127.0.0.1",
         "port": 5000
+      }
+    },
+    "controlNetwork": {
+      "listenEndpoint": {
+        "host": "127.0.0.1",
+        "port": 5100
       }
     }
   },
@@ -157,4 +164,4 @@
 **实现约束**
 1. `M2-02` 的配置加载必须至少支持 `ClusterConfig` 加载、`NodeConfig` 选择、必填块校验与未知字段失败。
 2. `M4-02` 的 Gate 客户端监听必须使用 `gate.<NodeID>.clientNetwork.listenEndpoint` 与顶层 `kcp`。
-3. 后续若新增 ctrl 工具与 `GM` 的链路配置，应使用 `ControlNetwork`、`controlNetwork.listenEndpoint` 等命名。
+3. `M3-07` 的 `GM` 本地 HTTP 管理接口使用 `gm.controlNetwork.listenEndpoint`；后续若扩展外部 ctrl 工具，也必须继续沿用 `ControlNetwork`、`controlNetwork.listenEndpoint` 等命名。

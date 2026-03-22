@@ -6,12 +6,12 @@
 1. 以单个 `xserver-node` 可执行程序承载 `GM`、`Gate`、`Game` 三类节点。
 2. 以 C++ 负责底层运行时、网络与宿主边界，以 C# 负责 `Game` 侧业务逻辑。
 3. 以单个 UTF-8 JSON 配置文件描述一个服务器组的集群配置与节点实例配置。
-4. 为后续 `Inner` 集群通信、`Client` 接入以及 `Control` 管理能力提供统一命名和稳定骨架。
+4. 为 `Inner` 集群通信、`Client` 接入以及 `Control` 管理能力提供统一命名和稳定骨架。
 
 **非目标**
 1. 当前阶段不实现分布式注册中心、自动部署或热更新协议。
 2. 当前阶段不提供完整的 RPC 框架；内部消息以项目自定义协议为主。
-3. 当前阶段不提供完整的 ctrl 管理工具实现；`Control` 只是预留的命名边界。
+3. 当前阶段只提供 `GM` 本地 HTTP 管理接口，不提供完整的外部 ctrl 工具链、鉴权体系或更复杂的运维平台能力。
 
 **平台与依赖**
 1. 目标平台为 Windows 与 Linux。
@@ -26,7 +26,7 @@
 
 **网络分层命名**
 1. `Inner`：节点与节点之间的网络，当前主要承载 `GM <-> Gate/Game` 的注册、心跳和路由消息。
-2. `Control`：ctrl 工具与 `GM` 之间的管理网络。当前阶段未落地独立实现，但所有后续命名必须沿用 `ControlNetwork`、`controlNetwork`。
+2. `Control`：ctrl 工具与 `GM` 之间的管理网络。当前阶段已落地 `GM` 本地 HTTP 管理接口，并统一沿用 `ControlNetwork`、`controlNetwork.listenEndpoint` 命名。
 3. `Client`：`Gate` 与客户端之间的网络，对应 `ClientNetwork`、`clientNetwork.listenEndpoint` 与集群级 `kcp`。
 
 **NodeID 约定**
@@ -50,8 +50,9 @@
 1. 顶层配置块固定为 `env`、`logging`、`kcp`、`gm`、`gate`、`game`。
 2. `logging` 与 `kcp` 是集群级公共配置。
 3. `gm.innerNetwork.listenEndpoint` 表示 `GM` 的内部监听地址。
-4. `gate.<NodeID>` 同时包含 `innerNetwork.listenEndpoint` 与 `clientNetwork.listenEndpoint`。
-5. `game.<NodeID>` 包含 `innerNetwork.listenEndpoint` 与可选 `managed.assemblyName`。
+4. `gm.controlNetwork.listenEndpoint` 表示 `GM` 的本地 HTTP 管理接口监听地址。
+5. `gate.<NodeID>` 同时包含 `innerNetwork.listenEndpoint` 与 `clientNetwork.listenEndpoint`。
+6. `game.<NodeID>` 包含 `innerNetwork.listenEndpoint` 与可选 `managed.assemblyName`。
 6. 当前仓库样例配置位于 `configs/local-dev.json`。
 
 **协议与运行时**

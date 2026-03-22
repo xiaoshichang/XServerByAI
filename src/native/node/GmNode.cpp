@@ -240,6 +240,19 @@ NodeErrorCode GmNode::OnInit()
         return SetError(NodeErrorCode::ConfigLoadFailed, "GM innerNetwork.listenEndpoint.port must be greater than zero.");
     }
 
+    const xs::core::EndpointConfig& control_endpoint = config->control_network_listen_endpoint;
+    if (control_endpoint.host.empty())
+    {
+        return SetError(NodeErrorCode::ConfigLoadFailed, "GM controlNetwork.listenEndpoint.host must not be empty.");
+    }
+
+    if (control_endpoint.port == 0U)
+    {
+        return SetError(
+            NodeErrorCode::ConfigLoadFailed,
+            "GM controlNetwork.listenEndpoint.port must be greater than zero.");
+    }
+
     InnerNetworkOptions options;
     options.mode = InnerNetworkMode::PassiveListener;
     options.local_endpoint = BuildTcpEndpoint(endpoint);
@@ -269,13 +282,40 @@ NodeErrorCode GmNode::OnInit()
         HandleInnerMessage(routing_id, payload);
     });
 
+    GmControlHttpServiceOptions control_options;
+    control_options.listen_endpoint = control_endpoint;
+    control_options.node_id = std::string(node_id());
+    control_options.status_provider = [this]() {
+        GmControlHttpStatusSnapshot snapshot;
+        snapshot.inner_network_endpoint = inner_network_ != nullptr ? std::string(inner_network_->bound_endpoint()) : "";
+        snapshot.registered_process_count =
+            inner_service_ != nullptr ? static_cast<std::uint64_t>(inner_service_->process_registry().size()) : 0u;
+        snapshot.running = true;
+        return snapshot;
+    };
+    control_options.stop_handler = [this]() {
+        RequestStop();
+    };
+
+    control_http_service_ = std::make_unique<GmControlHttpService>(event_loop(), logger(), std::move(control_options));
+    const NodeErrorCode control_init_result = control_http_service_->Init();
+    if (control_init_result != NodeErrorCode::None)
+    {
+        const std::string error_message = std::string(control_http_service_->last_error_message());
+        control_http_service_.reset();
+        inner_service_.reset();
+        (void)inner_network_->Uninit();
+        inner_network_.reset();
+        return SetError(control_init_result, error_message);
+    }
+
     ClearError();
     return NodeErrorCode::None;
 }
 
 NodeErrorCode GmNode::OnRun()
 {
-    if (inner_network_ == nullptr || inner_service_ == nullptr)
+    if (inner_network_ == nullptr || inner_service_ == nullptr || control_http_service_ == nullptr)
     {
         return SetError(NodeErrorCode::InvalidArgument, "GM node must be initialized before Run().");
     }
@@ -294,11 +334,21 @@ NodeErrorCode GmNode::OnRun()
         return SetError(inner_run_result, error_message);
     }
 
-    const std::array<xs::core::LogContextField, 2> runtime_context{
+    const NodeErrorCode control_run_result = control_http_service_->Run();
+    if (control_run_result != NodeErrorCode::None)
+    {
+        const std::string error_message = std::string(control_http_service_->last_error_message());
+        (void)inner_service_->Uninit();
+        (void)inner_network_->Uninit();
+        return SetError(control_run_result, error_message);
+    }
+
+    const std::array<xs::core::LogContextField, 3> runtime_context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"innerNetworkEndpoint", std::string(inner_network_->bound_endpoint())},
+        xs::core::LogContextField{"controlNetworkEndpoint", std::string(control_http_service_->bound_endpoint())},
     };
-    logger().Log(xs::core::LogLevel::Info, "runtime", "GM node entered inner-listening state.", runtime_context);
+    logger().Log(xs::core::LogLevel::Info, "runtime", "GM node entered runtime state.", runtime_context);
 
     ClearError();
     return NodeErrorCode::None;
@@ -306,6 +356,17 @@ NodeErrorCode GmNode::OnRun()
 
 NodeErrorCode GmNode::OnUninit()
 {
+    if (control_http_service_ != nullptr)
+    {
+        const NodeErrorCode result = control_http_service_->Uninit();
+        const std::string error_message = std::string(control_http_service_->last_error_message());
+        control_http_service_.reset();
+        if (result != NodeErrorCode::None)
+        {
+            return SetError(result, error_message);
+        }
+    }
+
     if (inner_service_ != nullptr)
     {
         const NodeErrorCode result = inner_service_->Uninit();

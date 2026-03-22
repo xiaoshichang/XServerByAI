@@ -105,6 +105,11 @@ xs::core::Json MakeValidClusterConfigJson()
                   {"listenEndpoint",
                    xs::core::Json{{"host", "127.0.0.1"}, {"port", 5000}}},
               }},
+             {"controlNetwork",
+              xs::core::Json{
+                  {"listenEndpoint",
+                   xs::core::Json{{"host", "127.0.0.1"}, {"port", 5100}}},
+              }},
          }},
         {"gate",
          xs::core::Json{
@@ -295,6 +300,8 @@ void TestLoadNodeConfigForGm()
     {
         XS_CHECK(gm_node_config->inner_network_listen_endpoint.host == "127.0.0.1");
         XS_CHECK(gm_node_config->inner_network_listen_endpoint.port == 5000);
+        XS_CHECK(gm_node_config->control_network_listen_endpoint.host == "127.0.0.1");
+        XS_CHECK(gm_node_config->control_network_listen_endpoint.port == 5100);
     }
 
     CleanupTestDirectory(base_path);
@@ -477,6 +484,29 @@ void TestLoadNodeConfigRejectsMissingGateClientNetwork()
     CleanupTestDirectory(base_path);
 }
 
+void TestLoadNodeConfigRejectsMissingGmControlNetwork()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("config-missing-gm-control-network");
+    const std::filesystem::path file_path = base_path / "config.json";
+    xs::core::Json config_json = MakeValidClusterConfigJson();
+    config_json["gm"].erase("controlNetwork");
+    if (!WriteJsonFile(file_path, config_json))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    xs::core::ClusterConfig cluster_config;
+    std::string error_message;
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadClusterConfigFile(file_path, &cluster_config, &error_message);
+
+    XS_CHECK(success == xs::core::ConfigErrorCode::MissingRequiredField);
+    XS_CHECK_MSG(error_message.find("gm.controlNetwork") != std::string::npos, error_message.c_str());
+
+    CleanupTestDirectory(base_path);
+}
+
 } // namespace
 
 int main()
@@ -494,6 +524,7 @@ int main()
     TestLoadNodeConfigRejectsUnknownLoggingField();
     TestLoadNodeConfigRejectsInvalidGateNodeId();
     TestLoadNodeConfigRejectsMissingGateClientNetwork();
+    TestLoadNodeConfigRejectsMissingGmControlNetwork();
 
     if (g_failures != 0)
     {

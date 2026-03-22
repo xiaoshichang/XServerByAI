@@ -89,7 +89,8 @@ std::uint16_t AcquireLoopbackPort()
 
 xs::core::Json MakeClusterConfigJson(
     const std::filesystem::path& base_path,
-    std::uint16_t gm_inner_port)
+    std::uint16_t gm_inner_port,
+    std::uint16_t gm_control_port)
 {
     const std::string root_log_dir = (base_path / "logs").string();
 
@@ -123,6 +124,11 @@ xs::core::Json MakeClusterConfigJson(
               xs::core::Json{
                   {"listenEndpoint",
                    xs::core::Json{{"host", "127.0.0.1"}, {"port", gm_inner_port}}},
+              }},
+             {"controlNetwork",
+              xs::core::Json{
+                  {"listenEndpoint",
+                   xs::core::Json{{"host", "127.0.0.1"}, {"port", gm_control_port}}},
               }},
          }},
         {"gate",
@@ -160,6 +166,7 @@ xs::core::Json MakeClusterConfigJson(
 bool WriteRuntimeConfig(
     const std::filesystem::path& base_path,
     std::uint16_t gm_inner_port,
+    std::uint16_t gm_control_port,
     std::filesystem::path* file_path)
 {
     if (file_path == nullptr)
@@ -169,7 +176,7 @@ bool WriteRuntimeConfig(
     }
 
     *file_path = base_path / "config.json";
-    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, gm_inner_port));
+    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, gm_inner_port, gm_control_port));
 }
 
 std::vector<std::byte> BytesFromText(std::string_view value)
@@ -374,7 +381,7 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-success");
     const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -475,7 +482,7 @@ void TestGmNodeRejectsDuplicateNodeId()
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-duplicate-node");
     const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -596,7 +603,7 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-sequential-success");
     const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -737,7 +744,7 @@ void TestGmNodeRejectsInvalidProcessType()
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-process-type");
     const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -818,7 +825,7 @@ void TestGmNodeRejectsInvalidInnerNetworkEndpoint()
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-endpoint");
     const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -898,7 +905,7 @@ void TestGmNodeRejectsInvalidRegisterPayload()
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-payload");
     const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -977,7 +984,7 @@ void TestGmNodeDropsMalformedPacketWithoutResponse()
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-malformed-packet");
     const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
