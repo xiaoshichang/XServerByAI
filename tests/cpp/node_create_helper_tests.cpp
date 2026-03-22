@@ -8,9 +8,12 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 namespace
@@ -604,8 +607,25 @@ void TestDefaultNodeLifecycleUsesCreateHelper()
     const xs::node::NodeErrorCode init_result = node->Init();
     XS_CHECK_MSG(init_result == xs::node::NodeErrorCode::None, node->last_error_message().data());
 
-    const xs::node::NodeErrorCode run_result = node->Run();
-    XS_CHECK_MSG(run_result == xs::node::NodeErrorCode::None, node->last_error_message().data());
+    std::atomic_bool run_completed = false;
+    xs::node::NodeErrorCode run_result = xs::node::NodeErrorCode::None;
+    std::string run_error;
+    std::thread run_thread([&]() {
+        run_result = node->Run();
+        run_error = std::string(node->last_error_message());
+        run_completed.store(true);
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    XS_CHECK(!run_completed.load());
+
+    node->RequestStop();
+    if (run_thread.joinable())
+    {
+        run_thread.join();
+    }
+
+    XS_CHECK_MSG(run_result == xs::node::NodeErrorCode::None, run_error.c_str());
 
     const xs::node::NodeErrorCode uninit_result = node->Uninit();
     XS_CHECK_MSG(uninit_result == xs::node::NodeErrorCode::None, node->last_error_message().data());

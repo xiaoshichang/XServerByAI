@@ -4,6 +4,7 @@
 
 #include "Logging.h"
 #include "MainEventLoop.h"
+#include "ZmqActiveConnector.h"
 #include "ZmqListenerMetrics.h"
 #include "ZmqPassiveListener.h"
 
@@ -21,12 +22,15 @@ enum class InnerNetworkMode : std::uint8_t
 {
     Disabled = 0,
     PassiveListener,
+    ActiveConnector,
 };
 
 struct InnerNetworkOptions
 {
     InnerNetworkMode mode{InnerNetworkMode::Disabled};
     std::string local_endpoint{};
+    std::string remote_endpoint{};
+    std::string routing_id{};
 };
 
 using InnerNetworkMessageHandler = std::function<void(std::vector<std::byte>, std::vector<std::byte>)>;
@@ -56,7 +60,10 @@ class InnerNetwork final
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] InnerNetworkMode mode() const noexcept;
     [[nodiscard]] ipc::ZmqListenerState listener_state() const noexcept;
+    [[nodiscard]] ipc::ZmqConnectionState connection_state() const noexcept;
     [[nodiscard]] std::string_view configured_endpoint() const noexcept;
+    [[nodiscard]] std::string_view local_endpoint() const noexcept;
+    [[nodiscard]] std::string_view remote_endpoint() const noexcept;
     [[nodiscard]] std::string_view bound_endpoint() const noexcept;
     [[nodiscard]] std::string_view last_error_message() const noexcept;
     [[nodiscard]] ipc::ZmqListenerMetricsSnapshot metrics() const noexcept;

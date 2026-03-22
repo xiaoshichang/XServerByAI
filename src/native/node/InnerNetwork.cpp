@@ -1,7 +1,5 @@
 #include "InnerNetwork.h"
 
-#include "ZmqContext.h"
-
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -49,44 +47,6 @@ std::string ToString(std::uint64_t value)
     return std::to_string(value);
 }
 
-NodeErrorCode MapSocketErrorToNodeError(ipc::ZmqSocketErrorCode code) noexcept
-{
-    switch (code)
-    {
-    case ipc::ZmqSocketErrorCode::None:
-        return NodeErrorCode::None;
-    case ipc::ZmqSocketErrorCode::InvalidState:
-    case ipc::ZmqSocketErrorCode::AlreadyRunning:
-    case ipc::ZmqSocketErrorCode::ContextNotInitialized:
-    case ipc::ZmqSocketErrorCode::EndpointEmpty:
-    case ipc::ZmqSocketErrorCode::PollIntervalMustBePositive:
-    case ipc::ZmqSocketErrorCode::HighWaterMarkNegative:
-    case ipc::ZmqSocketErrorCode::TimingOptionNegative:
-    case ipc::ZmqSocketErrorCode::NotStarted:
-    case ipc::ZmqSocketErrorCode::EmptyRoutingId:
-        return NodeErrorCode::InvalidArgument;
-    case ipc::ZmqSocketErrorCode::SocketCreateFailed:
-    case ipc::ZmqSocketErrorCode::SocketOptionFailed:
-    case ipc::ZmqSocketErrorCode::MonitorEnableFailed:
-    case ipc::ZmqSocketErrorCode::MonitorSocketCreateFailed:
-    case ipc::ZmqSocketErrorCode::MonitorSocketConnectFailed:
-    case ipc::ZmqSocketErrorCode::ConnectFailed:
-    case ipc::ZmqSocketErrorCode::BindFailed:
-    case ipc::ZmqSocketErrorCode::LastEndpointQueryFailed:
-    case ipc::ZmqSocketErrorCode::RoutingIdSendFailed:
-    case ipc::ZmqSocketErrorCode::PayloadSendFailed:
-    case ipc::ZmqSocketErrorCode::MessageSendFailed:
-    case ipc::ZmqSocketErrorCode::ReceiveFailed:
-    case ipc::ZmqSocketErrorCode::MonitorReceiveFailed:
-    case ipc::ZmqSocketErrorCode::MultipartNotSupported:
-    case ipc::ZmqSocketErrorCode::PayloadMissing:
-    case ipc::ZmqSocketErrorCode::TimerPumpFailed:
-        return NodeErrorCode::NodeRunFailed;
-    }
-
-    return NodeErrorCode::NodeRunFailed;
-}
-
 } // namespace
 
 class InnerNetwork::Impl final
@@ -111,12 +71,20 @@ class InnerNetwork::Impl final
             return NodeErrorCode::None;
         }
 
-        if (options_.local_endpoint.empty())
+        if (options_.mode == InnerNetworkMode::PassiveListener && options_.local_endpoint.empty())
         {
             return SetError(
                 last_error_message_,
                 NodeErrorCode::InvalidArgument,
                 "InnerNetwork local_endpoint must not be empty.");
+        }
+
+        if (options_.mode == InnerNetworkMode::ActiveConnector && options_.remote_endpoint.empty())
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork remote_endpoint must not be empty.");
         }
 
         context_ = std::make_unique<ipc::ZmqContext>();
@@ -130,28 +98,59 @@ class InnerNetwork::Impl final
                 "Failed to initialize inner network ZeroMQ context: " + initialization_error);
         }
 
-        ipc::ZmqPassiveListenerOptions listener_options;
-        listener_options.local_endpoint = options_.local_endpoint;
+        if (options_.mode == InnerNetworkMode::PassiveListener)
+        {
+            ipc::ZmqPassiveListenerOptions listener_options;
+            listener_options.local_endpoint = options_.local_endpoint;
 
-        listener_ = std::make_unique<ipc::ZmqPassiveListener>(event_loop_.context(), *context_, std::move(listener_options));
-        listener_->SetStateHandler([this](ipc::ZmqListenerState state) {
-            try
-            {
-                HandleStateChange(state);
-            }
-            catch (...)
-            {
-            }
-        });
-        listener_->SetMessageHandler([this](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
-            try
-            {
-                HandleMessage(std::move(routing_id), std::move(payload));
-            }
-            catch (...)
-            {
-            }
-        });
+            listener_ =
+                std::make_unique<ipc::ZmqPassiveListener>(event_loop_.context(), *context_, std::move(listener_options));
+            listener_->SetStateHandler([this](ipc::ZmqListenerState state) {
+                try
+                {
+                    HandleListenerStateChange(state);
+                }
+                catch (...)
+                {
+                }
+            });
+            listener_->SetMessageHandler([this](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
+                try
+                {
+                    HandlePassiveMessage(std::move(routing_id), std::move(payload));
+                }
+                catch (...)
+                {
+                }
+            });
+        }
+        else if (options_.mode == InnerNetworkMode::ActiveConnector)
+        {
+            ipc::ZmqActiveConnectorOptions connector_options;
+            connector_options.remote_endpoint = options_.remote_endpoint;
+            connector_options.routing_id = options_.routing_id;
+
+            connector_ =
+                std::make_unique<ipc::ZmqActiveConnector>(event_loop_.context(), *context_, std::move(connector_options));
+            connector_->SetStateHandler([this](ipc::ZmqConnectionState state) {
+                try
+                {
+                    HandleConnectionStateChange(state);
+                }
+                catch (...)
+                {
+                }
+            });
+            connector_->SetMessageHandler([this](std::vector<std::byte> payload) {
+                try
+                {
+                    HandleActiveMessage(std::move(payload));
+                }
+                catch (...)
+                {
+                }
+            });
+        }
 
         initialized_ = true;
         ClearError(last_error_message_);
@@ -174,7 +173,7 @@ class InnerNetwork::Impl final
             return NodeErrorCode::None;
         }
 
-        if (listener_ == nullptr)
+        if (options_.mode == InnerNetworkMode::PassiveListener && listener_ == nullptr)
         {
             return SetError(
                 last_error_message_,
@@ -182,7 +181,15 @@ class InnerNetwork::Impl final
                 "InnerNetwork listener is not configured.");
         }
 
-        if (listener_->IsRunning())
+        if (options_.mode == InnerNetworkMode::ActiveConnector && connector_ == nullptr)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork connector is not configured.");
+        }
+
+        if (options_.mode == InnerNetworkMode::PassiveListener && listener_->IsRunning())
         {
             return SetError(
                 last_error_message_,
@@ -190,22 +197,52 @@ class InnerNetwork::Impl final
                 "InnerNetwork listener is already running.");
         }
 
-        std::string listener_error;
-        const ipc::ZmqSocketErrorCode start_result = listener_->Start(&listener_error);
-        if (start_result != ipc::ZmqSocketErrorCode::None)
+        if (options_.mode == InnerNetworkMode::ActiveConnector && connector_->IsRunning())
         {
             return SetError(
                 last_error_message_,
-                NodeErrorCode::NodeRunFailed,
-                "Failed to start inner network listener: " + listener_error);
+                NodeErrorCode::InvalidArgument,
+                "InnerNetwork connector is already running.");
         }
 
-        bound_endpoint_ = std::string(listener_->bound_endpoint());
-        const std::array<xs::core::LogContextField, 2> context{
-            xs::core::LogContextField{"configuredEndpoint", options_.local_endpoint},
-            xs::core::LogContextField{"boundEndpoint", bound_endpoint_},
-        };
-        LogInfo("Inner network listener started.", context);
+        if (options_.mode == InnerNetworkMode::PassiveListener)
+        {
+            std::string listener_error;
+            const ipc::ZmqSocketErrorCode start_result = listener_->Start(&listener_error);
+            if (start_result != ipc::ZmqSocketErrorCode::None)
+            {
+                return SetError(
+                    last_error_message_,
+                    NodeErrorCode::NodeRunFailed,
+                    "Failed to start inner network listener: " + listener_error);
+            }
+
+            bound_endpoint_ = std::string(listener_->bound_endpoint());
+            const std::array<xs::core::LogContextField, 2> context{
+                xs::core::LogContextField{"configuredEndpoint", options_.local_endpoint},
+                xs::core::LogContextField{"boundEndpoint", bound_endpoint_},
+            };
+            LogInfo("Inner network listener started.", context);
+        }
+        else if (options_.mode == InnerNetworkMode::ActiveConnector)
+        {
+            std::string connector_error;
+            const ipc::ZmqSocketErrorCode start_result = connector_->Start(&connector_error);
+            if (start_result != ipc::ZmqSocketErrorCode::None)
+            {
+                return SetError(
+                    last_error_message_,
+                    NodeErrorCode::NodeRunFailed,
+                    "Failed to start inner network connector: " + connector_error);
+            }
+
+            const std::array<xs::core::LogContextField, 3> context{
+                xs::core::LogContextField{"remoteEndpoint", options_.remote_endpoint},
+                xs::core::LogContextField{"localEndpoint", options_.local_endpoint},
+                xs::core::LogContextField{"routingId", options_.routing_id},
+            };
+            LogInfo("Inner network active connector started.", context);
+        }
 
         ClearError(last_error_message_);
         return NodeErrorCode::None;
@@ -216,6 +253,7 @@ class InnerNetwork::Impl final
         if (!initialized_)
         {
             context_.reset();
+            connector_.reset();
             listener_.reset();
             bound_endpoint_.clear();
             message_handler_ = {};
@@ -258,6 +296,40 @@ class InnerNetwork::Impl final
             }
         }
 
+        if (connector_ != nullptr && connector_->IsRunning())
+        {
+            const std::string remote_endpoint = options_.remote_endpoint;
+            const std::string local_endpoint = options_.local_endpoint;
+
+            try
+            {
+                const std::array<xs::core::LogContextField, 3> context{
+                    xs::core::LogContextField{"remoteEndpoint", remote_endpoint},
+                    xs::core::LogContextField{"localEndpoint", local_endpoint},
+                    xs::core::LogContextField{"state", std::string(ipc::ZmqConnectionStateName(connector_->state()))},
+                };
+                LogInfo("Inner network active connector stopping.", context);
+            }
+            catch (...)
+            {
+            }
+
+            connector_->Stop();
+
+            try
+            {
+                const std::array<xs::core::LogContextField, 2> context{
+                    xs::core::LogContextField{"remoteEndpoint", remote_endpoint},
+                    xs::core::LogContextField{"localEndpoint", local_endpoint},
+                };
+                LogInfo("Inner network active connector stopped.", context);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        connector_.reset();
         listener_.reset();
         context_.reset();
         bound_endpoint_.clear();
@@ -279,26 +351,66 @@ class InnerNetwork::Impl final
                 "InnerNetwork must be initialized before Send().");
         }
 
-        if (options_.mode != InnerNetworkMode::PassiveListener || listener_ == nullptr)
+        if (options_.mode == InnerNetworkMode::PassiveListener)
         {
-            return SetError(
-                last_error_message_,
-                NodeErrorCode::InvalidArgument,
-                "InnerNetwork Send() requires passive-listener mode.");
+            if (listener_ == nullptr)
+            {
+                return SetError(
+                    last_error_message_,
+                    NodeErrorCode::InvalidArgument,
+                    "InnerNetwork Send() requires a configured passive listener.");
+            }
+
+            std::string listener_error;
+            const ipc::ZmqSocketErrorCode send_result = listener_->Send(routing_id, payload, &listener_error);
+            if (send_result != ipc::ZmqSocketErrorCode::None)
+            {
+                return SetError(
+                    last_error_message_,
+                    NodeErrorCode::NodeRunFailed,
+                    "Failed to send inner network payload: " + listener_error);
+            }
+
+            ClearError(last_error_message_);
+            return NodeErrorCode::None;
         }
 
-        std::string listener_error;
-        const ipc::ZmqSocketErrorCode send_result = listener_->Send(routing_id, payload, &listener_error);
-        if (send_result != ipc::ZmqSocketErrorCode::None)
+        if (options_.mode == InnerNetworkMode::ActiveConnector)
         {
-            return SetError(
-                last_error_message_,
-                NodeErrorCode::NodeRunFailed,
-                "Failed to send inner network payload: " + listener_error);
+            if (!routing_id.empty())
+            {
+                return SetError(
+                    last_error_message_,
+                    NodeErrorCode::InvalidArgument,
+                    "InnerNetwork active connector mode does not accept routing IDs.");
+            }
+
+            if (connector_ == nullptr)
+            {
+                return SetError(
+                    last_error_message_,
+                    NodeErrorCode::InvalidArgument,
+                    "InnerNetwork Send() requires a configured active connector.");
+            }
+
+            std::string connector_error;
+            const ipc::ZmqSocketErrorCode send_result = connector_->Send(payload, &connector_error);
+            if (send_result != ipc::ZmqSocketErrorCode::None)
+            {
+                return SetError(
+                    last_error_message_,
+                    NodeErrorCode::NodeRunFailed,
+                    "Failed to send inner network payload: " + connector_error);
+            }
+
+            ClearError(last_error_message_);
+            return NodeErrorCode::None;
         }
 
-        ClearError(last_error_message_);
-        return NodeErrorCode::None;
+        return SetError(
+            last_error_message_,
+            NodeErrorCode::InvalidArgument,
+            "InnerNetwork Send() is unavailable while disabled.");
     }
 
     void SetMessageHandler(InnerNetworkMessageHandler handler)
@@ -308,7 +420,12 @@ class InnerNetwork::Impl final
 
     [[nodiscard]] bool IsRunning() const noexcept
     {
-        return listener_ != nullptr && listener_->IsRunning();
+        if (listener_ != nullptr)
+        {
+            return listener_->IsRunning();
+        }
+
+        return connector_ != nullptr && connector_->IsRunning();
     }
 
     [[nodiscard]] InnerNetworkMode mode() const noexcept
@@ -321,9 +438,34 @@ class InnerNetwork::Impl final
         return listener_ != nullptr ? listener_->state() : ipc::ZmqListenerState::Stopped;
     }
 
+    [[nodiscard]] ipc::ZmqConnectionState connection_state() const noexcept
+    {
+        return connector_ != nullptr ? connector_->state() : ipc::ZmqConnectionState::Stopped;
+    }
+
     [[nodiscard]] std::string_view configured_endpoint() const noexcept
     {
+        if (options_.mode == InnerNetworkMode::PassiveListener)
+        {
+            return options_.local_endpoint;
+        }
+
+        if (options_.mode == InnerNetworkMode::ActiveConnector)
+        {
+            return options_.remote_endpoint;
+        }
+
+        return std::string_view{};
+    }
+
+    [[nodiscard]] std::string_view local_endpoint() const noexcept
+    {
         return options_.local_endpoint;
+    }
+
+    [[nodiscard]] std::string_view remote_endpoint() const noexcept
+    {
+        return options_.remote_endpoint;
     }
 
     [[nodiscard]] std::string_view bound_endpoint() const noexcept
@@ -338,7 +480,12 @@ class InnerNetwork::Impl final
             return last_error_message_;
         }
 
-        return listener_ != nullptr ? listener_->last_error_message() : std::string_view{};
+        if (listener_ != nullptr)
+        {
+            return listener_->last_error_message();
+        }
+
+        return connector_ != nullptr ? connector_->last_error_message() : std::string_view{};
     }
 
     [[nodiscard]] ipc::ZmqListenerMetricsSnapshot metrics() const noexcept
@@ -347,7 +494,7 @@ class InnerNetwork::Impl final
     }
 
   private:
-    void HandleStateChange(ipc::ZmqListenerState state)
+    void HandleListenerStateChange(ipc::ZmqListenerState state)
     {
         if (listener_ != nullptr)
         {
@@ -362,7 +509,7 @@ class InnerNetwork::Impl final
         LogInfo("Inner network listener state changed.", context);
     }
 
-    void HandleMessage(
+    void HandlePassiveMessage(
         std::vector<std::byte> routing_id,
         std::vector<std::byte> payload)
     {
@@ -382,6 +529,35 @@ class InnerNetwork::Impl final
         }
     }
 
+    void HandleConnectionStateChange(ipc::ZmqConnectionState state)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"state", std::string(ipc::ZmqConnectionStateName(state))},
+            xs::core::LogContextField{"remoteEndpoint", options_.remote_endpoint},
+            xs::core::LogContextField{"localEndpoint", options_.local_endpoint},
+            xs::core::LogContextField{"routingId", options_.routing_id},
+        };
+        LogInfo("Inner network active connector state changed.", context);
+    }
+
+    void HandleActiveMessage(std::vector<std::byte> payload)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
+            xs::core::LogContextField{"remoteEndpoint", options_.remote_endpoint},
+            xs::core::LogContextField{
+                "state",
+                std::string(ipc::ZmqConnectionStateName(connection_state())),
+            },
+        };
+        LogInfo("Inner network active connector received payload.", context);
+
+        if (message_handler_)
+        {
+            message_handler_({}, std::move(payload));
+        }
+    }
+
     template <std::size_t N>
     void LogInfo(
         std::string_view message,
@@ -397,6 +573,7 @@ class InnerNetwork::Impl final
     std::string last_error_message_{};
     std::unique_ptr<ipc::ZmqContext> context_{};
     std::unique_ptr<ipc::ZmqPassiveListener> listener_{};
+    std::unique_ptr<ipc::ZmqActiveConnector> connector_{};
     InnerNetworkMessageHandler message_handler_{};
     bool initialized_{false};
 };
@@ -466,9 +643,24 @@ ipc::ZmqListenerState InnerNetwork::listener_state() const noexcept
     return impl_ != nullptr ? impl_->listener_state() : ipc::ZmqListenerState::Stopped;
 }
 
+ipc::ZmqConnectionState InnerNetwork::connection_state() const noexcept
+{
+    return impl_ != nullptr ? impl_->connection_state() : ipc::ZmqConnectionState::Stopped;
+}
+
 std::string_view InnerNetwork::configured_endpoint() const noexcept
 {
     return impl_ != nullptr ? impl_->configured_endpoint() : std::string_view{};
+}
+
+std::string_view InnerNetwork::local_endpoint() const noexcept
+{
+    return impl_ != nullptr ? impl_->local_endpoint() : std::string_view{};
+}
+
+std::string_view InnerNetwork::remote_endpoint() const noexcept
+{
+    return impl_ != nullptr ? impl_->remote_endpoint() : std::string_view{};
 }
 
 std::string_view InnerNetwork::bound_endpoint() const noexcept
