@@ -484,7 +484,8 @@ void TestServerNodeRejectsProcessTypeMismatch()
     XS_CHECK(init_result == xs::node::NodeErrorCode::InvalidArgument);
     XS_CHECK(!init_called);
     XS_CHECK_MSG(
-        std::string(node.last_error_message()).find("Game node requires process_type = Game.") != std::string::npos,
+        std::string(node.last_error_message()).find("Game node requires nodeId resolving to Game.") !=
+            std::string::npos,
         node.last_error_message().data());
 
     CleanupTestDirectory(base_path);

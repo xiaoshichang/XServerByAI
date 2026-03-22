@@ -1,10 +1,23 @@
 #include "GateNode.h"
 
+#include <array>
+#include <sstream>
 #include <string>
 #include <utility>
 
 namespace xs::node
 {
+namespace
+{
+
+std::string BuildEndpointText(const xs::core::EndpointConfig& endpoint)
+{
+    std::ostringstream stream;
+    stream << endpoint.host << ':' << endpoint.port;
+    return stream.str();
+}
+
+} // namespace
 
 GateNode::GateNode(NodeCommandLineArgs args)
     : ServerNode(std::move(args))
@@ -20,8 +33,17 @@ xs::core::ProcessType GateNode::role_process_type() const noexcept
 
 NodeErrorCode GateNode::OnInit()
 {
+    const auto* config = dynamic_cast<const xs::core::GateNodeConfig*>(&node_config());
+    if (config == nullptr)
+    {
+        return SetError(NodeErrorCode::ConfigLoadFailed, "Gate node requires GateNodeConfig.");
+    }
+
     inner_network_ = std::make_unique<InnerNetwork>(event_loop(), logger(), InnerNetworkOptions{});
-    client_network_ = std::make_unique<ClientNetwork>(event_loop(), logger());
+    ClientNetworkOptions client_options;
+    client_options.listen_endpoint = BuildEndpointText(config->client_network_listen_endpoint);
+    client_options.kcp = cluster_config().kcp;
+    client_network_ = std::make_unique<ClientNetwork>(event_loop(), logger(), std::move(client_options));
 
     const NodeErrorCode inner_result = inner_network_->Init();
     if (inner_result != NodeErrorCode::None)
@@ -41,6 +63,13 @@ NodeErrorCode GateNode::OnInit()
         client_network_.reset();
         return SetError(client_result, error_message);
     }
+
+    const std::array<xs::core::LogContextField, 3> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"clientListenEndpoint", std::string(client_network_->configured_endpoint())},
+        xs::core::LogContextField{"kcpMtu", std::to_string(cluster_config().kcp.mtu)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "client.network", "Gate node configured client network.", context);
 
     ClearError();
     return NodeErrorCode::None;

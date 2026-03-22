@@ -2,19 +2,30 @@
 
 #include "NodeCommon.h"
 
+#include "Config.h"
 #include "Logging.h"
 #include "MainEventLoop.h"
 
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace xs::node
 {
 
+struct ClientNetworkOptions
+{
+    std::string listen_endpoint{};
+    xs::core::KcpConfig kcp{};
+};
+
 class ClientNetwork final
 {
   public:
-    ClientNetwork(xs::core::MainEventLoop& event_loop, xs::core::Logger& logger);
+    ClientNetwork(
+        xs::core::MainEventLoop& event_loop,
+        xs::core::Logger& logger,
+        ClientNetworkOptions options = {});
     ~ClientNetwork();
 
     ClientNetwork(const ClientNetwork&) = delete;
@@ -27,6 +38,7 @@ class ClientNetwork final
     [[nodiscard]] NodeErrorCode Uninit();
 
     [[nodiscard]] bool initialized() const noexcept;
+    [[nodiscard]] std::string_view configured_endpoint() const noexcept;
     [[nodiscard]] std::string_view last_error_message() const noexcept;
 
   private:

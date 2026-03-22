@@ -82,7 +82,7 @@ NodeErrorCode MapConfigError(xs::core::ConfigErrorCode code) noexcept
 std::string BuildProcessTypeMismatchMessage(xs::core::ProcessType expected)
 {
     const std::string process_type_name = std::string(xs::core::ProcessTypeName(expected));
-    return process_type_name + " node requires process_type = " + process_type_name + ".";
+    return process_type_name + " node requires nodeId resolving to " + process_type_name + ".";
 }
 
 } // namespace

@@ -306,7 +306,8 @@ void TestGmNodeRejectsNonGmSelector()
 
     XS_CHECK(result == xs::node::NodeErrorCode::InvalidArgument);
     XS_CHECK_MSG(
-        std::string(node.last_error_message()).find("GM node requires process_type = GM.") != std::string::npos,
+        std::string(node.last_error_message()).find("GM node requires nodeId resolving to GM.") !=
+            std::string::npos,
         node.last_error_message().data());
 
     CleanupTestDirectory(base_path);

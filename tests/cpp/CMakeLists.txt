@@ -110,6 +110,14 @@ target_link_libraries(xs_node_gm_node_tests PRIVATE node ipc)
 
 add_test(NAME xs_node_gm_node_tests COMMAND xs_node_gm_node_tests)
 
+add_executable(xs_node_gate_node_tests
+    node_gate_node_tests.cpp
+)
+
+target_link_libraries(xs_node_gate_node_tests PRIVATE node)
+
+add_test(NAME xs_node_gate_node_tests COMMAND xs_node_gate_node_tests)
+
 add_executable(xs_node_gm_inner_service_tests
     node_gm_inner_service_tests.cpp
 )
