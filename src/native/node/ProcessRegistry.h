@@ -1,6 +1,6 @@
 #pragma once
 
-#include "message/ControlMessageTypes.h"
+#include "message/InnerMessageTypes.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -20,8 +20,8 @@ enum class ProcessRegistryErrorCode : std::uint8_t
     InvalidArgument,
     InvalidProcessType,
     InvalidNodeId,
-    InvalidServiceEndpointHost,
-    InvalidServiceEndpointPort,
+    InvalidInnerNetworkEndpointHost,
+    InvalidInnerNetworkEndpointPort,
     NodeIdConflict,
     RoutingIdConflict,
     NodeNotFound,
@@ -38,28 +38,28 @@ struct ProcessRegistryRegistration
     std::string node_id{};
     std::uint32_t pid{0};
     std::uint64_t started_at_unix_ms{0};
-    xs::net::Endpoint service_endpoint{};
+    xs::net::Endpoint inner_network_endpoint{};
     std::string build_version{};
     std::vector<std::string> capability_tags{};
     xs::net::LoadSnapshot load{};
     RoutingID routing_id{};
     std::uint64_t last_heartbeat_at_unix_ms{0};
-    bool service_ready{false};
+    bool inner_network_ready{false};
 };
 
 struct ProcessRegistryEntry
 {
-    xs::net::ControlProcessType process_type{xs::net::ControlProcessType::Gate};
+    xs::net::InnerProcessType process_type{xs::net::InnerProcessType::Gate};
     std::string node_id{};
     std::uint32_t pid{0};
     std::uint64_t started_at_unix_ms{0};
-    xs::net::Endpoint service_endpoint{};
+    xs::net::Endpoint inner_network_endpoint{};
     std::string build_version{};
     std::vector<std::string> capability_tags{};
     xs::net::LoadSnapshot load{};
     RoutingID routing_id{};
     std::uint64_t last_heartbeat_at_unix_ms{0};
-    bool service_ready{false};
+    bool inner_network_ready{false};
 };
 
 class ProcessRegistry final
@@ -78,12 +78,12 @@ class ProcessRegistry final
         std::uint64_t last_heartbeat_at_unix_ms,
         const xs::net::LoadSnapshot& load);
 
-    [[nodiscard]] ProcessRegistryErrorCode UpdateServiceReadyByNodeId(
+    [[nodiscard]] ProcessRegistryErrorCode UpdateInnerNetworkReadyByNodeId(
         std::string_view node_id,
-        bool service_ready);
-    [[nodiscard]] ProcessRegistryErrorCode UpdateServiceReadyByRoutingId(
+        bool inner_network_ready);
+    [[nodiscard]] ProcessRegistryErrorCode UpdateInnerNetworkReadyByRoutingId(
         std::span<const std::byte> routing_id,
-        bool service_ready);
+        bool inner_network_ready);
 
     [[nodiscard]] const ProcessRegistryEntry* FindByNodeId(std::string_view node_id) const;
     [[nodiscard]] const ProcessRegistryEntry* FindByRoutingId(std::span<const std::byte> routing_id) const;

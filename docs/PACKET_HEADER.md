@@ -1,4 +1,4 @@
-# PACKET_HEADER
+﻿# PACKET_HEADER
 
 本文档定义 XServerByAI 当前内部二进制协议的固定包头结构与基础常量。该约定适用于 GM、Gate、Game 之间的内部节点消息体；当前默认承载在 ZeroMQ over TCP 链路上，并为后续 Gate↔Client 协议兼容性验证提供基础参照。
 

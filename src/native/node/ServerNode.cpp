@@ -3,6 +3,7 @@
 #include <asio/post.hpp>
 
 #include <exception>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -38,13 +39,34 @@ std::string BuildDefaultThreadName(std::string_view node_id)
 
 xs::core::LoggerOptions BuildLoggerOptions(
     const xs::core::ClusterConfig& cluster_config,
-    const xs::core::NodeConfig& node_config)
+    xs::core::ProcessType process_type,
+    std::string_view node_id)
 {
     xs::core::LoggerOptions options;
-    options.process_type = node_config.process_type;
-    options.instance_id = node_config.node_id;
+    options.process_type = process_type;
+    options.instance_id = std::string(node_id);
     options.config = cluster_config.logging;
     return options;
+}
+
+std::optional<xs::core::ProcessType> ResolveNodeProcessType(const xs::core::NodeConfig& node_config) noexcept
+{
+    if (dynamic_cast<const xs::core::GmNodeConfig*>(&node_config) != nullptr)
+    {
+        return xs::core::ProcessType::Gm;
+    }
+
+    if (dynamic_cast<const xs::core::GateNodeConfig*>(&node_config) != nullptr)
+    {
+        return xs::core::ProcessType::Gate;
+    }
+
+    if (dynamic_cast<const xs::core::GameNodeConfig*>(&node_config) != nullptr)
+    {
+        return xs::core::ProcessType::Game;
+    }
+
+    return std::nullopt;
 }
 
 NodeErrorCode MapConfigError(xs::core::ConfigErrorCode code) noexcept
@@ -117,8 +139,15 @@ NodeErrorCode ServerNode::Init()
         return SetError(MapConfigError(select_result), std::move(detail_error));
     }
 
-    process_type_ = node_config_->process_type;
-    node_id_ = node_config_->node_id;
+    const std::optional<xs::core::ProcessType> resolved_process_type = ResolveNodeProcessType(*node_config_);
+    if (!resolved_process_type.has_value())
+    {
+        ReleaseCoreState();
+        return SetError(NodeErrorCode::ConfigLoadFailed, "Selected node config type is unsupported.");
+    }
+
+    process_type_ = *resolved_process_type;
+    node_id_ = args_.node_id;
     pid_ = GetCurrentProcessIdValue();
 
     const xs::core::ProcessType expected_process_type = role_process_type();
@@ -130,7 +159,7 @@ NodeErrorCode ServerNode::Init()
 
     try
     {
-        logger_ = std::make_unique<xs::core::Logger>(BuildLoggerOptions(cluster_config_, *node_config_));
+        logger_ = std::make_unique<xs::core::Logger>(BuildLoggerOptions(cluster_config_, process_type_, node_id_));
     }
     catch (const std::exception& exception)
     {

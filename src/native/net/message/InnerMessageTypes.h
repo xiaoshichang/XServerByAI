@@ -7,19 +7,19 @@
 namespace xs::net
 {
 
-enum class ControlProcessType : std::uint16_t
+enum class InnerProcessType : std::uint16_t
 {
     Gate = 1,
     Game = 2,
 };
 
-[[nodiscard]] inline bool IsValidControlProcessType(std::uint16_t process_type) noexcept
+[[nodiscard]] inline bool IsValidInnerProcessType(std::uint16_t process_type) noexcept
 {
-    return process_type == static_cast<std::uint16_t>(ControlProcessType::Gate) ||
-           process_type == static_cast<std::uint16_t>(ControlProcessType::Game);
+    return process_type == static_cast<std::uint16_t>(InnerProcessType::Gate) ||
+           process_type == static_cast<std::uint16_t>(InnerProcessType::Game);
 }
 
-inline constexpr std::size_t kControlLoadSnapshotSize = sizeof(std::uint32_t) * 5u;
+inline constexpr std::size_t kInnerLoadSnapshotSize = sizeof(std::uint32_t) * 5u;
 
 struct Endpoint
 {

@@ -48,10 +48,10 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 #define XS_CHECK(expr) Check((expr), #expr)
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
 
-inline constexpr std::int32_t kControlProcessTypeInvalid = 3000;
-inline constexpr std::int32_t kControlNodeIdConflict = 3001;
-inline constexpr std::int32_t kControlServiceEndpointInvalid = 3002;
-inline constexpr std::int32_t kControlRegisterPayloadInvalid = 3005;
+inline constexpr std::int32_t kInnerProcessTypeInvalid = 3000;
+inline constexpr std::int32_t kInnerNodeIdConflict = 3001;
+inline constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
+inline constexpr std::int32_t kInnerRequestInvalid = 3005;
 
 std::filesystem::path PrepareTestDirectory(std::string_view name)
 {
@@ -89,7 +89,7 @@ std::uint16_t AcquireLoopbackPort()
 
 xs::core::Json MakeClusterConfigJson(
     const std::filesystem::path& base_path,
-    std::uint16_t gm_control_port)
+    std::uint16_t gm_inner_port)
 {
     const std::string root_log_dir = (base_path / "logs").string();
 
@@ -119,20 +119,25 @@ xs::core::Json MakeClusterConfigJson(
          }},
         {"gm",
          xs::core::Json{
-             {"control",
+             {"innerNetwork",
               xs::core::Json{
                   {"listenEndpoint",
-                   xs::core::Json{{"host", "127.0.0.1"}, {"port", gm_control_port}}},
+                   xs::core::Json{{"host", "127.0.0.1"}, {"port", gm_inner_port}}},
               }},
          }},
         {"gate",
          xs::core::Json{
              {"Gate0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7000}}},
+                   }},
+                  {"clientNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4000}}},
                    }},
               }},
          }},
@@ -140,7 +145,7 @@ xs::core::Json MakeClusterConfigJson(
          xs::core::Json{
              {"Game0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
@@ -154,7 +159,7 @@ xs::core::Json MakeClusterConfigJson(
 
 bool WriteRuntimeConfig(
     const std::filesystem::path& base_path,
-    std::uint16_t gm_control_port,
+    std::uint16_t gm_inner_port,
     std::filesystem::path* file_path)
 {
     if (file_path == nullptr)
@@ -164,7 +169,7 @@ bool WriteRuntimeConfig(
     }
 
     *file_path = base_path / "config.json";
-    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, gm_control_port));
+    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, gm_inner_port));
 }
 
 std::vector<std::byte> BytesFromText(std::string_view value)
@@ -235,9 +240,9 @@ xs::net::RegisterRequest MakeRegisterRequest(
         .node_id = std::move(node_id),
         .pid = pid,
         .started_at_unix_ms = started_at_unix_ms,
-        .service_endpoint = xs::net::Endpoint{.host = "127.0.0.1", .port = service_port},
+        .inner_network_endpoint = xs::net::Endpoint{.host = "127.0.0.1", .port = service_port},
         .build_version = "test-build",
-        .capability_tags = {"cluster", "control"},
+        .capability_tags = {"cluster", "inner"},
         .load = xs::net::LoadSnapshot{
             .connection_count = 1u,
             .session_count = 2u,
@@ -261,13 +266,13 @@ std::vector<std::byte> EncodeRegisterPayload(const xs::net::RegisterRequest& req
     return payload;
 }
 
-std::vector<std::byte> BuildControlRegisterPacket(
+std::vector<std::byte> BuildInnerRegisterPacket(
     std::span<const std::byte> register_payload,
     std::uint32_t seq)
 {
     const xs::net::PacketHeader header =
         xs::net::MakePacketHeader(
-            xs::net::kControlRegisterMsgId,
+            xs::net::kInnerRegisterMsgId,
             seq,
             0u,
             static_cast<std::uint32_t>(register_payload.size()));
@@ -367,9 +372,9 @@ class RunningGmNode final
 void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-success");
-    const std::uint16_t control_port = AcquireLoopbackPort();
+    const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -391,7 +396,7 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-success",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -414,9 +419,9 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
     XS_CHECK(connected);
 
     const xs::net::RegisterRequest request =
-        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Game), "Game0", 1001u, 2002u, 7100u);
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), "Game0", 1001u, 2002u, 7100u);
     const std::vector<std::byte> register_payload = EncodeRegisterPayload(request);
-    const std::vector<std::byte> packet = BuildControlRegisterPacket(register_payload, 42u);
+    const std::vector<std::byte> packet = BuildInnerRegisterPacket(register_payload, 42u);
 
     XS_CHECK(connector.Send(packet, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
@@ -428,7 +433,7 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
     XS_CHECK(responses.size() == 1u);
 
     const xs::net::PacketView response_packet = DecodeResponsePacket(responses.front());
-    XS_CHECK(response_packet.header.msg_id == xs::net::kControlRegisterMsgId);
+    XS_CHECK(response_packet.header.msg_id == xs::net::kInnerRegisterMsgId);
     XS_CHECK(response_packet.header.seq == 42u);
     XS_CHECK(
         response_packet.header.flags ==
@@ -448,16 +453,16 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
 
     const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
     XS_CHECK(snapshot.size() == 1u);
-    XS_CHECK(snapshot.front().process_type == xs::net::ControlProcessType::Game);
+    XS_CHECK(snapshot.front().process_type == xs::net::InnerProcessType::Game);
     XS_CHECK(snapshot.front().node_id == "Game0");
     XS_CHECK(snapshot.front().pid == 1001u);
     XS_CHECK(snapshot.front().started_at_unix_ms == 2002u);
-    XS_CHECK(snapshot.front().service_endpoint.host == "127.0.0.1");
-    XS_CHECK(snapshot.front().service_endpoint.port == 7100u);
+    XS_CHECK(snapshot.front().inner_network_endpoint.host == "127.0.0.1");
+    XS_CHECK(snapshot.front().inner_network_endpoint.port == 7100u);
     XS_CHECK(snapshot.front().build_version == "test-build");
     XS_CHECK(snapshot.front().capability_tags == request.capability_tags);
     XS_CHECK(snapshot.front().load.connection_count == 1u);
-    XS_CHECK(snapshot.front().service_ready == false);
+    XS_CHECK(snapshot.front().inner_network_ready == false);
     XS_CHECK(snapshot.front().last_heartbeat_at_unix_ms != 0u);
     XS_CHECK(ByteSpanEqualsText(snapshot.front().routing_id, "gm-route-success"));
 
@@ -468,9 +473,9 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
 void TestGmNodeRejectsDuplicateNodeId()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-duplicate-node");
-    const std::uint16_t control_port = AcquireLoopbackPort();
+    const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -494,7 +499,7 @@ void TestGmNodeRejectsDuplicateNodeId()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-dup-a",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -511,7 +516,7 @@ void TestGmNodeRejectsDuplicateNodeId()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-dup-b",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -536,9 +541,9 @@ void TestGmNodeRejectsDuplicateNodeId()
     });
     XS_CHECK(connected);
 
-    const std::vector<std::byte> first_packet = BuildControlRegisterPacket(
+    const std::vector<std::byte> first_packet = BuildInnerRegisterPacket(
         EncodeRegisterPayload(
-            MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", 2001u, 3001u, 7000u)),
+            MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", 2001u, 3001u, 7000u)),
         11u);
     XS_CHECK(first_connector.Send(first_packet, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
@@ -546,9 +551,9 @@ void TestGmNodeRejectsDuplicateNodeId()
         return first_responses.size() == 1u;
     }));
 
-    const std::vector<std::byte> second_packet = BuildControlRegisterPacket(
+    const std::vector<std::byte> second_packet = BuildInnerRegisterPacket(
         EncodeRegisterPayload(
-            MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", 2002u, 3002u, 7001u)),
+            MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", 2002u, 3002u, 7001u)),
         12u);
     XS_CHECK(second_connector.Send(second_packet, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
@@ -557,7 +562,7 @@ void TestGmNodeRejectsDuplicateNodeId()
     }));
 
     const xs::net::PacketView error_packet = DecodeResponsePacket(second_responses.front());
-    XS_CHECK(error_packet.header.msg_id == xs::net::kControlRegisterMsgId);
+    XS_CHECK(error_packet.header.msg_id == xs::net::kInnerRegisterMsgId);
     XS_CHECK(error_packet.header.seq == 12u);
     XS_CHECK(
         error_packet.header.flags ==
@@ -568,7 +573,7 @@ void TestGmNodeRejectsDuplicateNodeId()
     const xs::net::RegisterCodecErrorCode decode_result =
         xs::net::DecodeRegisterErrorResponse(error_packet.payload, &response);
     XS_CHECK(decode_result == xs::net::RegisterCodecErrorCode::None);
-    XS_CHECK(response.error_code == kControlNodeIdConflict);
+    XS_CHECK(response.error_code == kInnerNodeIdConflict);
     XS_CHECK(response.retry_after_ms == 0u);
 
     first_connector.Stop();
@@ -589,9 +594,9 @@ void TestGmNodeRejectsDuplicateNodeId()
 void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-sequential-success");
-    const std::uint16_t control_port = AcquireLoopbackPort();
+    const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -615,7 +620,7 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-gate-success",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -632,7 +637,7 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-game-success",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -657,14 +662,14 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     }));
 
     const xs::net::RegisterRequest gate_request =
-        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", 3101u, 4101u, 7000u);
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", 3101u, 4101u, 7000u);
     const xs::net::RegisterRequest game_request =
-        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Game), "Game0", 3102u, 4102u, 7100u);
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), "Game0", 3102u, 4102u, 7100u);
 
-    XS_CHECK(gate_connector.Send(BuildControlRegisterPacket(EncodeRegisterPayload(gate_request), 31u), &error_message) ==
+    XS_CHECK(gate_connector.Send(BuildInnerRegisterPacket(EncodeRegisterPayload(gate_request), 31u), &error_message) ==
              xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
-    XS_CHECK(game_connector.Send(BuildControlRegisterPacket(EncodeRegisterPayload(game_request), 32u), &error_message) ==
+    XS_CHECK(game_connector.Send(BuildInnerRegisterPacket(EncodeRegisterPayload(game_request), 32u), &error_message) ==
              xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
 
@@ -673,12 +678,12 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     }));
 
     const xs::net::PacketView gate_packet = DecodeResponsePacket(gate_responses.front());
-    XS_CHECK(gate_packet.header.msg_id == xs::net::kControlRegisterMsgId);
+    XS_CHECK(gate_packet.header.msg_id == xs::net::kInnerRegisterMsgId);
     XS_CHECK(gate_packet.header.seq == 31u);
     XS_CHECK(gate_packet.header.flags == static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
 
     const xs::net::PacketView game_packet = DecodeResponsePacket(game_responses.front());
-    XS_CHECK(game_packet.header.msg_id == xs::net::kControlRegisterMsgId);
+    XS_CHECK(game_packet.header.msg_id == xs::net::kInnerRegisterMsgId);
     XS_CHECK(game_packet.header.seq == 32u);
     XS_CHECK(game_packet.header.flags == static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
 
@@ -707,8 +712,8 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     XS_CHECK(gate_entry != snapshot.end());
     if (gate_entry != snapshot.end())
     {
-        XS_CHECK(gate_entry->process_type == xs::net::ControlProcessType::Gate);
-        XS_CHECK(gate_entry->service_endpoint.port == 7000u);
+        XS_CHECK(gate_entry->process_type == xs::net::InnerProcessType::Gate);
+        XS_CHECK(gate_entry->inner_network_endpoint.port == 7000u);
         XS_CHECK(ByteSpanEqualsText(gate_entry->routing_id, "gm-route-gate-success"));
     }
 
@@ -718,8 +723,8 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     XS_CHECK(game_entry != snapshot.end());
     if (game_entry != snapshot.end())
     {
-        XS_CHECK(game_entry->process_type == xs::net::ControlProcessType::Game);
-        XS_CHECK(game_entry->service_endpoint.port == 7100u);
+        XS_CHECK(game_entry->process_type == xs::net::InnerProcessType::Game);
+        XS_CHECK(game_entry->inner_network_endpoint.port == 7100u);
         XS_CHECK(ByteSpanEqualsText(game_entry->routing_id, "gm-route-game-success"));
     }
 
@@ -730,9 +735,9 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
 void TestGmNodeRejectsInvalidProcessType()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-process-type");
-    const std::uint16_t control_port = AcquireLoopbackPort();
+    const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -754,7 +759,7 @@ void TestGmNodeRejectsInvalidProcessType()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-invalid-process-type",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -775,12 +780,12 @@ void TestGmNodeRejectsInvalidProcessType()
     }));
 
     std::vector<std::byte> payload = EncodeRegisterPayload(
-        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate3", 2401u, 3401u, 7003u));
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate3", 2401u, 3401u, 7003u));
     // `processType` lives at bytes [0..1] in the stable M2-12 register payload layout.
     payload[0] = std::byte{0x00};
     payload[1] = std::byte{0x00};
 
-    const std::vector<std::byte> packet = BuildControlRegisterPacket(payload, 23u);
+    const std::vector<std::byte> packet = BuildInnerRegisterPacket(payload, 23u);
     XS_CHECK(connector.Send(packet, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&responses]() {
@@ -798,7 +803,7 @@ void TestGmNodeRejectsInvalidProcessType()
     const xs::net::RegisterCodecErrorCode decode_result =
         xs::net::DecodeRegisterErrorResponse(error_packet.payload, &response);
     XS_CHECK(decode_result == xs::net::RegisterCodecErrorCode::None);
-    XS_CHECK(response.error_code == kControlProcessTypeInvalid);
+    XS_CHECK(response.error_code == kInnerProcessTypeInvalid);
     XS_CHECK(response.retry_after_ms == 0u);
 
     connector.Stop();
@@ -808,12 +813,12 @@ void TestGmNodeRejectsInvalidProcessType()
     CleanupTestDirectory(base_path);
 }
 
-void TestGmNodeRejectsInvalidServiceEndpoint()
+void TestGmNodeRejectsInvalidInnerNetworkEndpoint()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-endpoint");
-    const std::uint16_t control_port = AcquireLoopbackPort();
+    const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -835,7 +840,7 @@ void TestGmNodeRejectsInvalidServiceEndpoint()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-invalid-endpoint",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -856,12 +861,12 @@ void TestGmNodeRejectsInvalidServiceEndpoint()
     }));
 
     std::vector<std::byte> payload = EncodeRegisterPayload(
-        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate1", 2201u, 3201u, 7001u));
-    // `serviceEndpoint.port` lives at bytes [34..35] for the fixed request shape used in this test.
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate1", 2201u, 3201u, 7001u));
+    // `innerNetworkEndpoint.port` lives at bytes [34..35] for the fixed request shape used in this test.
     payload[34] = std::byte{0x00};
     payload[35] = std::byte{0x00};
 
-    const std::vector<std::byte> packet = BuildControlRegisterPacket(payload, 21u);
+    const std::vector<std::byte> packet = BuildInnerRegisterPacket(payload, 21u);
     XS_CHECK(connector.Send(packet, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&responses]() {
@@ -879,7 +884,7 @@ void TestGmNodeRejectsInvalidServiceEndpoint()
     const xs::net::RegisterCodecErrorCode decode_result =
         xs::net::DecodeRegisterErrorResponse(error_packet.payload, &response);
     XS_CHECK(decode_result == xs::net::RegisterCodecErrorCode::None);
-    XS_CHECK(response.error_code == kControlServiceEndpointInvalid);
+    XS_CHECK(response.error_code == kInnerNetworkEndpointInvalid);
 
     connector.Stop();
     gm_node.StopAndJoin();
@@ -891,9 +896,9 @@ void TestGmNodeRejectsInvalidServiceEndpoint()
 void TestGmNodeRejectsInvalidRegisterPayload()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-invalid-payload");
-    const std::uint16_t control_port = AcquireLoopbackPort();
+    const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -915,7 +920,7 @@ void TestGmNodeRejectsInvalidRegisterPayload()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-invalid-payload",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -936,11 +941,11 @@ void TestGmNodeRejectsInvalidRegisterPayload()
     }));
 
     std::vector<std::byte> payload = EncodeRegisterPayload(
-        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate2", 2301u, 3301u, 7002u));
+        MakeRegisterRequest(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate2", 2301u, 3301u, 7002u));
     // `processFlags` lives at bytes [2..3] in the stable M2-12 register payload layout.
     payload[3] = std::byte{0x01};
 
-    const std::vector<std::byte> packet = BuildControlRegisterPacket(payload, 22u);
+    const std::vector<std::byte> packet = BuildInnerRegisterPacket(payload, 22u);
     XS_CHECK(connector.Send(packet, &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&responses]() {
@@ -958,7 +963,7 @@ void TestGmNodeRejectsInvalidRegisterPayload()
     const xs::net::RegisterCodecErrorCode decode_result =
         xs::net::DecodeRegisterErrorResponse(error_packet.payload, &response);
     XS_CHECK(decode_result == xs::net::RegisterCodecErrorCode::None);
-    XS_CHECK(response.error_code == kControlRegisterPayloadInvalid);
+    XS_CHECK(response.error_code == kInnerRequestInvalid);
 
     connector.Stop();
     gm_node.StopAndJoin();
@@ -970,9 +975,9 @@ void TestGmNodeRejectsInvalidRegisterPayload()
 void TestGmNodeDropsMalformedPacketWithoutResponse()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-malformed-packet");
-    const std::uint16_t control_port = AcquireLoopbackPort();
+    const std::uint16_t inner_port = AcquireLoopbackPort();
     std::filesystem::path config_path;
-    if (!WriteRuntimeConfig(base_path, control_port, &config_path))
+    if (!WriteRuntimeConfig(base_path, inner_port, &config_path))
     {
         CleanupTestDirectory(base_path);
         return;
@@ -994,7 +999,7 @@ void TestGmNodeDropsMalformedPacketWithoutResponse()
         io_context,
         context,
         {
-            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(control_port),
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
             .routing_id = "gm-route-malformed",
             .poll_interval = std::chrono::milliseconds(2),
             .send_high_water_mark = 16,
@@ -1041,7 +1046,7 @@ int main()
     TestGmNodeRejectsDuplicateNodeId();
     TestGmNodeAcceptsGateAndGameRegistrationsSequentially();
     TestGmNodeRejectsInvalidProcessType();
-    TestGmNodeRejectsInvalidServiceEndpoint();
+    TestGmNodeRejectsInvalidInnerNetworkEndpoint();
     TestGmNodeRejectsInvalidRegisterPayload();
     TestGmNodeDropsMalformedPacketWithoutResponse();
 
@@ -1053,3 +1058,4 @@ int main()
 
     return EXIT_SUCCESS;
 }
+

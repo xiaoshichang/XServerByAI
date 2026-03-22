@@ -8,11 +8,11 @@
 namespace xs::net
 {
 
-inline constexpr std::uint32_t kControlClusterReadyNotifyMsgId = 1201u;
+inline constexpr std::uint32_t kInnerClusterReadyNotifyMsgId = 1201u;
 inline constexpr std::size_t kClusterReadyNotifySize =
     sizeof(std::uint64_t) + sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 
-enum class ClusterControlCodecErrorCode : std::uint8_t
+enum class InnerClusterCodecErrorCode : std::uint8_t
 {
     None = 0,
     BufferTooSmall = 1,
@@ -22,7 +22,7 @@ enum class ClusterControlCodecErrorCode : std::uint8_t
     TrailingBytes = 5,
 };
 
-[[nodiscard]] std::string_view ClusterControlCodecErrorMessage(ClusterControlCodecErrorCode error_code) noexcept;
+[[nodiscard]] std::string_view InnerClusterCodecErrorMessage(InnerClusterCodecErrorCode error_code) noexcept;
 
 struct ClusterReadyNotify
 {
@@ -32,10 +32,10 @@ struct ClusterReadyNotify
     std::uint64_t server_now_unix_ms{0};
 };
 
-[[nodiscard]] ClusterControlCodecErrorCode EncodeClusterReadyNotify(
+[[nodiscard]] InnerClusterCodecErrorCode EncodeClusterReadyNotify(
     const ClusterReadyNotify& message,
     std::span<std::byte> buffer) noexcept;
-[[nodiscard]] ClusterControlCodecErrorCode DecodeClusterReadyNotify(
+[[nodiscard]] InnerClusterCodecErrorCode DecodeClusterReadyNotify(
     std::span<const std::byte> buffer,
     ClusterReadyNotify* message) noexcept;
 

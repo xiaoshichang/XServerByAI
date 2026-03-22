@@ -1,4 +1,4 @@
-# dotnet 常见命令行操作
+﻿# dotnet 常见命令行操作
 
 本文档整理 `dotnet` CLI 的常见操作，适合作为日常开发速查表。  
 示例默认使用 PowerShell，路径以当前仓库的 `src/managed/` 目录为参考。
@@ -355,3 +355,4 @@ dotnet build .\XServerByAI.Managed.sln -c Debug
 
 **4. 什么时候应该用解决方案文件，什么时候直接对 `.csproj` 操作？**  
 多项目协同时优先对 `.sln` 操作；单项目定位问题或局部构建时，直接指定 `.csproj` 更精确。
+

@@ -1,4 +1,4 @@
-#include "message/ClusterControlCodec.h"
+#include "message/InnerClusterCodec.h"
 
 #include <array>
 #include <cstddef>
@@ -62,7 +62,7 @@ void TestEncodeClusterReadyNotifyRoundTrip()
     std::array<std::byte, xs::net::kClusterReadyNotifySize> buffer{};
     XS_CHECK(
         xs::net::EncodeClusterReadyNotify(notify, buffer) ==
-        xs::net::ClusterControlCodecErrorCode::None);
+        xs::net::InnerClusterCodecErrorCode::None);
 
     const std::array<std::byte, xs::net::kClusterReadyNotifySize> expected{
         std::byte{0x21}, std::byte{0x22}, std::byte{0x23}, std::byte{0x24},
@@ -77,7 +77,7 @@ void TestEncodeClusterReadyNotifyRoundTrip()
     xs::net::ClusterReadyNotify decoded{};
     XS_CHECK(
         xs::net::DecodeClusterReadyNotify(buffer, &decoded) ==
-        xs::net::ClusterControlCodecErrorCode::None);
+        xs::net::InnerClusterCodecErrorCode::None);
     XS_CHECK(decoded.ready_epoch == notify.ready_epoch);
     XS_CHECK(decoded.cluster_ready == notify.cluster_ready);
     XS_CHECK(decoded.status_flags == notify.status_flags);
@@ -96,31 +96,31 @@ void TestRejectsClusterReadySemanticViolationsAndMalformedBuffers()
     std::array<std::byte, xs::net::kClusterReadyNotifySize> buffer{};
     XS_CHECK(
         xs::net::EncodeClusterReadyNotify(valid_notify, buffer) ==
-        xs::net::ClusterControlCodecErrorCode::None);
+        xs::net::InnerClusterCodecErrorCode::None);
 
     auto invalid_status_flags = buffer;
     invalid_status_flags[12] = std::byte{0x01};
     xs::net::ClusterReadyNotify decoded{};
     XS_CHECK(
         xs::net::DecodeClusterReadyNotify(invalid_status_flags, &decoded) ==
-        xs::net::ClusterControlCodecErrorCode::InvalidReadyStatusFlags);
+        xs::net::InnerClusterCodecErrorCode::InvalidReadyStatusFlags);
 
     auto invalid_bool = buffer;
     invalid_bool[8] = std::byte{0x02};
     XS_CHECK(
         xs::net::DecodeClusterReadyNotify(invalid_bool, &decoded) ==
-        xs::net::ClusterControlCodecErrorCode::InvalidBoolValue);
+        xs::net::InnerClusterCodecErrorCode::InvalidBoolValue);
 
     const std::span<const std::byte> truncated(buffer.data(), buffer.size() - 1u);
     XS_CHECK(
         xs::net::DecodeClusterReadyNotify(truncated, &decoded) ==
-        xs::net::ClusterControlCodecErrorCode::BufferTooSmall);
+        xs::net::InnerClusterCodecErrorCode::BufferTooSmall);
 
     std::vector<std::byte> trailing(buffer.begin(), buffer.end());
     trailing.push_back(std::byte{0xAA});
     XS_CHECK(
         xs::net::DecodeClusterReadyNotify(trailing, &decoded) ==
-        xs::net::ClusterControlCodecErrorCode::TrailingBytes);
+        xs::net::InnerClusterCodecErrorCode::TrailingBytes);
 }
 
 void TestRejectsInvalidArgumentsAndSizeViolations()
@@ -134,7 +134,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
     std::array<std::byte, xs::net::kClusterReadyNotifySize> ready_buffer{};
     XS_CHECK(
         xs::net::EncodeClusterReadyNotify(invalid_ready, ready_buffer) ==
-        xs::net::ClusterControlCodecErrorCode::InvalidReadyStatusFlags);
+        xs::net::InnerClusterCodecErrorCode::InvalidReadyStatusFlags);
 
     std::array<std::byte, xs::net::kClusterReadyNotifySize - 1u> short_ready_buffer{};
     const xs::net::ClusterReadyNotify valid_ready{
@@ -145,14 +145,14 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
     };
     XS_CHECK(
         xs::net::EncodeClusterReadyNotify(valid_ready, short_ready_buffer) ==
-        xs::net::ClusterControlCodecErrorCode::BufferTooSmall);
+        xs::net::InnerClusterCodecErrorCode::BufferTooSmall);
 
     XS_CHECK(
         xs::net::DecodeClusterReadyNotify(ready_buffer, nullptr) ==
-        xs::net::ClusterControlCodecErrorCode::InvalidArgument);
+        xs::net::InnerClusterCodecErrorCode::InvalidArgument);
     XS_CHECK(
-        xs::net::ClusterControlCodecErrorMessage(xs::net::ClusterControlCodecErrorCode::TrailingBytes) ==
-        std::string_view("Cluster-control buffer must not contain trailing bytes."));
+        xs::net::InnerClusterCodecErrorMessage(xs::net::InnerClusterCodecErrorCode::TrailingBytes) ==
+        std::string_view("Inner-cluster buffer must not contain trailing bytes."));
 }
 
 } // namespace
@@ -165,7 +165,7 @@ int main()
 
     if (g_failures != 0)
     {
-        std::cerr << g_failures << " cluster-control codec test(s) failed.\n";
+        std::cerr << g_failures << " inner-cluster codec test(s) failed.\n";
         return EXIT_FAILURE;
     }
 

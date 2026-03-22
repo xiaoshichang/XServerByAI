@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ControlMessageTypes.h"
+#include "InnerMessageTypes.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -10,8 +10,8 @@
 namespace xs::net
 {
 
-inline constexpr std::uint32_t kControlHeartbeatMsgId = 1100u;
-inline constexpr std::size_t kHeartbeatRequestSize = sizeof(std::uint64_t) + sizeof(std::uint32_t) + kControlLoadSnapshotSize;
+inline constexpr std::uint32_t kInnerHeartbeatMsgId = 1100u;
+inline constexpr std::size_t kHeartbeatRequestSize = sizeof(std::uint64_t) + sizeof(std::uint32_t) + kInnerLoadSnapshotSize;
 inline constexpr std::size_t kHeartbeatSuccessResponseSize = sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kHeartbeatErrorResponseSize = sizeof(std::int32_t) + sizeof(std::uint32_t) + sizeof(std::uint8_t);
 

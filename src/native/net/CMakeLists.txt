@@ -4,9 +4,9 @@ add_library(net STATIC
     ByteOrder.h
     MessageDispatcher.cpp
     MessageDispatcher.h
-    message/ClusterControlCodec.cpp
-    message/ClusterControlCodec.h
-    message/ControlMessageTypes.h
+    message/InnerClusterCodec.cpp
+    message/InnerClusterCodec.h
+    message/InnerMessageTypes.h
     message/HeartbeatCodec.cpp
     message/HeartbeatCodec.h
     message/PacketCodec.cpp

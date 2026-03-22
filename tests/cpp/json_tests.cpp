@@ -100,7 +100,7 @@ xs::core::Json MakeValidClusterConfigJson()
          }},
         {"gm",
          xs::core::Json{
-             {"control",
+             {"innerNetwork",
               xs::core::Json{
                   {"listenEndpoint",
                    xs::core::Json{{"host", "127.0.0.1"}, {"port", 5000}}},
@@ -110,10 +110,15 @@ xs::core::Json MakeValidClusterConfigJson()
          xs::core::Json{
              {"Gate0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "0.0.0.0"}, {"port", 7000}}},
+                   }},
+                  {"clientNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4000}}},
                    }},
               }},
          }},
@@ -121,7 +126,7 @@ xs::core::Json MakeValidClusterConfigJson()
          xs::core::Json{
              {"Game0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
@@ -279,8 +284,6 @@ void TestLoadNodeConfigForGm()
 
     XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
     XS_CHECK(node_config != nullptr);
-    XS_CHECK(node_config->process_type == xs::core::ProcessType::Gm);
-    XS_CHECK(node_config->node_id == "GM");
     XS_CHECK(cluster_config.env.id == "local-dev");
     XS_CHECK(cluster_config.env.environment == "dev");
     XS_CHECK(cluster_config.logging.root_dir == "logs");
@@ -290,8 +293,8 @@ void TestLoadNodeConfigForGm()
     XS_CHECK(gm_node_config != nullptr);
     if (gm_node_config != nullptr)
     {
-        XS_CHECK(gm_node_config->control_listen_endpoint.host == "127.0.0.1");
-        XS_CHECK(gm_node_config->control_listen_endpoint.port == 5000);
+        XS_CHECK(gm_node_config->inner_network_listen_endpoint.host == "127.0.0.1");
+        XS_CHECK(gm_node_config->inner_network_listen_endpoint.port == 5000);
     }
 
     CleanupTestDirectory(base_path);
@@ -322,8 +325,6 @@ void TestLoadNodeConfigForGate()
 
     XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
     XS_CHECK(node_config != nullptr);
-    XS_CHECK(node_config->process_type == xs::core::ProcessType::Gate);
-    XS_CHECK(node_config->node_id == "Gate0");
     XS_CHECK(cluster_config.logging.root_dir == "logs");
     XS_CHECK(cluster_config.logging.min_level == xs::core::LogLevel::Info);
 
@@ -331,8 +332,10 @@ void TestLoadNodeConfigForGate()
     XS_CHECK(gate_node_config != nullptr);
     if (gate_node_config != nullptr)
     {
-        XS_CHECK(gate_node_config->service_listen_endpoint.host == "0.0.0.0");
-        XS_CHECK(gate_node_config->service_listen_endpoint.port == 7000);
+        XS_CHECK(gate_node_config->inner_network_listen_endpoint.host == "0.0.0.0");
+        XS_CHECK(gate_node_config->inner_network_listen_endpoint.port == 7000);
+        XS_CHECK(gate_node_config->client_network_listen_endpoint.host == "0.0.0.0");
+        XS_CHECK(gate_node_config->client_network_listen_endpoint.port == 4000);
     }
     XS_CHECK(cluster_config.kcp.sndwnd == 256);
     XS_CHECK(cluster_config.kcp.mtu == 1200);
@@ -366,8 +369,6 @@ void TestLoadNodeConfigForGame()
 
     XS_CHECK_MSG(success == xs::core::ConfigErrorCode::None, error_message.c_str());
     XS_CHECK(node_config != nullptr);
-    XS_CHECK(node_config->process_type == xs::core::ProcessType::Game);
-    XS_CHECK(node_config->node_id == "Game0");
     XS_CHECK(cluster_config.logging.root_dir == "logs");
     XS_CHECK(cluster_config.logging.min_level == xs::core::LogLevel::Info);
 
@@ -375,8 +376,8 @@ void TestLoadNodeConfigForGame()
     XS_CHECK(game_node_config != nullptr);
     if (game_node_config != nullptr)
     {
-        XS_CHECK(game_node_config->service_listen_endpoint.host == "127.0.0.1");
-        XS_CHECK(game_node_config->service_listen_endpoint.port == 7100);
+        XS_CHECK(game_node_config->inner_network_listen_endpoint.host == "127.0.0.1");
+        XS_CHECK(game_node_config->inner_network_listen_endpoint.port == 7100);
         XS_CHECK(game_node_config->managed.assembly_name == "XServer.Managed.GameLogic");
     }
 
@@ -453,6 +454,29 @@ void TestLoadNodeConfigRejectsInvalidGateNodeId()
     CleanupTestDirectory(base_path);
 }
 
+void TestLoadNodeConfigRejectsMissingGateClientNetwork()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("config-missing-gate-client-network");
+    const std::filesystem::path file_path = base_path / "config.json";
+    xs::core::Json config_json = MakeValidClusterConfigJson();
+    config_json["gate"]["Gate0"].erase("clientNetwork");
+    if (!WriteJsonFile(file_path, config_json))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    xs::core::ClusterConfig cluster_config;
+    std::string error_message;
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadClusterConfigFile(file_path, &cluster_config, &error_message);
+
+    XS_CHECK(success == xs::core::ConfigErrorCode::MissingRequiredField);
+    XS_CHECK_MSG(error_message.find("gate.Gate0.clientNetwork") != std::string::npos, error_message.c_str());
+
+    CleanupTestDirectory(base_path);
+}
+
 } // namespace
 
 int main()
@@ -469,6 +493,7 @@ int main()
     TestLoadNodeConfigRejectsUnknownTopLevelField();
     TestLoadNodeConfigRejectsUnknownLoggingField();
     TestLoadNodeConfigRejectsInvalidGateNodeId();
+    TestLoadNodeConfigRejectsMissingGateClientNetwork();
 
     if (g_failures != 0)
     {

@@ -1,4 +1,4 @@
-# GATE_GAME_ENVELOPE
+﻿# GATE_GAME_ENVELOPE
 
 本文档定义 XServerByAI 当前阶段 Gate 与 Game 之间的中继封装格式。该格式用于承载“客户端请求转发到 Game”“Game 将业务响应回传 Gate”“Game 经由 Gate 主动推送客户端消息”三类链路语义。当前默认 Gate↔Game 传输承载在 ZeroMQ over TCP 全连接链路上。
 
@@ -89,7 +89,7 @@
 推送约束：
 1. `relay.clientFlags` 不得设置 `Response` 位；如推送本身携带客户端错误语义，可按客户端协议需要设置 `Error` 位。
 2. `relay.clientSeq` 默认应为 `0`；只有客户端协议明确要求推送也携带关联序号时，才允许使用非零值。
-3. `relay.clientMsgId` 应指向客户端可见的推送消息编号，不能复用内部控制或中继 `msgId`。
+3. `relay.clientMsgId` 应指向客户端可见的推送消息编号，不能复用 `Inner` 或中继 `msgId`。
 
 **字段与校验规则**
 1. `sessionId = 0` 一律视为非法中继包。

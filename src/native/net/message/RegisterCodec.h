@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ControlMessageTypes.h"
+#include "InnerMessageTypes.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +12,7 @@
 namespace xs::net
 {
 
-inline constexpr std::uint32_t kControlRegisterMsgId = 1000u;
+inline constexpr std::uint32_t kInnerRegisterMsgId = 1000u;
 inline constexpr std::size_t kRegisterSuccessResponseSize = sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kRegisterErrorResponseSize = sizeof(std::int32_t) + sizeof(std::uint32_t);
 inline constexpr std::size_t kRegisterMaxCapabilityTagCount = 32u;
@@ -26,8 +26,8 @@ enum class RegisterCodecErrorCode : std::uint8_t
     InvalidProcessType = 4,
     InvalidProcessFlags = 5,
     InvalidNodeId = 6,
-    InvalidServiceEndpointHost = 7,
-    InvalidServiceEndpointPort = 8,
+    InvalidInnerNetworkEndpointHost = 7,
+    InvalidInnerNetworkEndpointPort = 8,
     InvalidHeartbeatTiming = 9,
     TooManyCapabilityTags = 10,
     TrailingBytes = 11,
@@ -42,7 +42,7 @@ struct RegisterRequest
     std::string node_id{};
     std::uint32_t pid{0};
     std::uint64_t started_at_unix_ms{0};
-    Endpoint service_endpoint{};
+    Endpoint inner_network_endpoint{};
     std::string build_version{};
     std::vector<std::string> capability_tags{};
     LoadSnapshot load{};

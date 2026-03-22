@@ -842,7 +842,7 @@ bool ParseGmConfig(
     std::string* error_message)
 {
     static constexpr std::array<std::string_view, 1> kAllowedFields{
-        "control",
+        "innerNetwork",
     };
 
     if (output == nullptr)
@@ -862,13 +862,17 @@ bool ParseGmConfig(
 
     GmConfig config;
 
-    const Json* control = nullptr;
-    if (!GetRequiredMember(value, "control", &control, path, error_message))
+    const Json* inner_network = nullptr;
+    if (!GetRequiredMember(value, "innerNetwork", &inner_network, path, error_message))
     {
         return false;
     }
 
-    if (!ParseListenEndpointContainer(*control, &config.control_listen_endpoint, JoinPath(path, "control"), error_message))
+    if (!ParseListenEndpointContainer(
+            *inner_network,
+            &config.inner_network_listen_endpoint,
+            JoinPath(path, "innerNetwork"),
+            error_message))
     {
         return false;
     }
@@ -885,8 +889,9 @@ bool ParseGateConfig(
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 1> kAllowedFields{
-        "service",
+    static constexpr std::array<std::string_view, 2> kAllowedFields{
+        "innerNetwork",
+        "clientNetwork",
     };
 
     if (output == nullptr)
@@ -910,13 +915,32 @@ bool ParseGateConfig(
     }
 
     GateConfig config;
-    const Json* service = nullptr;
-    if (!GetRequiredMember(value, "service", &service, path, error_message))
+    const Json* inner_network = nullptr;
+    const Json* client_network = nullptr;
+    if (!GetRequiredMember(value, "innerNetwork", &inner_network, path, error_message))
     {
         return false;
     }
 
-    if (!ParseListenEndpointContainer(*service, &config.service_listen_endpoint, JoinPath(path, "service"), error_message))
+    if (!GetRequiredMember(value, "clientNetwork", &client_network, path, error_message))
+    {
+        return false;
+    }
+
+    if (!ParseListenEndpointContainer(
+            *inner_network,
+            &config.inner_network_listen_endpoint,
+            JoinPath(path, "innerNetwork"),
+            error_message))
+    {
+        return false;
+    }
+
+    if (!ParseListenEndpointContainer(
+            *client_network,
+            &config.client_network_listen_endpoint,
+            JoinPath(path, "clientNetwork"),
+            error_message))
     {
         return false;
     }
@@ -934,7 +958,7 @@ bool ParseGameConfig(
     std::string* error_message)
 {
     static constexpr std::array<std::string_view, 2> kAllowedFields{
-        "service",
+        "innerNetwork",
         "managed",
     };
 
@@ -959,13 +983,17 @@ bool ParseGameConfig(
     }
 
     GameConfig config;
-    const Json* service = nullptr;
-    if (!GetRequiredMember(value, "service", &service, path, error_message))
+    const Json* inner_network = nullptr;
+    if (!GetRequiredMember(value, "innerNetwork", &inner_network, path, error_message))
     {
         return false;
     }
 
-    if (!ParseListenEndpointContainer(*service, &config.service_listen_endpoint, JoinPath(path, "service"), error_message))
+    if (!ParseListenEndpointContainer(
+            *inner_network,
+            &config.inner_network_listen_endpoint,
+            JoinPath(path, "innerNetwork"),
+            error_message))
     {
         return false;
     }
@@ -1211,9 +1239,7 @@ ConfigErrorCode SelectNodeConfig(
     case ParsedNodeKind::Gm:
     {
         auto node_config = std::make_unique<GmNodeConfig>();
-        node_config->process_type = ProcessType::Gm;
-        node_config->node_id = "GM";
-        node_config->control_listen_endpoint = cluster_config.gm.control_listen_endpoint;
+        node_config->inner_network_listen_endpoint = cluster_config.gm.inner_network_listen_endpoint;
         *output = std::move(node_config);
         break;
     }
@@ -1229,9 +1255,8 @@ ConfigErrorCode SelectNodeConfig(
         }
 
         auto node_config = std::make_unique<GateNodeConfig>();
-        node_config->process_type = ProcessType::Gate;
-        node_config->node_id = std::string(node_id);
-        node_config->service_listen_endpoint = iterator->second.service_listen_endpoint;
+        node_config->inner_network_listen_endpoint = iterator->second.inner_network_listen_endpoint;
+        node_config->client_network_listen_endpoint = iterator->second.client_network_listen_endpoint;
         *output = std::move(node_config);
         break;
     }
@@ -1247,9 +1272,7 @@ ConfigErrorCode SelectNodeConfig(
         }
 
         auto node_config = std::make_unique<GameNodeConfig>();
-        node_config->process_type = ProcessType::Game;
-        node_config->node_id = std::string(node_id);
-        node_config->service_listen_endpoint = iterator->second.service_listen_endpoint;
+        node_config->inner_network_listen_endpoint = iterator->second.inner_network_listen_endpoint;
         node_config->managed = iterator->second.managed;
         *output = std::move(node_config);
         break;

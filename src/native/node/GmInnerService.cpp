@@ -1,4 +1,4 @@
-#include "GmControlService.h"
+#include "GmInnerService.h"
 
 #include "BinarySerialization.h"
 #include "message/HeartbeatCodec.h"
@@ -14,13 +14,13 @@ namespace xs::node
 namespace
 {
 
-constexpr std::int32_t kControlNodeNotRegistered = 3003;
-constexpr std::int32_t kControlControlChannelInvalid = 3004;
-constexpr std::int32_t kControlHeartbeatRequestInvalid = 3005;
+constexpr std::int32_t kInnerNodeNotRegistered = 3003;
+constexpr std::int32_t kInnerChannelInvalid = 3004;
+constexpr std::int32_t kInnerRequestInvalid = 3005;
 
-constexpr std::string_view kControlNodeNotRegisteredName = "Control.NodeNotRegistered";
-constexpr std::string_view kControlControlChannelInvalidName = "Control.ControlChannelInvalid";
-constexpr std::string_view kControlHeartbeatRequestInvalidName = "Control.HeartbeatRequestInvalid";
+constexpr std::string_view kInnerNodeNotRegisteredName = "Inner.NodeNotRegistered";
+constexpr std::string_view kInnerChannelInvalidName = "Inner.ChannelInvalid";
+constexpr std::string_view kInnerRequestInvalidName = "Inner.RequestInvalid";
 
 [[nodiscard]] std::string MakeRoutingKey(std::span<const std::byte> routing_id)
 {
@@ -69,7 +69,7 @@ constexpr std::string_view kControlHeartbeatRequestInvalidName = "Control.Heartb
 {
     return header.magic == xs::net::kPacketMagic &&
            header.version == xs::net::kPacketVersion &&
-           header.msg_id == xs::net::kControlHeartbeatMsgId;
+           header.msg_id == xs::net::kInnerHeartbeatMsgId;
 }
 
 [[nodiscard]] std::uint16_t HeartbeatResponseFlags(bool is_error) noexcept
@@ -85,11 +85,11 @@ constexpr std::string_view kControlHeartbeatRequestInvalidName = "Control.Heartb
 
 } // namespace
 
-GmControlService::GmControlService(
+GmInnerService::GmInnerService(
     xs::core::MainEventLoop& event_loop,
     xs::core::Logger& logger,
     InnerNetwork& inner_network,
-    GmControlServiceOptions options)
+    GmInnerServiceOptions options)
     : event_loop_(event_loop),
       logger_(logger),
       inner_network_(inner_network),
@@ -97,13 +97,13 @@ GmControlService::GmControlService(
 {
 }
 
-GmControlService::~GmControlService() = default;
+GmInnerService::~GmInnerService() = default;
 
-NodeErrorCode GmControlService::Init()
+NodeErrorCode GmInnerService::Init()
 {
     if (initialized_)
     {
-        return SetError(NodeErrorCode::InvalidArgument, "GM control service is already initialized.");
+        return SetError(NodeErrorCode::InvalidArgument, "GM inner service is already initialized.");
     }
 
     if (options_.heartbeat_interval_ms == 0U)
@@ -136,7 +136,7 @@ NodeErrorCode GmControlService::Init()
     }
 
     inner_network_.SetMessageHandler([this](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
-        HandleIncomingMessage(std::move(routing_id), std::move(payload));
+        HandleInnerMessage(routing_id, payload);
     });
 
     initialized_ = true;
@@ -144,16 +144,16 @@ NodeErrorCode GmControlService::Init()
     return NodeErrorCode::None;
 }
 
-NodeErrorCode GmControlService::Run()
+NodeErrorCode GmInnerService::Run()
 {
     if (!initialized_)
     {
-        return SetError(NodeErrorCode::InvalidArgument, "GM control service must be initialized before Run().");
+        return SetError(NodeErrorCode::InvalidArgument, "GM inner service must be initialized before Run().");
     }
 
     if (running_)
     {
-        return SetError(NodeErrorCode::InvalidArgument, "GM control service is already running.");
+        return SetError(NodeErrorCode::InvalidArgument, "GM inner service is already running.");
     }
 
     const xs::core::TimerCreateResult timer_result =
@@ -172,7 +172,7 @@ NodeErrorCode GmControlService::Run()
     return NodeErrorCode::None;
 }
 
-NodeErrorCode GmControlService::Uninit()
+NodeErrorCode GmInnerService::Uninit()
 {
     if (timeout_scan_timer_id_ > 0)
     {
@@ -187,17 +187,17 @@ NodeErrorCode GmControlService::Uninit()
     return NodeErrorCode::None;
 }
 
-ProcessRegistry& GmControlService::process_registry() noexcept
+ProcessRegistry& GmInnerService::process_registry() noexcept
 {
     return process_registry_;
 }
 
-const ProcessRegistry& GmControlService::process_registry() const noexcept
+const ProcessRegistry& GmInnerService::process_registry() const noexcept
 {
     return process_registry_;
 }
 
-ProcessRegistryErrorCode GmControlService::RegisterProcess(ProcessRegistryRegistration registration)
+ProcessRegistryErrorCode GmInnerService::RegisterProcess(ProcessRegistryRegistration registration)
 {
     if (registration.last_heartbeat_at_unix_ms == 0U)
     {
@@ -213,7 +213,7 @@ ProcessRegistryErrorCode GmControlService::RegisterProcess(ProcessRegistryRegist
     return result;
 }
 
-ProcessRegistryErrorCode GmControlService::UnregisterProcessByNodeId(std::string_view node_id)
+ProcessRegistryErrorCode GmInnerService::UnregisterProcessByNodeId(std::string_view node_id)
 {
     const ProcessRegistryEntry* entry = process_registry_.FindByNodeId(node_id);
     RoutingID routing_id = entry != nullptr ? entry->routing_id : RoutingID{};
@@ -226,12 +226,12 @@ ProcessRegistryErrorCode GmControlService::UnregisterProcessByNodeId(std::string
     return result;
 }
 
-void GmControlService::InvalidateRoutingId(std::span<const std::byte> routing_id)
+void GmInnerService::InvalidateRoutingId(std::span<const std::byte> routing_id)
 {
     RememberInvalidatedRoutingId(routing_id, CurrentUnixTimeMilliseconds());
 }
 
-bool GmControlService::ContainsInvalidatedRoutingId(std::span<const std::byte> routing_id) const
+bool GmInnerService::ContainsInvalidatedRoutingId(std::span<const std::byte> routing_id) const
 {
     if (routing_id.empty())
     {
@@ -247,12 +247,12 @@ bool GmControlService::ContainsInvalidatedRoutingId(std::span<const std::byte> r
     return iterator->second > CurrentUnixTimeMilliseconds();
 }
 
-std::string_view GmControlService::last_error_message() const noexcept
+std::string_view GmInnerService::last_error_message() const noexcept
 {
     return last_error_message_;
 }
 
-NodeErrorCode GmControlService::SetError(NodeErrorCode code, std::string message)
+NodeErrorCode GmInnerService::SetError(NodeErrorCode code, std::string message)
 {
     if (message.empty())
     {
@@ -266,18 +266,18 @@ NodeErrorCode GmControlService::SetError(NodeErrorCode code, std::string message
     return code;
 }
 
-void GmControlService::ClearError() noexcept
+void GmInnerService::ClearError() noexcept
 {
     last_error_message_.clear();
 }
 
-std::uint64_t GmControlService::CurrentUnixTimeMilliseconds() const noexcept
+std::uint64_t GmInnerService::CurrentUnixTimeMilliseconds() const noexcept
 {
     const std::int64_t now_unix_ms = xs::core::ToUnixTimeMilliseconds(xs::core::UtcNow());
     return now_unix_ms > 0 ? static_cast<std::uint64_t>(now_unix_ms) : 0U;
 }
 
-std::uint64_t GmControlService::InvalidatedRoutingRetentionMs() const noexcept
+std::uint64_t GmInnerService::InvalidatedRoutingRetentionMs() const noexcept
 {
     if (options_.invalidated_routing_retention > std::chrono::milliseconds::zero())
     {
@@ -287,7 +287,7 @@ std::uint64_t GmControlService::InvalidatedRoutingRetentionMs() const noexcept
     return static_cast<std::uint64_t>(options_.heartbeat_timeout_ms);
 }
 
-void GmControlService::RememberInvalidatedRoutingId(
+void GmInnerService::RememberInvalidatedRoutingId(
     std::span<const std::byte> routing_id,
     std::uint64_t now_unix_ms)
 {
@@ -305,7 +305,7 @@ void GmControlService::RememberInvalidatedRoutingId(
     invalidated_routing_ids_[MakeRoutingKey(routing_id)] = expires_at_unix_ms;
 }
 
-void GmControlService::PruneExpiredInvalidatedRoutingIds(std::uint64_t now_unix_ms)
+void GmInnerService::PruneExpiredInvalidatedRoutingIds(std::uint64_t now_unix_ms)
 {
     for (auto iterator = invalidated_routing_ids_.begin(); iterator != invalidated_routing_ids_.end();)
     {
@@ -319,9 +319,9 @@ void GmControlService::PruneExpiredInvalidatedRoutingIds(std::uint64_t now_unix_
     }
 }
 
-void GmControlService::HandleIncomingMessage(
-    std::vector<std::byte> routing_id,
-    std::vector<std::byte> payload)
+void GmInnerService::HandleInnerMessage(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
 {
     if (routing_id.empty())
     {
@@ -331,9 +331,9 @@ void GmControlService::HandleIncomingMessage(
     HandleHeartbeatMessage(routing_id, payload);
 }
 
-void GmControlService::HandleHeartbeatMessage(
+void GmInnerService::HandleHeartbeatMessage(
     std::span<const std::byte> routing_id,
-    const std::vector<std::byte>& payload)
+    std::span<const std::byte> payload)
 {
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
     PruneExpiredInvalidatedRoutingIds(now_unix_ms);
@@ -345,7 +345,7 @@ void GmControlService::HandleHeartbeatMessage(
             xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
             xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
         };
-        Log(xs::core::LogLevel::Warn, "GM control service ignored a payload without a complete packet header.", context);
+        Log(xs::core::LogLevel::Warn, "GM inner service ignored a payload without a complete packet header.", context);
         return;
     }
 
@@ -371,7 +371,7 @@ void GmControlService::HandleHeartbeatMessage(
         }
 
         const xs::net::PacketHeader response_header = xs::net::MakePacketHeader(
-            xs::net::kControlHeartbeatMsgId,
+            xs::net::kInnerHeartbeatMsgId,
             raw_header.seq,
             HeartbeatResponseFlags(true),
             static_cast<std::uint32_t>(response_body.size()));
@@ -390,7 +390,7 @@ void GmControlService::HandleHeartbeatMessage(
         {
             Log(
                 xs::core::LogLevel::Warn,
-                "GM control service failed to send heartbeat error response.",
+                "GM inner service failed to send heartbeat error response.",
                 context,
                 error_code,
                 error_name);
@@ -405,10 +405,10 @@ void GmControlService::HandleHeartbeatMessage(
         raw_header.seq == xs::net::kPacketSeqNone)
     {
         send_heartbeat_error(
-            kControlHeartbeatRequestInvalid,
-            kControlHeartbeatRequestInvalidName,
+            kInnerRequestInvalid,
+            kInnerRequestInvalidName,
             false,
-            "GM control service rejected an invalid heartbeat request.");
+            "GM inner service rejected an invalid heartbeat request.");
         return;
     }
 
@@ -417,10 +417,10 @@ void GmControlService::HandleHeartbeatMessage(
     if (decode_packet_result != xs::net::PacketCodecErrorCode::None)
     {
         send_heartbeat_error(
-            kControlHeartbeatRequestInvalid,
-            kControlHeartbeatRequestInvalidName,
+            kInnerRequestInvalid,
+            kInnerRequestInvalidName,
             false,
-            "GM control service rejected a malformed heartbeat packet.");
+            "GM inner service rejected a malformed heartbeat packet.");
         return;
     }
 
@@ -430,10 +430,10 @@ void GmControlService::HandleHeartbeatMessage(
     if (decode_request_result != xs::net::HeartbeatCodecErrorCode::None)
     {
         send_heartbeat_error(
-            kControlHeartbeatRequestInvalid,
-            kControlHeartbeatRequestInvalidName,
+            kInnerRequestInvalid,
+            kInnerRequestInvalidName,
             false,
-            "GM control service rejected a malformed heartbeat payload.");
+            "GM inner service rejected a malformed heartbeat payload.");
         return;
     }
 
@@ -442,12 +442,12 @@ void GmControlService::HandleHeartbeatMessage(
     {
         const bool invalidated = ContainsInvalidatedRoutingId(routing_id);
         send_heartbeat_error(
-            invalidated ? kControlControlChannelInvalid : kControlNodeNotRegistered,
-            invalidated ? kControlControlChannelInvalidName : kControlNodeNotRegisteredName,
+            invalidated ? kInnerChannelInvalid : kInnerNodeNotRegistered,
+            invalidated ? kInnerChannelInvalidName : kInnerNodeNotRegisteredName,
             true,
             invalidated
-                ? "GM control service rejected heartbeat on an invalidated control channel."
-                : "GM control service rejected heartbeat from an unknown control channel.");
+                ? "GM inner service rejected heartbeat on an invalidated inner channel."
+                : "GM inner service rejected heartbeat from an unknown inner channel.");
         return;
     }
 
@@ -456,10 +456,10 @@ void GmControlService::HandleHeartbeatMessage(
     if (update_result != ProcessRegistryErrorCode::None)
     {
         send_heartbeat_error(
-            kControlNodeNotRegistered,
-            kControlNodeNotRegisteredName,
+            kInnerNodeNotRegistered,
+            kInnerNodeNotRegisteredName,
             true,
-            "GM control service lost the active registry entry while handling heartbeat.");
+            "GM inner service lost the active registry entry while handling heartbeat.");
         return;
     }
 
@@ -475,7 +475,7 @@ void GmControlService::HandleHeartbeatMessage(
     }
 
     const xs::net::PacketHeader response_header = xs::net::MakePacketHeader(
-        xs::net::kControlHeartbeatMsgId,
+        xs::net::kInnerHeartbeatMsgId,
         packet.header.seq,
         HeartbeatResponseFlags(false),
         static_cast<std::uint32_t>(response_body.size()));
@@ -494,14 +494,14 @@ void GmControlService::HandleHeartbeatMessage(
     };
     if (send_result != NodeErrorCode::None)
     {
-        Log(xs::core::LogLevel::Warn, "GM control service failed to send heartbeat success response.", context);
+        Log(xs::core::LogLevel::Warn, "GM inner service failed to send heartbeat success response.", context);
         return;
     }
 
-    Log(xs::core::LogLevel::Info, "GM control service refreshed heartbeat state.", context);
+    Log(xs::core::LogLevel::Info, "GM inner service refreshed heartbeat state.", context);
 }
 
-void GmControlService::HandleTimeoutScan()
+void GmInnerService::HandleTimeoutScan()
 {
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
     PruneExpiredInvalidatedRoutingIds(now_unix_ms);
@@ -535,21 +535,21 @@ void GmControlService::HandleTimeoutScan()
         };
         Log(
             xs::core::LogLevel::Warn,
-            "GM control service evicted a timed-out process registry entry.",
+            "GM inner service evicted a timed-out process registry entry.",
             context,
-            kControlControlChannelInvalid,
-            kControlControlChannelInvalidName);
+            kInnerChannelInvalid,
+            kInnerChannelInvalidName);
     }
 }
 
-void GmControlService::Log(
+void GmInnerService::Log(
     xs::core::LogLevel level,
     std::string_view message,
     std::span<const xs::core::LogContextField> context,
     std::optional<std::int32_t> error_code,
     std::string_view error_name) const
 {
-    logger_.Log(level, "gm-control", message, context, error_code, error_name);
+    logger_.Log(level, "inner", message, context, error_code, error_name);
 }
 
 } // namespace xs::node

@@ -90,7 +90,7 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
          }},
         {"gm",
          xs::core::Json{
-             {"control",
+             {"innerNetwork",
               xs::core::Json{
                   {"listenEndpoint",
                    xs::core::Json{{"host", "127.0.0.1"}, {"port", 5000}}},
@@ -100,10 +100,15 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
          xs::core::Json{
              {"Gate0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "0.0.0.0"}, {"port", 7000}}},
+                   }},
+                  {"clientNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4000}}},
                    }},
               }},
          }},
@@ -111,7 +116,7 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
          xs::core::Json{
              {"Game0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},

@@ -24,7 +24,7 @@
     "streamMode": false
   },
   "gm": {
-    "control": {
+    "innerNetwork": {
       "listenEndpoint": {
         "host": "127.0.0.1",
         "port": 5000
@@ -33,17 +33,23 @@
   },
   "gate": {
     "Gate0": {
-      "service": {
+      "innerNetwork": {
         "listenEndpoint": {
           "host": "0.0.0.0",
           "port": 7000
+        }
+      },
+      "clientNetwork": {
+        "listenEndpoint": {
+          "host": "0.0.0.0",
+          "port": 4000
         }
       }
     }
   },
   "game": {
     "Game0": {
-      "service": {
+      "innerNetwork": {
         "listenEndpoint": {
           "host": "127.0.0.1",
           "port": 7100

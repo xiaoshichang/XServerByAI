@@ -7,7 +7,7 @@
   - `ba7cbf6`：`developer: fix node runtime stage error mapping`
   - `82afeb6`：`developer: simplify node lifecycle architecture`
 - 设计依据：`docs/M3-02.md`
-- 验证目标：确认 `NodeCreateHelper + ServerNode` 生命周期骨架、GM 内部控制端口监听、Gate/Game 占位节点入口与节点日志输出满足 M3-02 设计。
+- 验证目标：确认 `NodeCreateHelper + ServerNode` 生命周期骨架、GM `InnerNetwork` 监听、Gate/Game 占位节点入口与节点日志输出满足 M3-02 设计。
 
 ## 复测结果
 
@@ -24,13 +24,13 @@
 - 代码与行为检查结果：
   - `NodeCreateHelper` 已接管命令行解析与节点选择，不再依赖额外 runtime 包装层
   - `ServerNode` 统一承载 `Init()`、`Run()`、`Uninit()` 生命周期，配置、logger、mainloop 与错误文本均在节点自身边界内管理
-  - `GmNode` 通过 `InnerNetwork` 建立 GM 内部控制监听；`GateNode` / `GameNode` 保持可启动的占位骨架，符合当前设计范围
+  - `GmNode` 通过 `InnerNetwork` 建立 GM 内部监听；`GateNode` / `GameNode` 保持可启动的占位骨架，符合当前设计范围
 - 可执行程序 smoke 验证通过：
   - 缺少参数时进程退出码为 `1`，并输出 usage
-  - 非法 selector 时进程退出码为 `1`，并返回 selector 校验错误
-  - `gate0` 启动后退出码为 `0`
-  - `game0` 启动后退出码为 `0`
-  - `gm` 启动后保持监听运行，手动停止前持续存活，符合 GM 控制面监听节点预期
+  - 非法 nodeId 时进程退出码为 `1`，并返回 nodeId 校验错误
+  - `Gate0` 启动后退出码为 `0`
+  - `Game0` 启动后退出码为 `0`
+  - `GM` 启动后保持监听运行，手动停止前持续存活，符合 GM Inner 网络监听节点预期
   - 已生成角色日志：
     - `build/test-output/m3-02-smoke/logs/root/GM-2026-03-19.log`
     - `build/test-output/m3-02-smoke/logs/gate/Gate0-2026-03-19.log`
@@ -41,3 +41,5 @@
 - `M3-02` 本轮复测通过。
 - `docs/DEVELOPMENT_PLAN.md` 已将 `M3-02` 从 `开发中` 更新为 `已完成`。
 - `GateNode` / `GameNode` 当前仍是占位骨架，但这属于 `docs/M3-02.md` 明确约束的交付范围；后续真实集群与客户端行为继续由 `M3-08`、`M3-10`、`M4-02` 等条目承接。
+
+

@@ -79,19 +79,19 @@ void Check(bool condition, const char* expression, const char* message = nullptr
         .node_id = std::move(node_id),
         .pid = 101U,
         .started_at_unix_ms = 202U,
-        .service_endpoint = MakeEndpoint("127.0.0.1", 6000U),
+        .inner_network_endpoint = MakeEndpoint("127.0.0.1", 6000U),
         .build_version = "build-1",
-        .capability_tags = {"control", "route"},
+        .capability_tags = {"inner", "route"},
         .load = MakeLoadSnapshot(1U, 2U, 3U, 4U, 5U),
         .routing_id = MakeRoutingId(routing_id),
         .last_heartbeat_at_unix_ms = 303U,
-        .service_ready = false,
+        .inner_network_ready = false,
     };
 }
 
 void CheckEntryFields(
     const xs::node::ProcessRegistryEntry& entry,
-    xs::net::ControlProcessType process_type,
+    xs::net::InnerProcessType process_type,
     std::string_view node_id,
     std::string_view routing_id)
 {
@@ -99,11 +99,11 @@ void CheckEntryFields(
     XS_CHECK(entry.node_id == node_id);
     XS_CHECK(entry.pid == 101U);
     XS_CHECK(entry.started_at_unix_ms == 202U);
-    XS_CHECK(entry.service_endpoint.host == "127.0.0.1");
-    XS_CHECK(entry.service_endpoint.port == 6000U);
+    XS_CHECK(entry.inner_network_endpoint.host == "127.0.0.1");
+    XS_CHECK(entry.inner_network_endpoint.port == 6000U);
     XS_CHECK(entry.build_version == "build-1");
     XS_CHECK(entry.capability_tags.size() == 2U);
-    XS_CHECK(entry.capability_tags[0] == "control");
+    XS_CHECK(entry.capability_tags[0] == "inner");
     XS_CHECK(entry.capability_tags[1] == "route");
     XS_CHECK(entry.load.connection_count == 1U);
     XS_CHECK(entry.load.session_count == 2U);
@@ -111,7 +111,7 @@ void CheckEntryFields(
     XS_CHECK(entry.load.space_count == 4U);
     XS_CHECK(entry.load.load_score == 5U);
     XS_CHECK(entry.last_heartbeat_at_unix_ms == 303U);
-    XS_CHECK(!entry.service_ready);
+    XS_CHECK(!entry.inner_network_ready);
     XS_CHECK(entry.routing_id == MakeRoutingId(routing_id));
 }
 
@@ -120,9 +120,9 @@ void TestRegisterAndSnapshotSortByNodeId()
     xs::node::ProcessRegistry registry;
 
     const xs::node::ProcessRegistryRegistration game_registration =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Game), "Game1", "route-game");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), "Game1", "route-game");
     const xs::node::ProcessRegistryRegistration gate_registration =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", "route-gate");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", "route-gate");
 
     XS_CHECK(registry.Register(game_registration) == xs::node::ProcessRegistryErrorCode::None);
     XS_CHECK(registry.Register(gate_registration) == xs::node::ProcessRegistryErrorCode::None);
@@ -136,14 +136,14 @@ void TestRegisterAndSnapshotSortByNodeId()
     XS_CHECK(gate_entry != nullptr);
     if (gate_entry != nullptr)
     {
-        CheckEntryFields(*gate_entry, xs::net::ControlProcessType::Gate, "Gate0", "route-gate");
+        CheckEntryFields(*gate_entry, xs::net::InnerProcessType::Gate, "Gate0", "route-gate");
     }
 
     const xs::node::ProcessRegistryEntry* game_entry = registry.FindByRoutingId(MakeRoutingId("route-game"));
     XS_CHECK(game_entry != nullptr);
     if (game_entry != nullptr)
     {
-        CheckEntryFields(*game_entry, xs::net::ControlProcessType::Game, "Game1", "route-game");
+        CheckEntryFields(*game_entry, xs::net::InnerProcessType::Game, "Game1", "route-game");
     }
 
     const std::vector<xs::node::ProcessRegistryEntry> snapshot = registry.Snapshot();
@@ -160,29 +160,29 @@ void TestRejectsInvalidRegistrationsAndConflicts()
     XS_CHECK(registry.Register(invalid_process) == xs::node::ProcessRegistryErrorCode::InvalidProcessType);
 
     xs::node::ProcessRegistryRegistration invalid_node =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "", "route-a");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "", "route-a");
     XS_CHECK(registry.Register(invalid_node) == xs::node::ProcessRegistryErrorCode::InvalidNodeId);
 
     xs::node::ProcessRegistryRegistration invalid_host =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", "route-a");
-    invalid_host.service_endpoint.host.clear();
-    XS_CHECK(registry.Register(invalid_host) == xs::node::ProcessRegistryErrorCode::InvalidServiceEndpointHost);
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", "route-a");
+    invalid_host.inner_network_endpoint.host.clear();
+    XS_CHECK(registry.Register(invalid_host) == xs::node::ProcessRegistryErrorCode::InvalidInnerNetworkEndpointHost);
 
     xs::node::ProcessRegistryRegistration invalid_port =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", "route-a");
-    invalid_port.service_endpoint.port = 0U;
-    XS_CHECK(registry.Register(invalid_port) == xs::node::ProcessRegistryErrorCode::InvalidServiceEndpointPort);
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", "route-a");
+    invalid_port.inner_network_endpoint.port = 0U;
+    XS_CHECK(registry.Register(invalid_port) == xs::node::ProcessRegistryErrorCode::InvalidInnerNetworkEndpointPort);
 
     const xs::node::ProcessRegistryRegistration gate_registration =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", "route-a");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", "route-a");
     XS_CHECK(registry.Register(gate_registration) == xs::node::ProcessRegistryErrorCode::None);
 
     const xs::node::ProcessRegistryRegistration duplicate_node =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Game), "Gate0", "route-b");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), "Gate0", "route-b");
     XS_CHECK(registry.Register(duplicate_node) == xs::node::ProcessRegistryErrorCode::NodeIdConflict);
 
     const xs::node::ProcessRegistryRegistration duplicate_routing =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Game), "Game0", "route-a");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), "Game0", "route-a");
     XS_CHECK(registry.Register(duplicate_routing) == xs::node::ProcessRegistryErrorCode::RoutingIdConflict);
 }
 
@@ -190,7 +190,7 @@ void TestUpdatesAndRemovesByNodeIdAndRoutingId()
 {
     xs::node::ProcessRegistry registry;
     const xs::node::ProcessRegistryRegistration registration =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Game), "Game0", "route-game");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), "Game0", "route-game");
 
     XS_CHECK(registry.Register(registration) == xs::node::ProcessRegistryErrorCode::None);
 
@@ -199,7 +199,7 @@ void TestUpdatesAndRemovesByNodeIdAndRoutingId()
         registry.UpdateHeartbeatByNodeId("Game0", 999U, updated_load) ==
         xs::node::ProcessRegistryErrorCode::None);
     XS_CHECK(
-        registry.UpdateServiceReadyByRoutingId(MakeRoutingId("route-game"), true) ==
+        registry.UpdateInnerNetworkReadyByRoutingId(MakeRoutingId("route-game"), true) ==
         xs::node::ProcessRegistryErrorCode::None);
 
     const xs::node::ProcessRegistryEntry* entry = registry.FindByNodeId("Game0");
@@ -212,14 +212,14 @@ void TestUpdatesAndRemovesByNodeIdAndRoutingId()
         XS_CHECK(entry->load.entity_count == 10U);
         XS_CHECK(entry->load.space_count == 11U);
         XS_CHECK(entry->load.load_score == 12U);
-        XS_CHECK(entry->service_ready);
+        XS_CHECK(entry->inner_network_ready);
     }
 
     XS_CHECK(
         registry.UpdateHeartbeatByRoutingId(MakeRoutingId("missing"), 1U, updated_load) ==
         xs::node::ProcessRegistryErrorCode::RoutingIdNotFound);
     XS_CHECK(
-        registry.UpdateServiceReadyByNodeId("Missing", true) ==
+        registry.UpdateInnerNetworkReadyByNodeId("Missing", true) ==
         xs::node::ProcessRegistryErrorCode::NodeNotFound);
     XS_CHECK(
         registry.UnregisterByRoutingId(MakeRoutingId("route-game")) ==
@@ -240,7 +240,7 @@ void TestClearAndErrorMessages()
         std::string_view("Process registry entry was not found for the routingId."));
 
     const xs::node::ProcessRegistryRegistration gate_registration =
-        MakeRegistration(static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate), "Gate0", "");
+        MakeRegistration(static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate), "Gate0", "");
     XS_CHECK(registry.Register(gate_registration) == xs::node::ProcessRegistryErrorCode::None);
     XS_CHECK(!registry.ContainsRoutingId(MakeRoutingId("")));
     registry.Clear();

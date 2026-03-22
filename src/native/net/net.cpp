@@ -2,7 +2,7 @@
 #include "ByteOrder.h"
 #include "MessageDispatcher.h"
 #include "PacketHeader.h"
-#include "message/ClusterControlCodec.h"
+#include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
@@ -38,9 +38,9 @@ static_assert(
     "Byte-order conversion must round-trip fixed-width integers.");
 static_assert(std::is_default_constructible_v<asio::io_context>, "Asio io_context must remain available");
 static_assert(xs::net::kPacketMagic == 0x47535052u, "Packet magic must match the protocol spec");
-static_assert(xs::net::kControlRegisterMsgId == 1000u, "Register msgId must match the control-plane spec");
-static_assert(xs::net::kControlHeartbeatMsgId == 1100u, "Heartbeat msgId must match the control-plane spec");
-static_assert(xs::net::kControlClusterReadyNotifyMsgId == 1201u, "Cluster-ready msgId must match the control-plane spec");
+static_assert(xs::net::kInnerRegisterMsgId == 1000u, "Register msgId must match the inner-network spec");
+static_assert(xs::net::kInnerHeartbeatMsgId == 1100u, "Heartbeat msgId must match the inner-network spec");
+static_assert(xs::net::kInnerClusterReadyNotifyMsgId == 1201u, "Cluster-ready msgId must match the inner-network spec");
 
 namespace xs::net
 {

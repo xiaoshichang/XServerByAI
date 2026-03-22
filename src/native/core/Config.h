@@ -67,17 +67,18 @@ struct ManagedConfig
 
 struct GmConfig
 {
-    EndpointConfig control_listen_endpoint;
+    EndpointConfig inner_network_listen_endpoint;
 };
 
 struct GateConfig
 {
-    EndpointConfig service_listen_endpoint;
+    EndpointConfig inner_network_listen_endpoint;
+    EndpointConfig client_network_listen_endpoint;
 };
 
 struct GameConfig
 {
-    EndpointConfig service_listen_endpoint;
+    EndpointConfig inner_network_listen_endpoint;
     ManagedConfig managed{};
 };
 
@@ -94,24 +95,22 @@ struct ClusterConfig
 struct NodeConfig
 {
     virtual ~NodeConfig() = default;
-
-    ProcessType process_type{ProcessType::Gm};
-    std::string node_id{"GM"};
 };
 
 struct GmNodeConfig final : NodeConfig
 {
-    EndpointConfig control_listen_endpoint{};
+    EndpointConfig inner_network_listen_endpoint{};
 };
 
 struct GateNodeConfig final : NodeConfig
 {
-    EndpointConfig service_listen_endpoint{};
+    EndpointConfig inner_network_listen_endpoint{};
+    EndpointConfig client_network_listen_endpoint{};
 };
 
 struct GameNodeConfig final : NodeConfig
 {
-    EndpointConfig service_listen_endpoint{};
+    EndpointConfig inner_network_listen_endpoint{};
     ManagedConfig managed{};
 };
 

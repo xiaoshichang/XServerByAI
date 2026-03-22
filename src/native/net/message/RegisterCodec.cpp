@@ -65,7 +65,7 @@ namespace
 
 [[nodiscard]] RegisterCodecErrorCode ValidateProcessType(std::uint16_t process_type) noexcept
 {
-    if (!IsValidControlProcessType(process_type))
+    if (!IsValidInnerProcessType(process_type))
     {
         return RegisterCodecErrorCode::InvalidProcessType;
     }
@@ -97,12 +97,12 @@ namespace
 {
     if (endpoint.host.empty())
     {
-        return RegisterCodecErrorCode::InvalidServiceEndpointHost;
+        return RegisterCodecErrorCode::InvalidInnerNetworkEndpointHost;
     }
 
     if (endpoint.port == 0u)
     {
-        return RegisterCodecErrorCode::InvalidServiceEndpointPort;
+        return RegisterCodecErrorCode::InvalidInnerNetworkEndpointPort;
     }
 
     return RegisterCodecErrorCode::None;
@@ -150,7 +150,7 @@ namespace
         return node_id_result;
     }
 
-    const RegisterCodecErrorCode endpoint_result = ValidateEndpoint(message.service_endpoint);
+    const RegisterCodecErrorCode endpoint_result = ValidateEndpoint(message.inner_network_endpoint);
     if (endpoint_result != RegisterCodecErrorCode::None)
     {
         return endpoint_result;
@@ -426,10 +426,10 @@ std::string_view RegisterCodecErrorMessage(RegisterCodecErrorCode error_code) no
         return "Register processFlags must be zero.";
     case RegisterCodecErrorCode::InvalidNodeId:
         return "Register nodeId must not be empty.";
-    case RegisterCodecErrorCode::InvalidServiceEndpointHost:
-        return "Register serviceEndpoint.host must not be empty.";
-    case RegisterCodecErrorCode::InvalidServiceEndpointPort:
-        return "Register serviceEndpoint.port must not be zero.";
+    case RegisterCodecErrorCode::InvalidInnerNetworkEndpointHost:
+        return "Register innerNetworkEndpoint.host must not be empty.";
+    case RegisterCodecErrorCode::InvalidInnerNetworkEndpointPort:
+        return "Register innerNetworkEndpoint.port must not be zero.";
     case RegisterCodecErrorCode::InvalidHeartbeatTiming:
         return "Register heartbeat interval must be less than timeout.";
     case RegisterCodecErrorCode::TooManyCapabilityTags:
@@ -490,7 +490,7 @@ RegisterCodecErrorCode GetRegisterRequestWireSize(
         return add_started_at_result;
     }
 
-    const RegisterCodecErrorCode endpoint_size_result = GetEndpointWireSize(message.service_endpoint, &field_wire_size);
+    const RegisterCodecErrorCode endpoint_size_result = GetEndpointWireSize(message.inner_network_endpoint, &field_wire_size);
     if (endpoint_size_result != RegisterCodecErrorCode::None)
     {
         return endpoint_size_result;
@@ -528,7 +528,7 @@ RegisterCodecErrorCode GetRegisterRequestWireSize(
         return add_capability_tags_result;
     }
 
-    return AddWireSize(kControlLoadSnapshotSize, wire_size);
+    return AddWireSize(kInnerLoadSnapshotSize, wire_size);
 }
 
 RegisterCodecErrorCode EncodeRegisterRequest(
@@ -557,7 +557,7 @@ RegisterCodecErrorCode EncodeRegisterRequest(
         return MapSerializationError(writer.error());
     }
 
-    const RegisterCodecErrorCode endpoint_result = EncodeEndpoint(message.service_endpoint, &writer);
+    const RegisterCodecErrorCode endpoint_result = EncodeEndpoint(message.inner_network_endpoint, &writer);
     if (endpoint_result != RegisterCodecErrorCode::None)
     {
         return endpoint_result;
@@ -599,7 +599,7 @@ RegisterCodecErrorCode DecodeRegisterRequest(
         return MapSerializationError(reader.error());
     }
 
-    const RegisterCodecErrorCode endpoint_result = DecodeEndpoint(&reader, &parsed_message.service_endpoint);
+    const RegisterCodecErrorCode endpoint_result = DecodeEndpoint(&reader, &parsed_message.inner_network_endpoint);
     if (endpoint_result != RegisterCodecErrorCode::None)
     {
         return endpoint_result;

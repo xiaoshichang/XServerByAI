@@ -16,7 +16,7 @@ namespace
 
 [[nodiscard]] ProcessRegistryErrorCode ValidateProcessType(std::uint16_t process_type) noexcept
 {
-    if (!xs::net::IsValidControlProcessType(process_type))
+    if (!xs::net::IsValidInnerProcessType(process_type))
     {
         return ProcessRegistryErrorCode::InvalidProcessType;
     }
@@ -38,12 +38,12 @@ namespace
 {
     if (endpoint.host.empty())
     {
-        return ProcessRegistryErrorCode::InvalidServiceEndpointHost;
+        return ProcessRegistryErrorCode::InvalidInnerNetworkEndpointHost;
     }
 
     if (endpoint.port == 0U)
     {
-        return ProcessRegistryErrorCode::InvalidServiceEndpointPort;
+        return ProcessRegistryErrorCode::InvalidInnerNetworkEndpointPort;
     }
 
     return ProcessRegistryErrorCode::None;
@@ -74,7 +74,7 @@ namespace
         return node_id_result;
     }
 
-    return ValidateEndpoint(registration.service_endpoint);
+    return ValidateEndpoint(registration.inner_network_endpoint);
 }
 
 } // namespace
@@ -91,10 +91,10 @@ std::string_view ProcessRegistryErrorMessage(ProcessRegistryErrorCode code) noex
         return "Process registry only supports Gate or Game entries.";
     case ProcessRegistryErrorCode::InvalidNodeId:
         return "Process registry nodeId must not be empty.";
-    case ProcessRegistryErrorCode::InvalidServiceEndpointHost:
-        return "Process registry serviceEndpoint.host must not be empty.";
-    case ProcessRegistryErrorCode::InvalidServiceEndpointPort:
-        return "Process registry serviceEndpoint.port must not be zero.";
+    case ProcessRegistryErrorCode::InvalidInnerNetworkEndpointHost:
+        return "Process registry innerNetworkEndpoint.host must not be empty.";
+    case ProcessRegistryErrorCode::InvalidInnerNetworkEndpointPort:
+        return "Process registry innerNetworkEndpoint.port must not be zero.";
     case ProcessRegistryErrorCode::NodeIdConflict:
         return "Process registry already contains an active entry for the nodeId.";
     case ProcessRegistryErrorCode::RoutingIdConflict:
@@ -131,17 +131,17 @@ ProcessRegistryErrorCode ProcessRegistry::Register(const ProcessRegistryRegistra
     }
 
     ProcessRegistryEntry entry;
-    entry.process_type = static_cast<xs::net::ControlProcessType>(registration.process_type);
+    entry.process_type = static_cast<xs::net::InnerProcessType>(registration.process_type);
     entry.node_id = registration.node_id;
     entry.pid = registration.pid;
     entry.started_at_unix_ms = registration.started_at_unix_ms;
-    entry.service_endpoint = registration.service_endpoint;
+    entry.inner_network_endpoint = registration.inner_network_endpoint;
     entry.build_version = registration.build_version;
     entry.capability_tags = registration.capability_tags;
     entry.load = registration.load;
     entry.routing_id = registration.routing_id;
     entry.last_heartbeat_at_unix_ms = registration.last_heartbeat_at_unix_ms;
-    entry.service_ready = registration.service_ready;
+    entry.inner_network_ready = registration.inner_network_ready;
 
     const auto [iterator, inserted] = entries_by_node_id_.emplace(entry.node_id, std::move(entry));
     if (!inserted)
@@ -239,9 +239,9 @@ ProcessRegistryErrorCode ProcessRegistry::UpdateHeartbeatByRoutingId(
     return ProcessRegistryErrorCode::None;
 }
 
-ProcessRegistryErrorCode ProcessRegistry::UpdateServiceReadyByNodeId(
+ProcessRegistryErrorCode ProcessRegistry::UpdateInnerNetworkReadyByNodeId(
     std::string_view node_id,
-    bool service_ready)
+    bool inner_network_ready)
 {
     ProcessRegistryEntry* entry = FindMutableByNodeId(node_id);
     if (entry == nullptr)
@@ -249,13 +249,13 @@ ProcessRegistryErrorCode ProcessRegistry::UpdateServiceReadyByNodeId(
         return node_id.empty() ? ProcessRegistryErrorCode::InvalidNodeId : ProcessRegistryErrorCode::NodeNotFound;
     }
 
-    entry->service_ready = service_ready;
+    entry->inner_network_ready = inner_network_ready;
     return ProcessRegistryErrorCode::None;
 }
 
-ProcessRegistryErrorCode ProcessRegistry::UpdateServiceReadyByRoutingId(
+ProcessRegistryErrorCode ProcessRegistry::UpdateInnerNetworkReadyByRoutingId(
     std::span<const std::byte> routing_id,
-    bool service_ready)
+    bool inner_network_ready)
 {
     ProcessRegistryEntry* entry = FindMutableByRoutingId(routing_id);
     if (entry == nullptr)
@@ -264,7 +264,7 @@ ProcessRegistryErrorCode ProcessRegistry::UpdateServiceReadyByRoutingId(
                                   : ProcessRegistryErrorCode::RoutingIdNotFound;
     }
 
-    entry->service_ready = service_ready;
+    entry->inner_network_ready = inner_network_ready;
     return ProcessRegistryErrorCode::None;
 }
 

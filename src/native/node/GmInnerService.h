@@ -20,7 +20,7 @@
 namespace xs::node
 {
 
-struct GmControlServiceOptions
+struct GmInnerServiceOptions
 {
     std::uint32_t heartbeat_interval_ms{5000U};
     std::uint32_t heartbeat_timeout_ms{15000U};
@@ -28,20 +28,20 @@ struct GmControlServiceOptions
     std::chrono::milliseconds invalidated_routing_retention{std::chrono::milliseconds::zero()};
 };
 
-class GmControlService final
+class GmInnerService final
 {
   public:
-    GmControlService(
+    GmInnerService(
         xs::core::MainEventLoop& event_loop,
         xs::core::Logger& logger,
         InnerNetwork& inner_network,
-        GmControlServiceOptions options = {});
-    ~GmControlService();
+        GmInnerServiceOptions options = {});
+    ~GmInnerService();
 
-    GmControlService(const GmControlService&) = delete;
-    GmControlService& operator=(const GmControlService&) = delete;
-    GmControlService(GmControlService&&) = delete;
-    GmControlService& operator=(GmControlService&&) = delete;
+    GmInnerService(const GmInnerService&) = delete;
+    GmInnerService& operator=(const GmInnerService&) = delete;
+    GmInnerService(GmInnerService&&) = delete;
+    GmInnerService& operator=(GmInnerService&&) = delete;
 
     [[nodiscard]] NodeErrorCode Init();
     [[nodiscard]] NodeErrorCode Run();
@@ -51,6 +51,9 @@ class GmControlService final
     [[nodiscard]] const ProcessRegistry& process_registry() const noexcept;
     [[nodiscard]] ProcessRegistryErrorCode RegisterProcess(ProcessRegistryRegistration registration);
     [[nodiscard]] ProcessRegistryErrorCode UnregisterProcessByNodeId(std::string_view node_id);
+    void HandleInnerMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
 
     void InvalidateRoutingId(std::span<const std::byte> routing_id);
     [[nodiscard]] bool ContainsInvalidatedRoutingId(std::span<const std::byte> routing_id) const;
@@ -63,10 +66,9 @@ class GmControlService final
     [[nodiscard]] std::uint64_t InvalidatedRoutingRetentionMs() const noexcept;
     void RememberInvalidatedRoutingId(std::span<const std::byte> routing_id, std::uint64_t now_unix_ms);
     void PruneExpiredInvalidatedRoutingIds(std::uint64_t now_unix_ms);
-    void HandleIncomingMessage(std::vector<std::byte> routing_id, std::vector<std::byte> payload);
     void HandleHeartbeatMessage(
         std::span<const std::byte> routing_id,
-        const std::vector<std::byte>& payload);
+        std::span<const std::byte> payload);
     void HandleTimeoutScan();
     void Log(
         xs::core::LogLevel level,
@@ -78,7 +80,7 @@ class GmControlService final
     xs::core::MainEventLoop& event_loop_;
     xs::core::Logger& logger_;
     InnerNetwork& inner_network_;
-    GmControlServiceOptions options_{};
+    GmInnerServiceOptions options_{};
     ProcessRegistry process_registry_{};
     std::unordered_map<std::string, std::uint64_t> invalidated_routing_ids_{};
     std::string last_error_message_{};

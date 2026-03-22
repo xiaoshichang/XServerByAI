@@ -1,6 +1,6 @@
 #pragma once
 
-#include "GmControlService.h"
+#include "GmInnerService.h"
 #include "InnerNetwork.h"
 #include "ProcessRegistry.h"
 #include "ServerNode.h"
@@ -27,13 +27,12 @@ class GmNode final : public ServerNode
     [[nodiscard]] NodeErrorCode OnUninit() override;
 
   private:
-    void HandleControlMessage(
+    void HandleInnerMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
 
     std::unique_ptr<InnerNetwork> inner_network_{};
-    std::unique_ptr<GmControlService> control_service_{};
-    ProcessRegistry process_registry_{};
+    std::unique_ptr<GmInnerService> inner_service_{};
 };
 
 } // namespace xs::node

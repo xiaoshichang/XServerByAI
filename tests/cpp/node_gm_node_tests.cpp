@@ -67,15 +67,15 @@ bool WriteJsonFile(const std::filesystem::path& path, const xs::core::Json& valu
 
 xs::core::Json MakeClusterConfigJson(
     const std::filesystem::path& base_path,
-    bool include_gm_control_endpoint)
+    bool include_gm_inner_endpoint)
 {
     const std::string root_log_dir = (base_path / "logs").string();
 
     xs::core::Json gm_block;
-    if (include_gm_control_endpoint)
+    if (include_gm_inner_endpoint)
     {
         gm_block = xs::core::Json{
-            {"control",
+            {"innerNetwork",
              {{"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 5000}}}}},
         };
     }
@@ -113,10 +113,15 @@ xs::core::Json MakeClusterConfigJson(
          xs::core::Json{
              {"Gate0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "0.0.0.0"}, {"port", 7000}}},
+                   }},
+                  {"clientNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4000}}},
                    }},
               }},
          }},
@@ -124,7 +129,7 @@ xs::core::Json MakeClusterConfigJson(
          xs::core::Json{
              {"Game0",
               xs::core::Json{
-                  {"service",
+                  {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
@@ -138,7 +143,7 @@ xs::core::Json MakeClusterConfigJson(
 
 bool WriteRuntimeConfig(
     const std::filesystem::path& base_path,
-    bool include_gm_control_endpoint,
+    bool include_gm_inner_endpoint,
     std::filesystem::path* file_path)
 {
     if (file_path == nullptr)
@@ -148,7 +153,7 @@ bool WriteRuntimeConfig(
     }
 
     *file_path = base_path / "config.json";
-    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, include_gm_control_endpoint));
+    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, include_gm_inner_endpoint));
 }
 
 bool DirectoryContainsRegularFile(const std::filesystem::path& path)
@@ -257,9 +262,9 @@ std::string ResolveNodeError(xs::node::NodeErrorCode code, std::string_view erro
     return std::string(xs::node::NodeErrorMessage(code));
 }
 
-void TestGmNodeRejectsMissingControlEndpointConfig()
+void TestGmNodeRejectsMissingInnerNetworkEndpointConfig()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-node-missing-control");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-node-missing-inner");
     std::filesystem::path config_path;
     if (!WriteRuntimeConfig(base_path, false, &config_path))
     {
@@ -276,7 +281,7 @@ void TestGmNodeRejectsMissingControlEndpointConfig()
 
     XS_CHECK(result == xs::node::NodeErrorCode::ConfigLoadFailed);
     XS_CHECK_MSG(
-        std::string(node.last_error_message()).find("control") != std::string::npos,
+        std::string(node.last_error_message()).find("innerNetwork") != std::string::npos,
         node.last_error_message().data());
 
     CleanupTestDirectory(base_path);
@@ -480,7 +485,7 @@ void TestInnerNetworkWildcardBindAndReceivesPayload()
 
 int main()
 {
-    TestGmNodeRejectsMissingControlEndpointConfig();
+    TestGmNodeRejectsMissingInnerNetworkEndpointConfig();
     TestGmNodeRejectsNonGmSelector();
     TestInnerNetworkWildcardBindAndReceivesPayload();
 
@@ -492,3 +497,4 @@ int main()
 
     return EXIT_SUCCESS;
 }
+

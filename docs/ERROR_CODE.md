@@ -1,6 +1,6 @@
 ﻿# ERROR_CODE
 
-本文档定义 XServerByAI 当前阶段错误码的取值范围、编码约定与登记规则。所有 native 运行时错误、控制面错误、客户端接入错误与后续 C# 业务错误，在分配正式错误码前都应先更新本文件。
+本文档定义 XServerByAI 当前阶段错误码的取值范围、编码约定与登记规则。所有 native 运行时错误、Inner 网络错误、客户端接入错误与后续 C# 业务错误，在分配正式错误码前都应先更新本文件。
 
 **基础规则**
 1. `errorCode` 统一使用 `int32` 语义表示，`0` 固定表示成功，任何非 `0` 值都表示失败。
@@ -32,7 +32,7 @@
 | `1-999` | 通用公共 | 参数校验、状态冲突、超时、权限、限流等可跨模块复用的公共失败 |
 | `1000-1999` | 协议 / 序列化 | 包头校验、版本不兼容、flags 非法、编解码与 framing 错误 |
 | `2000-2999` | 网络 / 会话 | TCP、KCP、连接状态、会话生命周期与客户端链路问题 |
-| `3000-3999` | 控制面 / 路由 | GM 注册、心跳、集群就绪状态下发、路由与内部 RPC 相关失败 |
+| `3000-3999` | Inner 网络 / 路由 | GM 注册、心跳、集群就绪状态下发、路由与内部 RPC 相关失败 |
 | `4000-4999` | 运行时 / 互操作 | `nethost`、CLR 加载、函数绑定、宿主生命周期与跨语言互操作失败 |
 | `5000-5999` | 基础设施 | 配置、日志、持久化、资源、依赖服务与其他基础设施失败 |
 | `10000-19999` | Player 业务 | 玩家实体与玩家域业务失败 |
@@ -70,18 +70,18 @@
 
 其中 `10000-34999` 业务错误码的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Space` 等状态型失败属于 `ServerEntity` 领域，匹配、聊天等 `Stub / 全局服务` 失败属于 `ServerStubEntity` 领域，避免用基础设施错误码承载实体业务语义。
 
-`Mailbox` / `Proxy` 的寻址结果也应服从这一分层：实体内部业务拒绝、状态冲突或领域校验失败进入对应业务号段；而 `Proxy` 无法解析当前 owner、Gate 二次寻址失败或路由元数据失效，则应优先归入 `3000-3999` 的控制面 / 路由错误，而不是误登记为玩家或场景业务错误。
+`Mailbox` / `Proxy` 的寻址结果也应服从这一分层：实体内部业务拒绝、状态冲突或领域校验失败进入对应业务号段；而 `Proxy` 无法解析当前 owner、Gate 二次寻址失败或路由元数据失效，则应优先归入 `3000-3999` 的Inner 网络 / 路由错误，而不是误登记为玩家或场景业务错误。
 
-**已登记控制面错误码**
+**已登记Inner 网络错误码**
 
 | errorCode | CanonicalName | Domain | Status | Owner | Description |
 | --- | --- | --- | --- | --- | --- |
-| `3000` | `Control.ProcessTypeInvalid` | `control` | `Active` | `gm` | `processType` 非法或当前阶段不支持该进程类型 |
-| `3001` | `Control.NodeIdConflict` | `control` | `Active` | `gm` | `nodeId` 已被活动注册占用，当前连接不能重复注册 |
-| `3002` | `Control.ServiceEndpointInvalid` | `control` | `Active` | `gm` | 注册消息缺少可发布服务地址，或端口配置非法 |
-| `3003` | `Control.NodeNotRegistered` | `control` | `Active` | `gm` | 心跳或其他控制请求没有命中活动节点，当前连接需要重新注册 |
-| `3004` | `Control.ControlChannelInvalid` | `control` | `Active` | `gm` | 当前控制链路已失效或不再拥有该 `nodeId`，发送方必须重新注册 |
-| `3005` | `Control.HeartbeatRequestInvalid` | `control` | `Active` | `gm` | 心跳请求包头或消息体不符合控制面约束，发送方应修正请求后重试 |
+| `3000` | `Inner.ProcessTypeInvalid` | `inner` | `Active` | `GM` | `processType` 非法或当前阶段不支持该进程类型 |
+| `3001` | `Inner.NodeIdConflict` | `inner` | `Active` | `GM` | `nodeId` 已被活动注册占用，当前连接不能重复注册 |
+| `3002` | `Inner.InnerNetworkEndpointInvalid` | `inner` | `Active` | `GM` | 注册消息缺少可发布服务地址，或端口配置非法 |
+| `3003` | `Inner.NodeNotRegistered` | `inner` | `Active` | `GM` | 心跳或其他控制请求没有命中活动节点，当前连接需要重新注册 |
+| `3004` | `Inner.ChannelInvalid` | `inner` | `Active` | `GM` | 当前 inner 链路已失效或不再拥有该 `nodeId`，发送方必须重新注册 |
+| `3005` | `Inner.RequestInvalid` | `inner` | `Active` | `GM` | 心跳请求包头或消息体不符合 inner 网络约束，发送方应修正请求后重试 |
 
 **已登记 Relay 错误码**
 
@@ -111,4 +111,6 @@
 | errorCode | CanonicalName | Domain | Status | Owner | Description |
 | --- | --- | --- | --- | --- | --- |
 | `1` | `Common.InvalidArgument` | `common` | `Reserved` | `core` | 非法参数，占位示例 |
+
+
 

@@ -1,4 +1,4 @@
-#include "GmControlService.h"
+#include "GmInnerService.h"
 #include "message/HeartbeatCodec.h"
 #include "InnerNetwork.h"
 #include "message/PacketCodec.h"
@@ -104,11 +104,11 @@ void CleanupTestDirectory(const std::filesystem::path& path)
     std::uint64_t last_heartbeat_at_unix_ms)
 {
     return xs::node::ProcessRegistryRegistration{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Game),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Game),
         .node_id = std::move(node_id),
         .pid = 1001U,
         .started_at_unix_ms = CurrentUnixTimeMilliseconds(),
-        .service_endpoint =
+        .inner_network_endpoint =
             xs::net::Endpoint{
                 .host = "127.0.0.1",
                 .port = 7100U,
@@ -118,7 +118,7 @@ void CleanupTestDirectory(const std::filesystem::path& path)
         .load = MakeLoadSnapshot(1U, 2U, 3U, 4U, 5U),
         .routing_id = MakeRoutingId(routing_id),
         .last_heartbeat_at_unix_ms = last_heartbeat_at_unix_ms,
-        .service_ready = false,
+        .inner_network_ready = false,
     };
 }
 
@@ -151,7 +151,7 @@ void CleanupTestDirectory(const std::filesystem::path& path)
 
     std::vector<std::byte> packet(xs::net::kPacketHeaderSize + body.size());
     const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kControlHeartbeatMsgId,
+        xs::net::kInnerHeartbeatMsgId,
         seq,
         packet_flags,
         static_cast<std::uint32_t>(body.size()));
@@ -167,7 +167,7 @@ void CheckHeartbeatSuccessResponse(
 {
     xs::net::PacketView packet{};
     XS_CHECK(xs::net::DecodePacket(payload, &packet) == xs::net::PacketCodecErrorCode::None);
-    XS_CHECK(packet.header.msg_id == xs::net::kControlHeartbeatMsgId);
+    XS_CHECK(packet.header.msg_id == xs::net::kInnerHeartbeatMsgId);
     XS_CHECK(packet.header.seq == expected_seq);
     XS_CHECK(packet.header.flags == static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
 
@@ -188,7 +188,7 @@ void CheckHeartbeatErrorResponse(
 {
     xs::net::PacketView packet{};
     XS_CHECK(xs::net::DecodePacket(payload, &packet) == xs::net::PacketCodecErrorCode::None);
-    XS_CHECK(packet.header.msg_id == xs::net::kControlHeartbeatMsgId);
+    XS_CHECK(packet.header.msg_id == xs::net::kInnerHeartbeatMsgId);
     XS_CHECK(packet.header.seq == expected_seq);
     XS_CHECK(
         packet.header.flags ==
@@ -206,13 +206,13 @@ void CheckHeartbeatErrorResponse(
 
 void TestTimeoutScanEvictsExpiredEntry()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-control-service-timeout");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-inner-service-timeout");
     const std::filesystem::path log_dir = base_path / "logs" / "gm";
 
     xs::core::Logger logger(MakeLoggerOptions(log_dir, "GM"));
-    xs::core::MainEventLoop event_loop({.thread_name = "gm-control-timeout"});
+    xs::core::MainEventLoop event_loop({.thread_name = "gm-inner-timeout"});
     xs::node::InnerNetwork inner_network(event_loop, logger, {});
-    xs::node::GmControlService service(
+    xs::node::GmInnerService service(
         event_loop,
         logger,
         inner_network,
@@ -274,18 +274,18 @@ void TestTimeoutScanEvictsExpiredEntry()
 
 void TestHeartbeatResponsesOverInnerNetwork()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-control-service-network");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-inner-service-network");
     const std::filesystem::path log_dir = base_path / "logs" / "gm";
 
     xs::core::Logger logger(MakeLoggerOptions(log_dir, "GM"));
-    xs::core::MainEventLoop event_loop({.thread_name = "gm-control-network"});
+    xs::core::MainEventLoop event_loop({.thread_name = "gm-inner-network"});
 
     xs::node::InnerNetworkOptions network_options;
     network_options.mode = xs::node::InnerNetworkMode::PassiveListener;
     network_options.local_endpoint = "tcp://127.0.0.1:*";
 
     xs::node::InnerNetwork inner_network(event_loop, logger, std::move(network_options));
-    xs::node::GmControlService service(
+    xs::node::GmInnerService service(
         event_loop,
         logger,
         inner_network,
@@ -322,7 +322,7 @@ void TestHeartbeatResponsesOverInnerNetwork()
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to initialize GM control network test.";
+                *error_message = "Failed to initialize GM inner network test.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
@@ -335,7 +335,7 @@ void TestHeartbeatResponsesOverInnerNetwork()
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to initialize ZeroMQ context for GM control network test.";
+                *error_message = "Failed to initialize ZeroMQ context for GM inner network test.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
@@ -391,7 +391,7 @@ void TestHeartbeatResponsesOverInnerNetwork()
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to create GM control response poll timer.";
+                *error_message = "Failed to create GM inner response poll timer.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
@@ -404,7 +404,7 @@ void TestHeartbeatResponsesOverInnerNetwork()
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to create GM control timeout timer.";
+                *error_message = "Failed to create GM inner timeout timer.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
@@ -478,7 +478,7 @@ int main()
 
     if (g_failures != 0)
     {
-        std::cerr << g_failures << " gm control service test(s) failed.\n";
+        std::cerr << g_failures << " gm inner service test(s) failed.\n";
         return EXIT_FAILURE;
     }
 

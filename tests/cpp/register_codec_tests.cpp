@@ -96,12 +96,12 @@ void CheckEndpointEquals(const xs::net::Endpoint& actual, const xs::net::Endpoin
 void TestGetWireSizeAndEncodeRequestRoundTrip()
 {
     const xs::net::RegisterRequest request{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
         .process_flags = 0u,
         .node_id = "Gate0",
         .pid = 0x11223344u,
         .started_at_unix_ms = 0x0102030405060708ull,
-        .service_endpoint = MakeEndpoint("127.0.0.1", 6000u),
+        .inner_network_endpoint = MakeEndpoint("127.0.0.1", 6000u),
         .build_version = "build-42",
         .capability_tags = {"kcp", "relay"},
         .load = MakeLoadSnapshot(1u, 2u, 3u, 4u, 5u),
@@ -149,7 +149,7 @@ void TestGetWireSizeAndEncodeRequestRoundTrip()
     XS_CHECK(decoded.node_id == request.node_id);
     XS_CHECK(decoded.pid == request.pid);
     XS_CHECK(decoded.started_at_unix_ms == request.started_at_unix_ms);
-    CheckEndpointEquals(decoded.service_endpoint, request.service_endpoint);
+    CheckEndpointEquals(decoded.inner_network_endpoint, request.inner_network_endpoint);
     XS_CHECK(decoded.build_version == request.build_version);
     XS_CHECK(decoded.capability_tags == request.capability_tags);
     CheckLoadSnapshotEquals(decoded.load, request.load);
@@ -211,12 +211,12 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
 void TestRejectsSemanticViolationsAndMalformedBuffers()
 {
     const xs::net::RegisterRequest request{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
         .process_flags = 0u,
         .node_id = "Gate0",
         .pid = 0x11223344u,
         .started_at_unix_ms = 0x0102030405060708ull,
-        .service_endpoint = MakeEndpoint("127.0.0.1", 6000u),
+        .inner_network_endpoint = MakeEndpoint("127.0.0.1", 6000u),
         .build_version = "build-42",
         .capability_tags = {"kcp", "relay"},
         .load = MakeLoadSnapshot(1u, 2u, 3u, 4u, 5u),
@@ -244,7 +244,7 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
     invalid_endpoint_port[35] = std::byte{0x00};
     XS_CHECK(
         xs::net::DecodeRegisterRequest(invalid_endpoint_port, &decoded_request) ==
-        xs::net::RegisterCodecErrorCode::InvalidServiceEndpointPort);
+        xs::net::RegisterCodecErrorCode::InvalidInnerNetworkEndpointPort);
 
     auto invalid_tag_count = request_buffer;
     invalid_tag_count[46] = std::byte{0x00};
@@ -303,12 +303,12 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
 void TestRejectsInvalidArgumentsAndSizeViolations()
 {
     const xs::net::RegisterRequest empty_node_id{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
         .process_flags = 0u,
         .node_id = "",
         .pid = 1u,
         .started_at_unix_ms = 2u,
-        .service_endpoint = MakeEndpoint("127.0.0.1", 6000u),
+        .inner_network_endpoint = MakeEndpoint("127.0.0.1", 6000u),
         .build_version = "build-42",
         .capability_tags = {},
         .load = MakeLoadSnapshot(0u, 0u, 0u, 0u, 0u),
@@ -319,27 +319,27 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
         xs::net::RegisterCodecErrorCode::InvalidNodeId);
 
     const xs::net::RegisterRequest empty_endpoint_host{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
         .process_flags = 0u,
         .node_id = "Gate0",
         .pid = 1u,
         .started_at_unix_ms = 2u,
-        .service_endpoint = MakeEndpoint("", 6000u),
+        .inner_network_endpoint = MakeEndpoint("", 6000u),
         .build_version = "build-42",
         .capability_tags = {},
         .load = MakeLoadSnapshot(0u, 0u, 0u, 0u, 0u),
     };
     XS_CHECK(
         xs::net::GetRegisterRequestWireSize(empty_endpoint_host, &wire_size) ==
-        xs::net::RegisterCodecErrorCode::InvalidServiceEndpointHost);
+        xs::net::RegisterCodecErrorCode::InvalidInnerNetworkEndpointHost);
 
     xs::net::RegisterRequest too_many_tags{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
         .process_flags = 0u,
         .node_id = "Gate0",
         .pid = 1u,
         .started_at_unix_ms = 2u,
-        .service_endpoint = MakeEndpoint("127.0.0.1", 6000u),
+        .inner_network_endpoint = MakeEndpoint("127.0.0.1", 6000u),
         .build_version = "build-42",
         .capability_tags = {},
         .load = MakeLoadSnapshot(0u, 0u, 0u, 0u, 0u),
@@ -350,12 +350,12 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
         xs::net::RegisterCodecErrorCode::TooManyCapabilityTags);
 
     xs::net::RegisterRequest too_long_build_version{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
         .process_flags = 0u,
         .node_id = "Gate0",
         .pid = 1u,
         .started_at_unix_ms = 2u,
-        .service_endpoint = MakeEndpoint("127.0.0.1", 6000u),
+        .inner_network_endpoint = MakeEndpoint("127.0.0.1", 6000u),
         .build_version = std::string(static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()) + 1u, 'a'),
         .capability_tags = {},
         .load = MakeLoadSnapshot(0u, 0u, 0u, 0u, 0u),
@@ -365,12 +365,12 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
         xs::net::RegisterCodecErrorCode::LengthOverflow);
 
     const xs::net::RegisterRequest valid_request{
-        .process_type = static_cast<std::uint16_t>(xs::net::ControlProcessType::Gate),
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
         .process_flags = 0u,
         .node_id = "Gate0",
         .pid = 0x11223344u,
         .started_at_unix_ms = 0x0102030405060708ull,
-        .service_endpoint = MakeEndpoint("127.0.0.1", 6000u),
+        .inner_network_endpoint = MakeEndpoint("127.0.0.1", 6000u),
         .build_version = "build-42",
         .capability_tags = {"kcp", "relay"},
         .load = MakeLoadSnapshot(1u, 2u, 3u, 4u, 5u),
