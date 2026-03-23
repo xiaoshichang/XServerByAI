@@ -179,48 +179,71 @@ add_test(NAME xs_node_process_registry_tests COMMAND xs_node_process_registry_te
 ###############################
 find_program(DOTNET_EXECUTABLE dotnet REQUIRED)
 
-file(GLOB_RECURSE XS_MANAGED_RUNTIME_TEST_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/src/managed/Foundation/*.cs"
-    "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/*.cs"
+function(xs_add_managed_runtime_asset asset_name project_path output_dir)
+    get_filename_component(project_directory "${project_path}" DIRECTORY)
+
+    file(GLOB_RECURSE ${asset_name}_SOURCES CONFIGURE_DEPENDS
+        "${project_directory}/*.cs"
+    )
+
+    set(${asset_name}_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/managed/${output_dir}")
+    file(TO_CMAKE_PATH "${${asset_name}_OUTPUT_DIR}" ${asset_name}_OUTPUT_DIR_CMAKE)
+    set(${asset_name}_ASSEMBLY_PATH
+        "${${asset_name}_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.dll")
+    set(${asset_name}_RUNTIMECONFIG_PATH
+        "${${asset_name}_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.runtimeconfig.json")
+
+    add_custom_command(
+        OUTPUT
+            "${${asset_name}_ASSEMBLY_PATH}"
+            "${${asset_name}_RUNTIMECONFIG_PATH}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dotnet-cli-home"
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+                DOTNET_CLI_HOME=${CMAKE_BINARY_DIR}/dotnet-cli-home
+                DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+                DOTNET_NOLOGO=1
+                "${DOTNET_EXECUTABLE}"
+                build
+                "${project_path}"
+                -c
+                Debug
+                --nologo
+                -p:GenerateRuntimeConfigurationFiles=true
+                "-p:OutDir=${${asset_name}_OUTPUT_DIR_CMAKE}/"
+        DEPENDS
+            "${CMAKE_SOURCE_DIR}/XServerByAI.Managed.sln"
+            "${project_path}"
+            ${${asset_name}_SOURCES}
+        VERBATIM
+    )
+
+    add_custom_target(${asset_name}
+        DEPENDS
+            "${${asset_name}_ASSEMBLY_PATH}"
+            "${${asset_name}_RUNTIMECONFIG_PATH}"
+    )
+
+    set(${asset_name}_ASSEMBLY_PATH "${${asset_name}_ASSEMBLY_PATH}" PARENT_SCOPE)
+    set(${asset_name}_RUNTIMECONFIG_PATH "${${asset_name}_RUNTIMECONFIG_PATH}" PARENT_SCOPE)
+endfunction()
+
+xs_add_managed_runtime_asset(
+    xs_managed_gamelogic_runtime_assets
+    "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/GameLogic.csproj"
+    "GameLogic"
 )
 
-set(XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/managed/GameLogic")
-file(TO_CMAKE_PATH "${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR}" XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE)
-set(XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH
-    "${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.dll")
-set(XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH
-    "${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.runtimeconfig.json")
-
-add_custom_command(
-    OUTPUT
-        "${XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH}"
-        "${XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dotnet-cli-home"
-    COMMAND
-        ${CMAKE_COMMAND} -E env
-            DOTNET_CLI_HOME=${CMAKE_BINARY_DIR}/dotnet-cli-home
-            DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
-            DOTNET_NOLOGO=1
-            "${DOTNET_EXECUTABLE}"
-            build
-            "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/GameLogic.csproj"
-            -c
-            Debug
-            --nologo
-            -p:GenerateRuntimeConfigurationFiles=true
-            "-p:OutDir=${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE}/"
-    DEPENDS
-        "${CMAKE_SOURCE_DIR}/XServerByAI.Managed.sln"
-        "${CMAKE_SOURCE_DIR}/src/managed/Foundation/Foundation.csproj"
-        "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/GameLogic.csproj"
-        ${XS_MANAGED_RUNTIME_TEST_SOURCES}
-    VERBATIM
+xs_add_managed_runtime_asset(
+    xs_managed_interop_abi_mismatch_runtime_assets
+    "${CMAKE_SOURCE_DIR}/src/managed/Tests/ManagedInteropAbiMismatch.Tests/ManagedInteropAbiMismatch.Tests.csproj"
+    "InteropAbiMismatch"
 )
 
-add_custom_target(xs_managed_gamelogic_runtime_assets
-    DEPENDS
-        "${XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH}"
-        "${XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH}"
+xs_add_managed_runtime_asset(
+    xs_managed_interop_missing_exports_runtime_assets
+    "${CMAKE_SOURCE_DIR}/src/managed/Tests/ManagedInteropMissingExports.Tests/ManagedInteropMissingExports.Tests.csproj"
+    "InteropMissingExports"
 )
 
 ###############################
@@ -230,13 +253,22 @@ add_executable(xs_host_runtime_tests
     host_runtime_tests.cpp
 )
 
-add_dependencies(xs_host_runtime_tests xs_managed_gamelogic_runtime_assets)
+add_dependencies(
+    xs_host_runtime_tests
+    xs_managed_gamelogic_runtime_assets
+    xs_managed_interop_abi_mismatch_runtime_assets
+    xs_managed_interop_missing_exports_runtime_assets
+)
 
 target_link_libraries(xs_host_runtime_tests PRIVATE host)
 
 target_compile_definitions(xs_host_runtime_tests PRIVATE
-    XS_TEST_GAMELOGIC_ASSEMBLY_PATH=\"${XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH}\"
-    XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH=\"${XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH}\"
+    XS_TEST_GAMELOGIC_ASSEMBLY_PATH="${xs_managed_gamelogic_runtime_assets_ASSEMBLY_PATH}"
+    XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH="${xs_managed_gamelogic_runtime_assets_RUNTIMECONFIG_PATH}"
+    XS_TEST_GAMELOGIC_ABI_MISMATCH_ASSEMBLY_PATH="${xs_managed_interop_abi_mismatch_runtime_assets_ASSEMBLY_PATH}"
+    XS_TEST_GAMELOGIC_ABI_MISMATCH_RUNTIMECONFIG_PATH="${xs_managed_interop_abi_mismatch_runtime_assets_RUNTIMECONFIG_PATH}"
+    XS_TEST_GAMELOGIC_MISSING_EXPORTS_ASSEMBLY_PATH="${xs_managed_interop_missing_exports_runtime_assets_ASSEMBLY_PATH}"
+    XS_TEST_GAMELOGIC_MISSING_EXPORTS_RUNTIMECONFIG_PATH="${xs_managed_interop_missing_exports_runtime_assets_RUNTIMECONFIG_PATH}"
 )
 
 if (WIN32)
@@ -247,4 +279,3 @@ if (WIN32)
     )
 endif()
 add_test(NAME xs_host_runtime_tests COMMAND xs_host_runtime_tests)
-

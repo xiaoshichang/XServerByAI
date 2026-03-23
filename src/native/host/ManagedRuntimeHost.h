@@ -1,9 +1,10 @@
 #pragma once
 
+#include "ManagedInterop.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <string>
 #include <string_view>
 
 #include <coreclr_delegates.h>
@@ -25,6 +26,10 @@ enum class ManagedHostErrorCode : std::int32_t
     RuntimeInitializeFailed = 4008,
     RuntimeDelegateLoadFailed = 4009,
     RuntimeContextCloseFailed = 4010,
+    RuntimeNotLoaded = 4011,
+    EntryPointResolveFailed = 4012,
+    AbiVersionMismatch = 4013,
+    EntryPointNotBound = 4014,
 };
 
 struct ManagedRuntimeHostOptions
@@ -44,12 +49,13 @@ class ManagedRuntimeHost final
     ManagedRuntimeHost(ManagedRuntimeHost&&) = delete;
     ManagedRuntimeHost& operator=(ManagedRuntimeHost&&) = delete;
 
-    [[nodiscard]] ManagedHostErrorCode Load(
-        const ManagedRuntimeHostOptions& options,
-        std::string* error_message = nullptr);
-    [[nodiscard]] ManagedHostErrorCode Unload(std::string* error_message = nullptr) noexcept;
+    [[nodiscard]] ManagedHostErrorCode Load(const ManagedRuntimeHostOptions& options);
+    [[nodiscard]] ManagedHostErrorCode Unload() noexcept;
+    [[nodiscard]] ManagedHostErrorCode BindGameExports();
+    [[nodiscard]] ManagedHostErrorCode GetGameExports(ManagedGameExports& exports) const noexcept;
 
     [[nodiscard]] bool IsLoaded() const noexcept;
+    [[nodiscard]] bool AreGameExportsBound() const noexcept;
     [[nodiscard]] load_assembly_and_get_function_pointer_fn load_assembly_and_get_function_pointer() const noexcept;
     [[nodiscard]] const std::filesystem::path& runtime_config_path() const noexcept;
     [[nodiscard]] const std::filesystem::path& assembly_path() const noexcept;
