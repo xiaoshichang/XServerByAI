@@ -34,6 +34,7 @@ struct InnerNetworkOptions
 };
 
 using InnerNetworkMessageHandler = std::function<void(std::vector<std::byte>, std::vector<std::byte>)>;
+using InnerNetworkConnectionStateHandler = std::function<void(ipc::ZmqConnectionState)>;
 
 class InnerNetwork final
 {
@@ -56,6 +57,7 @@ class InnerNetwork final
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
     void SetMessageHandler(InnerNetworkMessageHandler handler);
+    void SetConnectionStateHandler(InnerNetworkConnectionStateHandler handler);
 
     [[nodiscard]] bool IsRunning() const noexcept;
     [[nodiscard]] InnerNetworkMode mode() const noexcept;

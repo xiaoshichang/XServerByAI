@@ -257,6 +257,7 @@ class InnerNetwork::Impl final
             listener_.reset();
             bound_endpoint_.clear();
             message_handler_ = {};
+            connection_state_handler_ = {};
             ClearError(last_error_message_);
             return NodeErrorCode::None;
         }
@@ -334,6 +335,7 @@ class InnerNetwork::Impl final
         context_.reset();
         bound_endpoint_.clear();
         message_handler_ = {};
+        connection_state_handler_ = {};
         initialized_ = false;
         ClearError(last_error_message_);
         return NodeErrorCode::None;
@@ -416,6 +418,11 @@ class InnerNetwork::Impl final
     void SetMessageHandler(InnerNetworkMessageHandler handler)
     {
         message_handler_ = std::move(handler);
+    }
+
+    void SetConnectionStateHandler(InnerNetworkConnectionStateHandler handler)
+    {
+        connection_state_handler_ = std::move(handler);
     }
 
     [[nodiscard]] bool IsRunning() const noexcept
@@ -538,6 +545,11 @@ class InnerNetwork::Impl final
             xs::core::LogContextField{"routingId", options_.routing_id},
         };
         LogInfo("Inner network active connector state changed.", context);
+
+        if (connection_state_handler_)
+        {
+            connection_state_handler_(state);
+        }
     }
 
     void HandleActiveMessage(std::vector<std::byte> payload)
@@ -575,6 +587,7 @@ class InnerNetwork::Impl final
     std::unique_ptr<ipc::ZmqPassiveListener> listener_{};
     std::unique_ptr<ipc::ZmqActiveConnector> connector_{};
     InnerNetworkMessageHandler message_handler_{};
+    InnerNetworkConnectionStateHandler connection_state_handler_{};
     bool initialized_{false};
 };
 
@@ -625,6 +638,14 @@ void InnerNetwork::SetMessageHandler(InnerNetworkMessageHandler handler)
     if (impl_ != nullptr)
     {
         impl_->SetMessageHandler(std::move(handler));
+    }
+}
+
+void InnerNetwork::SetConnectionStateHandler(InnerNetworkConnectionStateHandler handler)
+{
+    if (impl_ != nullptr)
+    {
+        impl_->SetConnectionStateHandler(std::move(handler));
     }
 }
 
