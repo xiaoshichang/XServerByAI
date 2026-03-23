@@ -1,4 +1,4 @@
-﻿# ERROR_CODE
+# ERROR_CODE
 
 本文档定义 XServerByAI 当前阶段错误码的取值范围、编码约定与登记规则。所有 native 运行时错误、控制面错误、客户端接入错误与后续 C# 业务错误，在分配正式错误码前都应先更新本文件。
 
@@ -92,6 +92,21 @@
 | `3102` | `Relay.RouteOwnershipMismatch` | `relay` | `Active` | `game` | `sessionId` / `playerId` 与当前 Game 持有的路由或绑定关系不一致 |
 | `3103` | `Relay.ClientFlagsInvalid` | `relay` | `Active` | `game` | `clientFlags` 包含非法组合或未定义标志位 |
 
+**已登记互操作错误码**
+
+| errorCode | CanonicalName | Domain | Status | Owner | Description |
+| --- | --- | --- | --- | --- | --- |
+| `4000` | `Interop.RuntimeAlreadyLoaded` | `interop` | `Active` | `host` | 当前进程内的 CLR 宿主已经完成初始化，禁止在未卸载宿主状态前重复执行 `M5-01` 初始化 |
+| `4001` | `Interop.RuntimeConfigPathEmpty` | `interop` | `Active` | `host` | 调用方没有提供 `runtimeconfig.json` 路径 |
+| `4002` | `Interop.RuntimeConfigNotFound` | `interop` | `Active` | `host` | 指定的 `runtimeconfig.json` 文件不存在或不可作为宿主初始化输入 |
+| `4003` | `Interop.AssemblyPathEmpty` | `interop` | `Active` | `host` | 调用方没有提供根程序集 `.dll` 路径 |
+| `4004` | `Interop.AssemblyNotFound` | `interop` | `Active` | `host` | 指定的根程序集 `.dll` 文件不存在 |
+| `4005` | `Interop.HostfxrPathResolveFailed` | `interop` | `Active` | `host` | `nethost` 无法解析 `hostfxr` 动态库路径 |
+| `4006` | `Interop.HostfxrLibraryLoadFailed` | `interop` | `Active` | `host` | 已解析的 `hostfxr` 动态库无法装载到当前 native 进程 |
+| `4007` | `Interop.HostfxrExportLoadFailed` | `interop` | `Active` | `host` | `hostfxr_initialize_for_runtime_config`、`hostfxr_get_runtime_delegate` 或 `hostfxr_close` 等必需导出缺失 |
+| `4008` | `Interop.RuntimeInitializeFailed` | `interop` | `Active` | `host` | `hostfxr_initialize_for_runtime_config` 未能基于目标 `runtimeconfig.json` 初始化 CLR 宿主上下文 |
+| `4009` | `Interop.RuntimeDelegateLoadFailed` | `interop` | `Active` | `host` | `hostfxr_get_runtime_delegate` 未能返回 `load_assembly_and_get_function_pointer` 委托 |
+| `4010` | `Interop.RuntimeContextCloseFailed` | `interop` | `Active` | `host` | `hostfxr_close` 未能正常关闭 `M5-01` 初始化阶段的临时宿主上下文 |
 **命名规范**
 1. 每个错误码都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Reason>` 或 `<Area>.<Subject>.<Reason>`。
 2. 公共错误优先使用 `Common` 作为域名，例如 `Common.InvalidArgument`、`Common.Timeout`、`Common.RateLimited`。
@@ -111,4 +126,3 @@
 | errorCode | CanonicalName | Domain | Status | Owner | Description |
 | --- | --- | --- | --- | --- | --- |
 | `1` | `Common.InvalidArgument` | `common` | `Reserved` | `core` | 非法参数，占位示例 |
-

@@ -1,4 +1,4 @@
-﻿# 构建产物
+# 构建产物
 /build/
 /cmake-build-*/
 /out/
@@ -17,3 +17,5 @@
 
 # Runtime outputs
 /logs/
+/.dotnet-cli-home/
+/.cache/

@@ -125,3 +125,72 @@ add_executable(xs_node_process_registry_tests
 target_link_libraries(xs_node_process_registry_tests PRIVATE node)
 
 add_test(NAME xs_node_process_registry_tests COMMAND xs_node_process_registry_tests)
+
+find_program(DOTNET_EXECUTABLE dotnet REQUIRED)
+
+file(GLOB_RECURSE XS_MANAGED_RUNTIME_TEST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/src/managed/Foundation/*.cs"
+    "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/*.cs"
+)
+
+set(XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/managed/GameLogic")
+file(TO_CMAKE_PATH "${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR}" XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE)
+set(XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH
+    "${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.dll")
+set(XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH
+    "${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.runtimeconfig.json")
+
+add_custom_command(
+    OUTPUT
+        "${XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH}"
+        "${XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dotnet-cli-home"
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+            DOTNET_CLI_HOME=${CMAKE_BINARY_DIR}/dotnet-cli-home
+            DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+            DOTNET_NOLOGO=1
+            "${DOTNET_EXECUTABLE}"
+            build
+            "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/GameLogic.csproj"
+            -c
+            Debug
+            --nologo
+            -p:GenerateRuntimeConfigurationFiles=true
+            "-p:OutDir=${XS_MANAGED_RUNTIME_TEST_OUTPUT_DIR_CMAKE}/"
+    DEPENDS
+        "${CMAKE_SOURCE_DIR}/XServerByAI.Managed.sln"
+        "${CMAKE_SOURCE_DIR}/src/managed/Foundation/Foundation.csproj"
+        "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/GameLogic.csproj"
+        ${XS_MANAGED_RUNTIME_TEST_SOURCES}
+    VERBATIM
+)
+
+add_custom_target(xs_managed_gamelogic_runtime_assets
+    DEPENDS
+        "${XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH}"
+        "${XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH}"
+)
+
+add_executable(xs_host_runtime_tests
+    host_runtime_tests.cpp
+)
+
+add_dependencies(xs_host_runtime_tests xs_managed_gamelogic_runtime_assets)
+
+target_link_libraries(xs_host_runtime_tests PRIVATE host)
+
+target_compile_definitions(xs_host_runtime_tests PRIVATE
+    XS_TEST_GAMELOGIC_ASSEMBLY_PATH=\"${XS_MANAGED_RUNTIME_TEST_ASSEMBLY_PATH}\"
+    XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH=\"${XS_MANAGED_RUNTIME_TEST_RUNTIMECONFIG_PATH}\"
+)
+
+if (WIN32)
+    add_custom_command(TARGET xs_host_runtime_tests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/3rd/dotnet_host/win-x64/nethost.dll"
+            $<TARGET_FILE_DIR:xs_host_runtime_tests>
+    )
+endif()
+add_test(NAME xs_host_runtime_tests COMMAND xs_host_runtime_tests)
+
