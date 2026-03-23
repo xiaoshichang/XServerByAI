@@ -13,6 +13,7 @@ CMake configure or build.
 | `zeromq/` | https://github.com/zeromq/libzmq | `v4.3.5` | ZeroMQ core library used for node-to-node TCP messaging. |
 | `nlohmann_json/` | https://github.com/nlohmann/json | `v3.12.0` | Header-only JSON library used for native-side JSON serialization/deserialization and config file IO. |
 | `asio-1.36.0/` | https://github.com/chriskohlhoff/asio | `1.36.0` | Standalone Asio headers used for native networking and event-loop utilities; no other Boost components are vendored alongside it. |
+| `dotnet_host/` | https://www.nuget.org/packages/Microsoft.NETCore.App.Host.win-x64 and https://www.nuget.org/packages/Microsoft.NETCore.App.Host.linux-x64 | `10.0.0` | Official .NET native hosting headers plus the platform `nethost` link artifacts used by `M5-01` for CLR bootstrap on Windows/Linux (`nethost.lib` + `nethost.dll` on Windows, `libnethost.a` on Linux). |
 
 ## Build Integration
 
@@ -21,8 +22,14 @@ CMake configure or build.
 - `3rd/CMakeLists.txt` builds `spdlog` and `zeromq` from vendored source,
   integrates header-only `nlohmann/json` from vendored source, and exposes
   standalone `asio` through project-side `INTERFACE` targets.
-- Internal aliases `xs::thirdparty::spdlog`, `xs::thirdparty::zeromq` and
-  `xs::thirdparty::asio`, plus `xs::thirdparty::nlohmann_json`, shield project
-  code from upstream target naming or directory layout details.
+- `3rd/CMakeLists.txt` also exposes vendored .NET hosting headers and the
+  platform `nethost` link artifact through a project-side `INTERFACE` target.
+- Internal aliases `xs::thirdparty::spdlog`, `xs::thirdparty::zeromq`,
+  `xs::thirdparty::asio`, `xs::thirdparty::nlohmann_json`, and
+  `xs::thirdparty::nethost` shield project code from upstream target naming or
+  directory layout details.
 - `xs::thirdparty::asio` sets `ASIO_STANDALONE=1` and links required threading
   and socket system libraries for supported platforms.
+- `xs::thirdparty::nethost` links the vendored host artifact and adds the
+  platform integration required by the official hosting API (`dl` on Linux and
+  `nethost.dll` deployment on Windows).

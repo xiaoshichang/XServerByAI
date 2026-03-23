@@ -1,4 +1,4 @@
-# PROJECT
+# 项目说明（初版）
 
 本文档描述 XServerByAI 当前阶段的目标、节点拓扑、网络分层与关键技术边界。当前阶段以“统一节点入口 + 配置基线 + 协议骨架 + 运行时骨架”为主，不展开完整业务玩法实现。
 
@@ -9,15 +9,15 @@
 4. 为 `Inner` 集群通信、`Client` 接入以及 `Control` 管理能力提供统一命名和稳定骨架。
 
 **非目标**
-1. 当前阶段不实现分布式注册中心、自动部署或热更新协议。
-2. 当前阶段不提供完整的 RPC 框架；内部消息以项目自定义协议为主。
-3. 当前阶段只提供 `GM` 本地 HTTP 管理接口，不提供完整的外部 ctrl 工具链、鉴权体系或更复杂的运维平台能力。
+1. 当前阶段不引入独立分布式注册中心、跨机房复制或跨地域多活部署能力。
+2. 不引入第三方 RPC 框架；节点间二进制协议仍由项目自定义实现。当前 native 基础设施依赖为 `spdlog`、`zeromq/libzmq`、standalone `asio` 与 header-only `nlohmann/json`（不携带其他 Boost 组件）；此外为 C++↔C# 宿主链路 vendored 官方 .NET native hosting artifacts（`nethost` / `hostfxr` 头文件与平台 `nethost` 链接工件），其中 `nlohmann/json` 仅用于 JSON 序列化/反序列化与配置载体读写。
+3. 不在本阶段定义完整的业务玩法、场景迁移或多活写入模型。
 
 **平台与依赖**
 1. 目标平台为 Windows 与 Linux。
 2. C++ 构建使用 CMake。
-3. C# 构建使用 `dotnet`，托管宿主通过 `nethost` / `hostfxr` 接入。
-4. 当前主要 vendored 依赖位于 `3rd/`，包括 `spdlog`、`zeromq/libzmq`、standalone `asio` 与 header-only `nlohmann/json`。
+3. C# 构建使用 `dotnet`（.NET 运行时由 `nethost` 加载）。
+4. 基础第三方依赖以 vendored 源码或官方 host pack 工件形式统一放在 `3rd/`，当前基线为 `spdlog`、`zeromq/libzmq`、standalone `asio`、header-only `nlohmann/json` 与 .NET 官方 `dotnet_host`（`nethost` / `hostfxr` headers + platform `nethost` link artifacts）。
 
 **节点角色**
 1. `GM`：集群协调节点，负责注册、心跳、ready 聚合、ownership 分配与路由目录维护。

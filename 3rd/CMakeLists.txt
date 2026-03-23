@@ -1,7 +1,13 @@
 # Vendored third-party dependencies are built or exposed from local source only.
 
+###############################
+# Shared Prerequisites
+###############################
 find_package(Threads REQUIRED)
 
+###############################
+# spdlog
+###############################
 set(SPDLOG_BUILD_ALL OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
@@ -12,6 +18,13 @@ set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "" FORCE)
 set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(spdlog)
 
+add_library(xs_thirdparty_spdlog INTERFACE)
+target_link_libraries(xs_thirdparty_spdlog INTERFACE spdlog::spdlog)
+add_library(xs::thirdparty::spdlog ALIAS xs_thirdparty_spdlog)
+
+###############################
+# zeromq
+###############################
 set(BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -25,26 +38,28 @@ set(ENABLE_CPACK OFF CACHE BOOL "" FORCE)
 set(ENABLE_CLANG OFF CACHE BOOL "" FORCE)
 add_subdirectory(zeromq)
 
-set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
-set(JSON_Install OFF CACHE BOOL "" FORCE)
-add_subdirectory(nlohmann_json)
-
-set(XS_ASIO_ROOT "${CMAKE_CURRENT_LIST_DIR}/asio-1.36.0")
-if (NOT EXISTS "${XS_ASIO_ROOT}/include/asio.hpp")
-    message(FATAL_ERROR "Standalone Asio headers were not found under ${XS_ASIO_ROOT}.")
-endif()
-
-add_library(xs_thirdparty_spdlog INTERFACE)
-target_link_libraries(xs_thirdparty_spdlog INTERFACE spdlog::spdlog)
-add_library(xs::thirdparty::spdlog ALIAS xs_thirdparty_spdlog)
-
 add_library(xs_thirdparty_zeromq INTERFACE)
 target_link_libraries(xs_thirdparty_zeromq INTERFACE libzmq-static)
 add_library(xs::thirdparty::zeromq ALIAS xs_thirdparty_zeromq)
 
+###############################
+# nlohmann_json
+###############################
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+add_subdirectory(nlohmann_json)
+
 add_library(xs_thirdparty_nlohmann_json INTERFACE)
 target_link_libraries(xs_thirdparty_nlohmann_json INTERFACE nlohmann_json::nlohmann_json)
 add_library(xs::thirdparty::nlohmann_json ALIAS xs_thirdparty_nlohmann_json)
+
+###############################
+# standalone asio
+###############################
+set(XS_ASIO_ROOT "${CMAKE_CURRENT_LIST_DIR}/asio-1.36.0")
+if (NOT EXISTS "${XS_ASIO_ROOT}/include/asio.hpp")
+    message(FATAL_ERROR "Standalone Asio headers were not found under ${XS_ASIO_ROOT}.")
+endif()
 
 add_library(xs_thirdparty_asio INTERFACE)
 target_include_directories(xs_thirdparty_asio INTERFACE "${XS_ASIO_ROOT}/include")
@@ -55,3 +70,32 @@ if (WIN32)
     target_link_libraries(xs_thirdparty_asio INTERFACE ws2_32 mswsock)
 endif()
 add_library(xs::thirdparty::asio ALIAS xs_thirdparty_asio)
+
+###############################
+# dotnet_host
+###############################
+set(XS_DOTNET_HOST_ROOT "${CMAKE_CURRENT_LIST_DIR}/dotnet_host")
+set(XS_DOTNET_HOST_INCLUDE_DIR "${XS_DOTNET_HOST_ROOT}/include")
+if (NOT EXISTS "${XS_DOTNET_HOST_INCLUDE_DIR}/nethost.h")
+    message(FATAL_ERROR "Vendored dotnet_host headers were not found under ${XS_DOTNET_HOST_INCLUDE_DIR}.")
+endif()
+
+if (WIN32)
+    set(XS_DOTNET_HOST_LIBRARY "${XS_DOTNET_HOST_ROOT}/win-x64/nethost.lib")
+elseif (UNIX AND NOT APPLE)
+    set(XS_DOTNET_HOST_LIBRARY "${XS_DOTNET_HOST_ROOT}/linux-x64/libnethost.a")
+else()
+    message(FATAL_ERROR "Vendored dotnet_host artifacts are only prepared for Windows and Linux.")
+endif()
+
+if (NOT EXISTS "${XS_DOTNET_HOST_LIBRARY}")
+    message(FATAL_ERROR "Vendored nethost link artifact was not found at ${XS_DOTNET_HOST_LIBRARY}.")
+endif()
+
+add_library(xs_thirdparty_nethost INTERFACE)
+target_include_directories(xs_thirdparty_nethost INTERFACE "${XS_DOTNET_HOST_INCLUDE_DIR}")
+target_link_libraries(xs_thirdparty_nethost INTERFACE "${XS_DOTNET_HOST_LIBRARY}")
+if (UNIX AND NOT APPLE)
+    target_link_libraries(xs_thirdparty_nethost INTERFACE dl)
+endif()
+add_library(xs::thirdparty::nethost ALIAS xs_thirdparty_nethost)

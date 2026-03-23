@@ -1,4 +1,4 @@
-﻿# 开发计划（修订版）
+# 开发计划（修订版）
 
 本计划基于当前项目约束：架构允许多机多进程部署，开发期默认单机多进程测试，C++ 运行时 + C# 业务，`nethost` 互操作，客户端 KCP，节点间 ZeroMQ over TCP，应用层统一二进制消息体协议。
 业务层采用“分布式实体架构”。
@@ -87,7 +87,7 @@
 16. M4-16 完成断线重连流程（占位）。Deps: M4-15 | 状态: 未开发
 
 **里程碑 M5：C# 分布式实体框架（17 条）**
-1. M5-01 实现 `nethost` 初始化与 CLR 加载（Windows/Linux）。Deps: M1-15 | 状态: 未开发
+1. M5-01 实现 `nethost` 初始化与 CLR 加载（Windows/Linux）。Deps: M1-15 | 状态: 已完成
 2. M5-02 实现 C++→C# 入口绑定（函数指针获取）。Deps: M5-01 | 状态: 未开发
 3. M5-03 建立 C# Framework 基础项目（ServerEntity/ServerStubEntity）。Deps: M1-04, M1-14 | 状态: 未开发
 4. M5-04 实现 `ServerEntity` 基类（Id/属性/生命周期）。Deps: M5-03 | 状态: 未开发
