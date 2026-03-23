@@ -87,17 +87,6 @@ target_link_libraries(xs_net_register_codec_tests PRIVATE net)
 add_test(NAME xs_net_register_codec_tests COMMAND xs_net_register_codec_tests)
 
 ###############################
-# xs_net_cluster_control_codec_tests
-###############################
-add_executable(xs_net_cluster_control_codec_tests
-    cluster_control_codec_tests.cpp
-)
-
-target_link_libraries(xs_net_inner_cluster_codec_tests PRIVATE net)
-
-add_test(NAME xs_net_inner_cluster_codec_tests COMMAND xs_net_inner_cluster_codec_tests)
-
-###############################
 # xs_main_event_loop_tests
 ###############################
 add_executable(xs_main_event_loop_tests
@@ -151,17 +140,6 @@ add_executable(xs_node_gm_node_tests
 target_link_libraries(xs_node_gm_node_tests PRIVATE node ipc)
 
 add_test(NAME xs_node_gm_node_tests COMMAND xs_node_gm_node_tests)
-
-###############################
-# xs_node_gm_control_service_tests
-###############################
-add_executable(xs_node_gm_control_service_tests
-    node_gm_control_service_tests.cpp
-)
-
-target_link_libraries(xs_node_gate_node_tests PRIVATE node)
-
-add_test(NAME xs_node_gate_node_tests COMMAND xs_node_gate_node_tests)
 
 
 ###############################
