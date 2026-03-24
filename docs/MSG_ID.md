@@ -14,7 +14,7 @@
 | 范围 | 类别 | 用途 |
 | --- | --- | --- |
 | `1-999` | 协议保留 | 协议层公共语义、基础兼容控制、通用保留位配套消息 |
-| `1000-1999` | Inner 网络 | `GM ↔ Gate/Game` 与 `Game ↔ Gate` 的注册、心跳、Stub ownership、ready 上报与启动编排消息 |
+| `1000-1999` | Inner 网络 | `GM ↔ Gate/Game` 与 `Game ↔ Gate` 的注册、心跳、节点上线通知、mesh ready、Stub ownership、服务 ready 与集群启动编排消息 |
 | `2000-3999` | 内部中转 | Gate ↔ Game 封装、会话事件、内部 RPC 与转发消息 |
 | `4000-9999` | 客户端接入 | Gate ↔ Client 的鉴权、会话、基础服务与通用推送 |
 | `10000-39999` | 预留 | 预留 |
@@ -28,7 +28,7 @@
 | --- | --- | --- | --- |
 | `1000-1099` | 进程 / 链路注册 | `GM` 协调与 `Game -> Gate` 启动链路的注册消息 | `M1-09`, `M3-04`, `M3-13` |
 | `1100-1199` | 心跳 / 健康检查 | `GM` 协调与 `Game -> Gate` 启动链路的心跳消息 | `M1-09`, `M3-05`, `M3-13` |
-| `1200-1299` | 启动编排 / 集群就绪 | `GM` 下发集群就绪状态、Stub ownership、Game 服务 ready 聚合结果及相关扩展 | `M3-06`, `M3-12`, `M3-14`, `M3-15` |
+| `1200-1299` | 启动编排 / 集群就绪 | 节点上线通知、Game↔Gate mesh ready、Stub ownership、Game 服务 ready 与 `clusterReady` 相关扩展 | `M3-06`, `M3-12`, `M3-14`, `M3-15` |
 | `2000-2099` | Gate↔Game 封装 | 请求转发、响应回传、内部 RPC 信封 | `M1-10`, `M4-06`, `M4-07` |
 | `2100-2199` | 会话事件 | 绑定、关闭、路由丢失、踢出、重连等会话与路由状态变化 | `M1-12`, `M4-10`, `M4-16`, `M5-08` |
 | `4000-4199` | 客户端会话基础 | 鉴权、客户端心跳、基础 Push | `M4-03`, `M4-15` |
@@ -47,8 +47,10 @@
 | `1000` | `Inner.NodeRegister` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 启动期注册请求；成功或失败响应都复用同一 `msgId` |
 | `1100` | `Inner.NodeHeartbeat` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 注册后的周期心跳与轻量负载上报；响应复用同一 `msgId` |
 | `1201` | `Inner.ClusterReadyNotify` | `GM -> Gate/Game` | `GM` | `Active` | `GM` 下发集群 ready 结论；单向通知，无响应 `msgId` |
-| `1202` | `Inner.ServerStubOwnershipSync` | `GM -> Game` | `GM` | `Active` | `GM` 下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照 |
-| `1203` | `Inner.GameServiceReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `assignmentEpoch` 下的本地 assigned `ServerStubEntity` ready 聚合结果 |
+| `1202` | `Inner.ServerStubOwnershipSync` | `GM -> Game` | `GM` | `Active` | `GM` 在 mesh ready 聚合完成后，下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照 |
+| `1203` | `Inner.GameServiceReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `assignmentEpoch` 下的本地 `ServerStubEntity` ready 聚合结果 |
+| `1204` | `Inner.ClusterNodesOnlineNotify` | `GM -> Game` | `GM` | `Active` | `GM` 下发“期望节点已全部上线”的最新结论；单向通知，无响应 `msgId` |
+| `1205` | `Inner.GameGateMeshReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `onlineEpoch` 下到全部 `Gate` 的全连接完成状态 |
 
 **已登记 Relay 消息**
 
@@ -62,9 +64,10 @@
 2. `<Area>` 必须与所属号段的责任域一致，例如 `Inner.NodeRegister`、`Relay.ForwardToGame`、`Inner.ClusterReadyNotify`。
 3. 请求 / 查询 / 命令名称不追加 `Request` 或 `Response` 后缀；响应使用相同 `msgId`，只通过 `Response` 标志位区分。
 4. 单向事件统一使用 `Notify` 后缀；面向客户端的主动下行消息统一使用 `Push` 后缀；仅在明确扇出语义时使用 `Broadcast`。
-5. 避免使用 `Handle`、`Do`、`Process` 这类宽泛动词，优先使用 `Register`、`Heartbeat`、`Forward`、`Join`、`Leave`、`Sync` 等领域动词。
-6. 缩写只允许使用已在项目中固定的名词，例如 `GM`、`Gate`、`Game`、`KCP`；其余名称优先使用完整单词。
-7. 文档中的规范英文名应直接映射为代码常量名，去掉 `.` 后保持 `PascalCase`，例如 `Inner.NodeRegister` → `InnerNodeRegister`。
+5. 上报当前节点状态的消息统一使用 `Report` 后缀，例如 `Inner.GameGateMeshReadyReport`、`Inner.GameServiceReadyReport`。
+6. 避免使用 `Handle`、`Do`、`Process` 这类宽泛动词，优先使用 `Register`、`Heartbeat`、`Forward`、`Join`、`Leave`、`Sync`、`Report` 等领域动词。
+7. 缩写只允许使用已在项目中固定的名词，例如 `GM`、`Gate`、`Game`、`KCP`；其余名称优先使用完整单词。
+8. 文档中的规范英文名应直接映射为代码常量名，去掉 `.` 后保持 `PascalCase`，例如 `Inner.NodeRegister` → `InnerNodeRegister`。
 
 **登记要求**
 1. 任何新增正式 `msgId` 的功能条目，都必须在本文件追加登记记录后才能合入。
@@ -77,4 +80,3 @@
 | msgId | CanonicalName | Direction | Owner | Status | Description |
 | --- | --- | --- | --- | --- | --- |
 | `<value>` | `<Area>.<Action>` | `<caller -> callee>` | `<owner>` | `<status>` | `<summary>` |
-

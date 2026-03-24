@@ -6,7 +6,7 @@
 1. 当前默认拓扑为 `1 GM + N Gate + M Game`，开发期默认单机多进程验证，也允许未来扩展到多机部署。
 2. 业务实体运行在 `Game` 进程中；`GM` 负责集群编排与状态聚合，`Gate` 负责客户端接入、会话与转发。
 3. 当前阶段不引入 `Game -> Game` 直连业务调用；跨节点实体访问统一经 `Gate` 中转。
-4. 启动期的 `ServerStubEntity` ownership、`Game` ready 汇报与 `Gate` 客户端入口开放，都属于集群编排问题，不允许由单个 `Game` 或 `Gate` 自行推断。
+4. 启动期的“所有节点上线”通知、`Game` mesh ready 汇报、`ServerStubEntity` ownership、`Game` ready 汇报与 `Gate` 客户端入口开放，都属于集群编排问题，不允许由单个 `Game` 或 `Gate` 自行推断。
 
 **核心概念**
 
@@ -19,8 +19,9 @@
 | `Mailbox` | 静态目标地址，适用于 `Pinned` 实体或启动期由 `GM` 分配好的 `ServerStubEntity`。它携带目标 `GameNodeId`，供 `Gate` 直接转发。 |
 | `Proxy` | 动态实体引用，适用于 `Migratable` 实体。它不直接绑定最终 owner，而是依赖 `Gate` 根据最新路由解析目标。 |
 | `ExecutionLane` | 实体串行执行上下文。实体消息、Tick 与异步回调都必须先回到所属 lane，再修改实体状态。 |
+| `onlineEpoch` | `GM` 下发“期望节点已全部上线”通知的轮次号。`Game` 只应基于当前轮次建立到全部 `Gate` 的启动期全连接，并在回报 mesh ready 时携带它。 |
 | `assignmentEpoch` | `GM` 下发 ownership 分配的轮次号。`Game` 只应基于当前轮次初始化本地承载。 |
-| `readyEpoch` | `Game` 向 `GM` 汇报服务 ready 时使用的轮次号。旧轮次结果必须被丢弃。 |
+| `readyEpoch` | `GM` 聚合所有必需 `Game` 的 ready 后形成的轮次号，随 `clusterReady` 一起下发给 `Gate`。 |
 | `clusterReady` | `GM` 聚合所有必需 `Game` 的 ready 结果后，对 `Gate` 下发的集群对外服务开关。 |
 
 **实体分类**
@@ -34,11 +35,13 @@
 
 **启动编排与 ownership**
 1. `GM` 必须先进入 `InnerNetwork` 监听状态，然后等待期望的 `Game` 与 `Gate` 节点完成到 `GM` 的注册与心跳闭环。
-2. `GM` 在确认必需节点到齐后，统一决定 `ServerStubEntity -> OwnerGameNodeId` 映射，并通过 `Inner.ServerStubOwnershipSync (1202)` 下发给所有 `Game`。
-3. `Game` 只能在收到最新 `assignmentEpoch` 的 ownership 后，初始化自己负责的 `ServerStubEntity` 托管逻辑；不得自行猜测或抢先承载。
-4. `Game` 在本地 owned `ServerStubEntity` ready、并且已向全部目标 `Gate` 完成注册与心跳闭环后，才能通过 `Inner.GameServiceReadyReport (1203)` 向 `GM` 报告 ready。
-5. `GM` 聚合所有必需 `Game` 的 ready 结果后，向全部 `Gate` 下发 `Inner.ClusterReadyNotify (1201)`。
-6. `Gate` 只有在收到最新 `clusterReady = true` 后，才允许真正打开 `ClientNetwork`；它不能因为本地配置齐全、已连接 `GM`、已拿到部分目录或局部链路健康，就提前开放客户端入口。
+2. `GM` 在确认必需节点到齐后，先通过 `Inner.ClusterNodesOnlineNotify (1204)` 向所有 `Game` 下发“所有节点已上线”的当前结论。
+3. `Game` 只有在收到最新 `onlineEpoch` 的 `allNodesOnline = true` 后，才允许向全部目标 `Gate` 完成注册与心跳闭环，并通过 `Inner.GameGateMeshReadyReport (1205)` 向 `GM` 报告 mesh ready。
+4. `GM` 在聚合全部必需 `Game` 的 mesh ready 结果后，统一决定 `ServerStubEntity -> OwnerGameNodeId` 映射，并通过 `Inner.ServerStubOwnershipSync (1202)` 下发给所有 `Game`。
+5. `Game` 只能在收到最新 `assignmentEpoch` 的 ownership 后，初始化自己负责的 `ServerStubEntity` 托管逻辑；不得自行猜测或抢先承载。
+6. `Game` 在本地 owned `ServerStubEntity` ready 后，才能通过 `Inner.GameServiceReadyReport (1203)` 向 `GM` 报告 ready。
+7. `GM` 聚合所有必需 `Game` 的 ready 结果后，向全部 `Gate` 下发 `Inner.ClusterReadyNotify (1201)`。
+8. `Gate` 只有在收到最新 `clusterReady = true` 后，才允许真正打开 `ClientNetwork`；它不能因为本地配置齐全、已连接 `GM`、已拿到部分目录或局部链路健康，就提前开放客户端入口。
 
 **迁移性分类**
 1. `Migratable ServerEntity` 允许显式迁移到新的 `OwnerGameNodeId`，典型示例是 `PlayerEntity`。
@@ -47,9 +50,9 @@
 4. 迁移是业务层的显式语义，不是网络层或会话层的隐式副作用。
 
 **职责边界**
-1. `GM` 负责注册表、心跳、节点存活、ownership 分配、ready 聚合与 `clusterReady` 下发，不承载业务实体活动实例。
+1. `GM` 负责注册表、心跳、节点存活、“所有节点上线”通知、mesh ready 聚合、ownership 分配、ready 聚合与 `clusterReady` 下发，不承载业务实体活动实例。
 2. `Gate` 负责客户端接入、会话管理、`Game` 目录维护与消息转发，但不持有业务权威状态，也不决定 `ServerStubEntity` ownership。
-3. `Game` 负责实体活动实例、实体注册表、消息分发、Tick、持久化接入，以及本地 `ServerStubEntity` ready 判定。
+3. `Game` 负责实体活动实例、实体注册表、消息分发、Tick、持久化接入、对全部 `Gate` 的全连接闭环、ownership 驱动的本地 Stub 初始化，以及本地 `ServerStubEntity` ready 判定。
 4. `ServerEntity` / `ServerStubEntity` 负责业务语义与状态，不直接持有网络 socket、KCP 会话或 `Gate` 连接对象。
 5. 任何共享可变业务状态都应归属于某个实体实例，禁止把权威状态散落在进程级全局单例或 `Gate` 连接对象中。
 
@@ -64,12 +67,12 @@
 1. 逻辑实体身份存在，不等于其运行时实例已经被装载；但一旦装载为活动实例，就必须拥有唯一 `OwnerGameNodeId`。
 2. 同一实体的消息处理、Tick 推进、异步结果落地与状态修改，都必须串行化到同一 `ExecutionLane`。
 3. 实体内部可以发起异步操作，但异步结果在写回状态前必须回到所属 lane。
-4. `Game` 在丢失当前 `assignmentEpoch`、`readyEpoch` 或相关 `Gate` 注册闭环时，必须撤销旧轮次 ready 结果并重新参与编排。
+4. `Game` 在丢失当前 `onlineEpoch`、`assignmentEpoch`、`readyEpoch` 或相关 `Gate` 注册闭环时，必须撤销旧轮次结论并重新参与编排。
 
 **对后续里程碑的约束**
-1. `M3-12` 必须把 ownership 视为 `GM -> Game` 的编排真值来源，而不是 `Game` 自主决策。
+1. `M3-12` 必须把 `GM -> Game` 的“所有节点已上线”通知视为 `Game -> Gate` 全连接的唯一启动信号，而不是 `Game` 自主推断。
 2. `M3-13` 必须建立 `Game -> Gate` 注册与心跳闭环，使 `Gate` 的可转发目录建立在真实会话之上。
-3. `M3-14` 的 `Game` ready 必须同时满足“本地 owned Stub ready”与“已注册全部 Gate”两个条件。
-4. `M3-15` 必须由 `GM` 聚合 ready 结果并下发 `clusterReady`，`Gate` 只消费结论，不重新推导结论。
+3. `M3-14` 必须先聚合 `Game` 的 mesh ready，再下发 ownership，并把 ownership 作为 `Game` 本地 Stub 初始化的真值来源。
+4. `M3-15` 必须建立在当前 `assignmentEpoch` 的本地 Stub ready 之上，并由 `GM` 聚合 ready 结果后下发 `clusterReady`；`Gate` 只消费结论，不重新推导结论。
 5. `M4-02` 的 `ClientNetwork` 必须受 `clusterReady` 控制，禁止在 `Gate` 启动时自动开放。
-6. `M4-05` 之后的转发通道必须建立在 `Game -> Gate` 注册形成的目录之上，而不是依赖旧的 `Gate -> GM` 目录查询假设。
+6. `M4-05` 之后的转发通道必须建立在启动期已经完成的 `Game -> Gate` 全连接与注册目录之上，而不是依赖旧的 `Gate -> GM` 目录查询假设。

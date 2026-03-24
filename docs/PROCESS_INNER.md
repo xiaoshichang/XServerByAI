@@ -1,13 +1,15 @@
 ﻿# PROCESS_INNER
 
-本文档定义 XServerByAI 当前阶段启动编排相关 `Inner` 消息的结构、字段语义与时序约束。当前启动控制面分成两段：
-1. `Gate/Game -> GM`：完成节点注册、心跳、ownership 下发与 ready 聚合。
-2. `Game -> Gate`：完成 `Game` 到每个 `Gate` 的注册与心跳闭环，为后续 Gate→Game 转发建立可用目标目录。
+本文档定义 XServerByAI 当前阶段启动编排相关 `Inner` 消息的结构、字段语义与时序约束。当前启动控制面分成四段：
+1. `Gate/Game -> GM`：完成节点注册与心跳闭环。
+2. `GM -> Game`：下发“所有节点已上线”通知，并在后续下发 `ServerStubEntity` ownership。
+3. `Game -> Gate`：完成 `Game` 到每个 `Gate` 的注册与心跳闭环，为后续 Gate→Game 转发与启动期 Stub 初始化通信建立可用目标目录。
+4. `Game -> GM` / `GM -> Gate`：完成 mesh ready 上报、服务 ready 上报与 `clusterReady` 聚合下发。
 
 所有消息默认承载在 ZeroMQ over TCP 的 `Inner` 链路上；消息边界、包头与 flags 规则以 `docs/PACKET_HEADER.md` 为准。
 
 **适用范围**
-1. 当前文档覆盖 `Inner.NodeRegister`（`1000`）、`Inner.NodeHeartbeat`（`1100`）、`Inner.ClusterReadyNotify`（`1201`）、`Inner.ServerStubOwnershipSync`（`1202`）与 `Inner.GameServiceReadyReport`（`1203`）。
+1. 当前文档覆盖 `Inner.NodeRegister`（`1000`）、`Inner.NodeHeartbeat`（`1100`）、`Inner.ClusterReadyNotify`（`1201`）、`Inner.ServerStubOwnershipSync`（`1202`）、`Inner.GameServiceReadyReport`（`1203`）、`Inner.ClusterNodesOnlineNotify`（`1204`）与 `Inner.GameGateMeshReadyReport`（`1205`）。
 2. `Inner.NodeRegister` / `Inner.NodeHeartbeat` 是共享消息：既用于 `Gate/Game -> GM`，也用于 `Game -> Gate` 的启动期闭环。
 
 **通用编码约定**
@@ -130,6 +132,63 @@
 | `retryAfterMs` | `uint32` | 建议重试等待时间；`0` 表示未提供 |
 | `requireFullRegister` | `bool` | `true` 表示发送方必须丢弃旧会话并重新走完整注册 |
 
+**Inner.ClusterNodesOnlineNotify（`msgId = 1204`）**
+1. 发送时机：`GM` 在“期望 `Game` / `Gate` 节点是否都已完成到 `GM` 的注册与心跳闭环”这一聚合结论发生变化时，向全部 `Game` 下发最新结果。
+2. 关键语义：`allNodesOnline = true` 表示 `GM` 已确认本轮期望节点全部在线；`Game` 只有收到这一结论后，才允许开始 `Game -> Gate` 全连接闭环。
+3. 幂等语义：接收方只保留最新 `onlineEpoch` 的结果；旧轮次通知必须忽略。
+
+通知体：
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `onlineEpoch` | `uint64` | “所有节点在线”结论版本号 |
+| `allNodesOnline` | `bool` | 当前是否已确认期望节点全部在线 |
+| `statusFlags` | `uint32` | 保留，当前必须为 `0` |
+| `serverNowUnixMs` | `uint64` | `GM` 当前时间 |
+
+**Inner.GameGateMeshReadyReport（`msgId = 1205`）**
+1. 发送时机：`Game` 在当前 `onlineEpoch` 下完成到全部目标 `Gate` 的注册与心跳闭环后，向 `GM` 上报自身 mesh ready 结果；若同轮次闭环随后失效，也允许重新上报 `meshReady = false`。
+2. 关键语义：`meshReady = true` 表示该 `Game` 已经具备与全部目标 `Gate` 的可用通信链路，可以进入 ownership 驱动的本地 Stub 初始化阶段。
+3. 聚合语义：`GM` 必须按 `nodeId + onlineEpoch` 聚合；旧轮次 mesh ready 上报不得混入新一轮“所有节点在线”结论。
+
+上报体：
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `onlineEpoch` | `uint64` | 当前 mesh ready 所基于的“所有节点在线”版本 |
+| `meshReady` | `bool` | 当前 `Game` 是否已经完成到全部目标 `Gate` 的注册与心跳闭环 |
+| `statusFlags` | `uint32` | 保留，当前必须为 `0` |
+| `reportedAtUnixMs` | `uint64` | 发送方形成该 mesh ready 结论的时间 |
+
+**Inner.ServerStubOwnershipSync（`msgId = 1202`）**
+1. 发送时机：`GM` 在当前 `onlineEpoch` 下聚合全部必需 `Game` 的 `meshReady = true` 结果后，向全部 `Game` 下发当前 `ServerStubEntity` ownership 快照。
+2. 关键语义：接收方只接受最新 `assignmentEpoch` 的全量快照；旧轮次结果必须丢弃。
+3. 使用方式：`Game` 收到后只初始化分配给自己的 Stub；它在进入该步骤前，应已经具备与全部目标 `Gate` 的可用通信链路。
+
+通知体：
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `assignmentEpoch` | `uint64` | 当前 ownership 版本号 |
+| `statusFlags` | `uint32` | 保留，当前必须为 `0` |
+| `assignments` | `ServerStubOwnershipEntry[]` | 当前全量 ownership 快照 |
+| `serverNowUnixMs` | `uint64` | `GM` 当前时间 |
+
+**Inner.GameServiceReadyReport（`msgId = 1203`）**
+1. 发送时机：`Game` 只有在当前 `assignmentEpoch` 下完成本地 Stub 初始化，并聚合出自身所有必需 `ServerStubEntity` 的 ready 结果后，才允许向 `GM` 上报本地 ready 结果。
+2. 关键语义：`localReady = true` 表示该 `Game` 在当前 `assignmentEpoch` 下已经满足对外服务前提。
+3. 聚合语义：`GM` 必须按 `nodeId + assignmentEpoch` 聚合；旧轮次 ready 上报不得混入新一轮 ownership 结论。
+
+上报体：
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `assignmentEpoch` | `uint64` | 当前 ready 所基于的 ownership 版本 |
+| `localReady` | `bool` | 当前 `Game` 是否已经本地 ready |
+| `statusFlags` | `uint32` | 保留，当前必须为 `0` |
+| `entries` | `ServerStubReadyEntry[]` | 当前 `Game` 负责 Stub 的 ready 明细 |
+| `reportedAtUnixMs` | `uint64` | 发送方形成该 ready 结论的时间 |
+
 **Inner.ClusterReadyNotify（`msgId = 1201`）**
 1. 发送时机：`GM` 在集群 ready 聚合结果发生变化时，向全部 `Gate` 下发最新结论；`Game` 可按需旁路消费，但当前关键接收方是 `Gate`。
 2. 关键语义：`clusterReady = true` 表示 `GM` 已确认当前服务器组满足对外服务前提；`Gate` 只有收到这一结论后，才允许开放 `ClientNetwork`。
@@ -144,44 +203,17 @@
 | `statusFlags` | `uint32` | 保留，当前必须为 `0` |
 | `serverNowUnixMs` | `uint64` | `GM` 当前时间 |
 
-**Inner.ServerStubOwnershipSync（`msgId = 1202`）**
-1. 发送时机：`GM` 在期望 `Game` 与 `Gate` 节点都已注册完成后，向全部 `Game` 下发当前 `ServerStubEntity` ownership 快照。
-2. 关键语义：接收方只接受最新 `assignmentEpoch` 的全量快照；旧轮次结果必须丢弃。
-3. 使用方式：`Game` 收到后只初始化分配给自己的 Stub，并以同一 `assignmentEpoch` 驱动后续 ready 上报。
-
-通知体：
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `assignmentEpoch` | `uint64` | 当前 ownership 版本号 |
-| `statusFlags` | `uint32` | 保留，当前必须为 `0` |
-| `assignments` | `ServerStubOwnershipEntry[]` | 当前全量 ownership 快照 |
-| `serverNowUnixMs` | `uint64` | `GM` 当前时间 |
-
-**Inner.GameServiceReadyReport（`msgId = 1203`）**
-1. 发送时机：`Game` 只有在 assigned `ServerStubEntity` 已 ready 且已经完成对全部目标 `Gate` 的注册/心跳闭环后，才允许向 `GM` 上报本地 ready 结果。
-2. 关键语义：`localReady = true` 表示该 `Game` 在当前 `assignmentEpoch` 下已经满足对外服务前提。
-3. 聚合语义：`GM` 必须按 `nodeId + assignmentEpoch` 聚合；旧轮次 ready 上报不得混入新一轮 ownership 结论。
-
-上报体：
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `assignmentEpoch` | `uint64` | 当前 ready 所基于的 ownership 版本 |
-| `localReady` | `bool` | 当前 `Game` 是否已经本地 ready |
-| `statusFlags` | `uint32` | 保留，当前必须为 `0` |
-| `entries` | `ServerStubReadyEntry[]` | 当前 `Game` 负责 Stub 的 ready 明细 |
-| `reportedAtUnixMs` | `uint64` | 发送方形成该 ready 结论的时间 |
-
 **时序与一致性约束**
 1. `GM` 必须先进入 `InnerNetwork` 监听状态，再允许其他节点接入。
-2. `Game` 与 `Gate` 都必须先完成 `Gate/Game -> GM` 的注册与心跳闭环，`GM` 才能进入 ownership 决策阶段。
-3. `GM` 只有在期望的 `Game` 与 `Gate` 节点都注册完成后，才能下发 `Inner.ServerStubOwnershipSync`。
-4. `Game` 不得在收到 ownership 分配前自行决定本地承载哪些 `ServerStubEntity`。
-5. `Game` 在向 `GM` 报告 `localReady = true` 前，必须先完成对全部目标 `Gate` 的注册与心跳闭环。
-6. `Gate` 可以在收到 `clusterReady = true` 之前维护来自 `Game` 的内部注册表，但不得提前开放客户端入口。
-7. `Gate` 对客户端入口的开放只取决于最新的 `Inner.ClusterReadyNotify`；本地配置齐全、局部链路可用或单个 `Game` ready 都不足以替代这一结论。
-8. 当前默认心跳参数为 `heartbeatIntervalMs = 5000`、`heartbeatTimeoutMs = 15000`；响应方可以覆盖，但必须满足 `heartbeatIntervalMs < heartbeatTimeoutMs`。
-9. `statusFlags`、`ServerStubOwnershipEntry.entryFlags` 与 `ServerStubReadyEntry.entryFlags` 当前都必须为 `0`。
-10. 若未来需要额外的目录快照或增量同步协议，应以新的扩展条目重新登记，而不是复用当前已登记的启动编排消息。
-
+2. `Game` 与 `Gate` 都必须先完成 `Gate/Game -> GM` 的注册与心跳闭环，`GM` 才能进入“所有节点在线”聚合阶段。
+3. `GM` 只有在期望的 `Game` 与 `Gate` 节点都注册完成后，才能下发 `Inner.ClusterNodesOnlineNotify` 的 `allNodesOnline = true` 结论。
+4. `Game` 不得在收到当前轮次 `allNodesOnline = true` 前，就开始 `Game -> Gate` 全连接闭环。
+5. `Game` 只有在当前 `onlineEpoch` 下完成到全部目标 `Gate` 的注册与心跳闭环后，才能向 `GM` 报告 `meshReady = true`。
+6. `GM` 只有在聚合全部必需 `Game` 的 `meshReady = true` 结果后，才能下发 `Inner.ServerStubOwnershipSync`。
+7. `Game` 不得在收到 ownership 分配前自行决定本地承载哪些 `ServerStubEntity`。
+8. `Game` 在向 `GM` 报告 `localReady = true` 前，必须先完成当前 `assignmentEpoch` 下的本地 Stub 初始化，并聚合自身所有必需 `ServerStubEntity` 的 ready 结果。
+9. `Gate` 可以在收到 `clusterReady = true` 之前维护来自 `Game` 的内部注册表，但不得提前开放客户端入口。
+10. `Gate` 对客户端入口的开放只取决于最新的 `Inner.ClusterReadyNotify`；本地配置齐全、局部链路可用或单个 `Game` ready 都不足以替代这一结论。
+11. 当前默认心跳参数为 `heartbeatIntervalMs = 5000`、`heartbeatTimeoutMs = 15000`；响应方可以覆盖，但必须满足 `heartbeatIntervalMs < heartbeatTimeoutMs`。
+12. `statusFlags`、`ServerStubOwnershipEntry.entryFlags` 与 `ServerStubReadyEntry.entryFlags` 当前都必须为 `0`。
+13. 若未来需要额外的目录快照、mesh 详情或增量同步协议，应以新的扩展条目重新登记，而不是复用当前已登记的启动编排消息。

@@ -20,9 +20,9 @@
 4. 基础第三方依赖以 vendored 源码或官方 host pack 工件形式统一放在 `3rd/`，当前基线为 `spdlog`、`zeromq/libzmq`、standalone `asio`、header-only `nlohmann/json` 与 .NET 官方 `dotnet_host`（`nethost` / `hostfxr` headers + platform `nethost` link artifacts）。
 
 **节点角色**
-1. `GM`：集群协调节点，负责注册、心跳、ownership 分配、ready 聚合与 `clusterReady` 编排。
+1. `GM`：集群协调节点，负责注册、心跳、“所有节点已上线”通知、Game↔Gate mesh ready 聚合、ownership 分配、ready 聚合与 `clusterReady` 编排。
 2. `Gate`：客户端接入节点，负责 `Client` 网络、会话管理、维护已注册 `Game` 目录以及 Gate/Game 中继。
-3. `Game`：业务承载节点，负责托管逻辑、实体状态、对全部 `Gate` 的注册/心跳以及本地 ready 上报。
+3. `Game`：业务承载节点，负责托管逻辑、实体状态、对全部 `Gate` 的注册/心跳、mesh ready 上报、按 ownership 初始化 Stub 以及本地 ready 上报。
 
 **网络分层命名**
 1. `Inner`：节点与节点之间的网络，当前主要承载 `GM <-> Gate/Game` 与 `Game -> Gate` 的注册、心跳及启动编排消息。
@@ -72,3 +72,4 @@
 2. KCP：`docs/KCP_CONFIG.md`
 3. 启动顺序：`docs/STARTUP_FLOW.md`
 4. 分布式实体：`docs/DISTRIBUTED_ENTITY.md`
+
