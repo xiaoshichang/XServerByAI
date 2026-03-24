@@ -164,6 +164,16 @@ target_link_libraries(xs_node_gate_gm_session_tests PRIVATE node)
 
 add_test(NAME xs_node_gate_gm_session_tests COMMAND xs_node_gate_gm_session_tests)
 
+###############################
+# xs_node_game_gm_session_tests
+###############################
+add_executable(xs_node_game_gm_session_tests
+    node_game_gm_session_tests.cpp
+)
+
+target_link_libraries(xs_node_game_gm_session_tests PRIVATE node)
+
+add_test(NAME xs_node_game_gm_session_tests COMMAND xs_node_game_gm_session_tests)
 
 ###############################
 # xs_node_inner_network_tests

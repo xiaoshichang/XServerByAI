@@ -60,7 +60,7 @@
 8. M3-08 实现 Gate 角色启动骨架与 GM Inner 链路接入。Deps: M3-01, M2-07 | 状态: 已完成
 9. M3-09 实现 Gate→GM 注册与心跳。Deps: M3-08, M2-11, M2-12 | 状态: 已完成
 10. M3-10 实现 Game 角色启动骨架与 GM Inner 链路接入。Deps: M3-01, M2-07 | 状态: 已完成
-11. M3-11 实现 Game→GM 注册与心跳。Deps: M3-10, M2-11, M2-12 | 状态: 未开发
+11. M3-11 实现 Game→GM 注册与心跳。Deps: M3-10, M2-11, M2-12 | 状态: 开发中
 12. M3-12 实现 GM 推送 Game 节点路由目录到 Gate。Deps: M3-03, M3-06 | 状态: 未开发
 13. M3-13 实现 Gate 维护 Game 节点路由目录与变更更新。Deps: M3-12 | 状态: 未开发
 14. M3-14 实现 Game 服务就绪状态上报（含 ServerStubEntity ready 聚合）。Deps: M3-03 | 状态: 未开发
