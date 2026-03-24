@@ -88,7 +88,7 @@
 
 **里程碑 M5：C# 分布式实体框架（17 条）**
 1. M5-01 实现 `nethost` 初始化与 CLR 加载（Windows/Linux）。Deps: M1-15 | 状态: 已完成
-2. M5-02 实现 C++→C# 入口绑定（函数指针获取）。Deps: M5-01 | 状态: 开发中
+2. M5-02 实现 C++→C# 入口绑定（函数指针获取）。Deps: M5-01 | 状态: 已完成
 3. M5-03 建立 C# Framework 基础项目（ServerEntity/ServerStubEntity）。Deps: M1-04, M1-14 | 状态: 未开发
 4. M5-04 实现 `ServerEntity` 基类（Id/属性/生命周期）。Deps: M5-03 | 状态: 未开发
 5. M5-05 实现 `ServerStubEntity` 基类（全局服务语义）。Deps: M5-04 | 状态: 未开发
