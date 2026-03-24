@@ -141,6 +141,17 @@ target_link_libraries(xs_node_gm_node_tests PRIVATE node ipc)
 
 add_test(NAME xs_node_gm_node_tests COMMAND xs_node_gm_node_tests)
 
+###############################
+# xs_node_game_node_tests
+###############################
+add_executable(xs_node_game_node_tests
+    node_game_node_tests.cpp
+)
+
+target_link_libraries(xs_node_game_node_tests PRIVATE node ipc)
+
+add_test(NAME xs_node_game_node_tests COMMAND xs_node_game_node_tests)
+
 
 ###############################
 # xs_node_gate_gm_session_tests
