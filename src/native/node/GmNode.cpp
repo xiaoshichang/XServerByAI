@@ -188,25 +188,26 @@ std::optional<std::int32_t> MapRegisterCodecErrorToInnerError(xs::net::RegisterC
     return kInnerRequestInvalid;
 }
 
-std::optional<std::int32_t> MapProcessRegistryErrorToInnerError(ProcessRegistryErrorCode error_code) noexcept
+std::optional<std::int32_t> MapInnerNetworkSessionManagerErrorToInnerError(
+    InnerNetworkSessionManagerErrorCode error_code) noexcept
 {
     switch (error_code)
     {
-    case ProcessRegistryErrorCode::None:
+    case InnerNetworkSessionManagerErrorCode::None:
         return std::nullopt;
-    case ProcessRegistryErrorCode::InvalidProcessType:
+    case InnerNetworkSessionManagerErrorCode::InvalidProcessType:
         return kInnerProcessTypeInvalid;
-    case ProcessRegistryErrorCode::InvalidInnerNetworkEndpointHost:
-    case ProcessRegistryErrorCode::InvalidInnerNetworkEndpointPort:
+    case InnerNetworkSessionManagerErrorCode::InvalidInnerNetworkEndpointHost:
+    case InnerNetworkSessionManagerErrorCode::InvalidInnerNetworkEndpointPort:
         return kInnerNetworkEndpointInvalid;
-    case ProcessRegistryErrorCode::NodeIdConflict:
+    case InnerNetworkSessionManagerErrorCode::NodeIdConflict:
         return kInnerNodeIdConflict;
-    case ProcessRegistryErrorCode::RoutingIdConflict:
-    case ProcessRegistryErrorCode::NodeNotFound:
-    case ProcessRegistryErrorCode::RoutingIdNotFound:
+    case InnerNetworkSessionManagerErrorCode::RoutingIdConflict:
+    case InnerNetworkSessionManagerErrorCode::NodeNotFound:
+    case InnerNetworkSessionManagerErrorCode::RoutingIdNotFound:
         return kInnerChannelInvalid;
-    case ProcessRegistryErrorCode::InvalidArgument:
-    case ProcessRegistryErrorCode::InvalidNodeId:
+    case InnerNetworkSessionManagerErrorCode::InvalidArgument:
+    case InnerNetworkSessionManagerErrorCode::InvalidNodeId:
         return kInnerRequestInvalid;
     }
 
@@ -254,7 +255,7 @@ GmNode::GmNode(NodeCommandLineArgs args)
 
 GmNode::~GmNode() = default;
 
-std::vector<ProcessRegistryEntry> GmNode::registry_snapshot() const
+std::vector<InnerNetworkSession> GmNode::registry_snapshot() const
 {
     return inner_network_remote_sessions().Snapshot();
 }
@@ -577,7 +578,7 @@ void GmNode::HandleInnerMessage(
         return;
     }
 
-    ProcessRegistryRegistration registration{
+    InnerNetworkSessionRegistration registration{
         .process_type = *process_type,
         .node_id = request.node_id,
         .pid = request.pid,
@@ -591,10 +592,12 @@ void GmNode::HandleInnerMessage(
         .inner_network_ready = false,
     };
 
-    const ProcessRegistryErrorCode register_result = inner_network_remote_sessions().Register(std::move(registration));
-    if (register_result != ProcessRegistryErrorCode::None)
+    const InnerNetworkSessionManagerErrorCode register_result =
+        inner_network_remote_sessions().Register(std::move(registration));
+    if (register_result != InnerNetworkSessionManagerErrorCode::None)
     {
-        const std::optional<std::int32_t> error_code = MapProcessRegistryErrorToInnerError(register_result);
+        const std::optional<std::int32_t> error_code =
+            MapInnerNetworkSessionManagerErrorToInnerError(register_result);
         if (error_code.has_value())
         {
             send_error_response(*error_code, &request);
@@ -603,8 +606,14 @@ void GmNode::HandleInnerMessage(
         {
             std::vector<xs::core::LogContextField> context = BuildRegisterContext(routing_id, packet.header.seq, &request);
             context.push_back(
-                xs::core::LogContextField{"registryError", std::string(ProcessRegistryErrorMessage(register_result))});
-            logger().Log(xs::core::LogLevel::Warn, "inner", "GM rejected register request without mapped error code.", context);
+                xs::core::LogContextField{
+                    "sessionManagerError",
+                    std::string(InnerNetworkSessionManagerErrorMessage(register_result))});
+            logger().Log(
+                xs::core::LogLevel::Warn,
+                "inner",
+                "GM rejected register request without a mapped session manager error code.",
+                context);
         }
 
         return;
@@ -836,8 +845,8 @@ void GmNode::HandleTimeoutScan()
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
     PruneExpiredInvalidatedRoutingIds(now_unix_ms);
 
-    const std::vector<ProcessRegistryEntry> snapshot = inner_network_remote_sessions().Snapshot();
-    for (const ProcessRegistryEntry& entry : snapshot)
+    const std::vector<InnerNetworkSession> snapshot = inner_network_remote_sessions().Snapshot();
+    for (const InnerNetworkSession& entry : snapshot)
     {
         if (entry.last_heartbeat_at_unix_ms == 0U || entry.last_heartbeat_at_unix_ms > now_unix_ms)
         {
@@ -850,8 +859,9 @@ void GmNode::HandleTimeoutScan()
             continue;
         }
 
-        const ProcessRegistryErrorCode unregister_result = inner_network_remote_sessions().UnregisterByNodeId(entry.node_id);
-        if (unregister_result != ProcessRegistryErrorCode::None)
+        const InnerNetworkSessionManagerErrorCode unregister_result =
+            inner_network_remote_sessions().UnregisterByNodeId(entry.node_id);
+        if (unregister_result != InnerNetworkSessionManagerErrorCode::None)
         {
             continue;
         }
@@ -866,7 +876,7 @@ void GmNode::HandleTimeoutScan()
         logger().Log(
             xs::core::LogLevel::Warn,
             "inner",
-            "GM inner service evicted a timed-out process registry entry.",
+            "GM inner service evicted a timed-out inner network session.",
             context,
             kInnerChannelInvalid,
             "Inner.ChannelInvalid");

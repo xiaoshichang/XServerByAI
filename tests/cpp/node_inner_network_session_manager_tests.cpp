@@ -1,4 +1,4 @@
-#include "ProcessRegistry.h"
+#include "InnerNetworkSessionManager.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -69,12 +69,12 @@ void Check(bool condition, const char* expression, const char* message = nullptr
     };
 }
 
-[[nodiscard]] xs::node::ProcessRegistryRegistration MakeRegistration(
+[[nodiscard]] xs::node::InnerNetworkSessionRegistration MakeRegistration(
     xs::core::ProcessType process_type,
     std::string node_id,
     std::string routing_id)
 {
-    return xs::node::ProcessRegistryRegistration{
+    return xs::node::InnerNetworkSessionRegistration{
         .process_type = process_type,
         .node_id = std::move(node_id),
         .pid = 101U,
@@ -90,7 +90,7 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 }
 
 void CheckEntryFields(
-    const xs::node::ProcessRegistryEntry& entry,
+    const xs::node::InnerNetworkSession& entry,
     xs::core::ProcessType process_type,
     std::string_view node_id,
     std::string_view routing_id)
@@ -117,36 +117,36 @@ void CheckEntryFields(
 
 void TestRegisterAndSnapshotSortByNodeId()
 {
-    xs::node::ProcessRegistry registry;
+    xs::node::InnerNetworkSessionManager manager;
 
-    const xs::node::ProcessRegistryRegistration game_registration =
+    const xs::node::InnerNetworkSessionRegistration game_registration =
         MakeRegistration(xs::core::ProcessType::Game, "Game1", "route-game");
-    const xs::node::ProcessRegistryRegistration gate_registration =
+    const xs::node::InnerNetworkSessionRegistration gate_registration =
         MakeRegistration(xs::core::ProcessType::Gate, "Gate0", "route-gate");
 
-    XS_CHECK(registry.Register(game_registration) == xs::node::ProcessRegistryErrorCode::None);
-    XS_CHECK(registry.Register(gate_registration) == xs::node::ProcessRegistryErrorCode::None);
-    XS_CHECK(registry.size() == 2U);
-    XS_CHECK(registry.ContainsNodeId("Game1"));
-    XS_CHECK(registry.ContainsNodeId("Gate0"));
-    XS_CHECK(registry.ContainsRoutingId(MakeRoutingId("route-game")));
-    XS_CHECK(registry.ContainsRoutingId(MakeRoutingId("route-gate")));
+    XS_CHECK(manager.Register(game_registration) == xs::node::InnerNetworkSessionManagerErrorCode::None);
+    XS_CHECK(manager.Register(gate_registration) == xs::node::InnerNetworkSessionManagerErrorCode::None);
+    XS_CHECK(manager.size() == 2U);
+    XS_CHECK(manager.ContainsNodeId("Game1"));
+    XS_CHECK(manager.ContainsNodeId("Gate0"));
+    XS_CHECK(manager.ContainsRoutingId(MakeRoutingId("route-game")));
+    XS_CHECK(manager.ContainsRoutingId(MakeRoutingId("route-gate")));
 
-    const xs::node::ProcessRegistryEntry* gate_entry = registry.FindByNodeId("Gate0");
+    const xs::node::InnerNetworkSession* gate_entry = manager.FindByNodeId("Gate0");
     XS_CHECK(gate_entry != nullptr);
     if (gate_entry != nullptr)
     {
         CheckEntryFields(*gate_entry, xs::core::ProcessType::Gate, "Gate0", "route-gate");
     }
 
-    const xs::node::ProcessRegistryEntry* game_entry = registry.FindByRoutingId(MakeRoutingId("route-game"));
+    const xs::node::InnerNetworkSession* game_entry = manager.FindByRoutingId(MakeRoutingId("route-game"));
     XS_CHECK(game_entry != nullptr);
     if (game_entry != nullptr)
     {
         CheckEntryFields(*game_entry, xs::core::ProcessType::Game, "Game1", "route-game");
     }
 
-    const std::vector<xs::node::ProcessRegistryEntry> snapshot = registry.Snapshot();
+    const std::vector<xs::node::InnerNetworkSession> snapshot = manager.Snapshot();
     XS_CHECK(snapshot.size() == 2U);
     XS_CHECK(snapshot[0].node_id == "Game1");
     XS_CHECK(snapshot[1].node_id == "Gate0");
@@ -154,56 +154,64 @@ void TestRegisterAndSnapshotSortByNodeId()
 
 void TestRejectsInvalidRegistrationsAndConflicts()
 {
-    xs::node::ProcessRegistry registry;
+    xs::node::InnerNetworkSessionManager manager;
 
-    xs::node::ProcessRegistryRegistration invalid_process =
+    xs::node::InnerNetworkSessionRegistration invalid_process =
         MakeRegistration(static_cast<xs::core::ProcessType>(255U), "Gate0", "route-a");
-    XS_CHECK(registry.Register(invalid_process) == xs::node::ProcessRegistryErrorCode::InvalidProcessType);
+    XS_CHECK(
+        manager.Register(invalid_process) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::InvalidProcessType);
 
-    xs::node::ProcessRegistryRegistration invalid_node =
+    xs::node::InnerNetworkSessionRegistration invalid_node =
         MakeRegistration(xs::core::ProcessType::Gate, "", "route-a");
-    XS_CHECK(registry.Register(invalid_node) == xs::node::ProcessRegistryErrorCode::InvalidNodeId);
+    XS_CHECK(manager.Register(invalid_node) == xs::node::InnerNetworkSessionManagerErrorCode::InvalidNodeId);
 
-    xs::node::ProcessRegistryRegistration invalid_host =
+    xs::node::InnerNetworkSessionRegistration invalid_host =
         MakeRegistration(xs::core::ProcessType::Gate, "Gate0", "route-a");
     invalid_host.inner_network_endpoint.host.clear();
-    XS_CHECK(registry.Register(invalid_host) == xs::node::ProcessRegistryErrorCode::InvalidInnerNetworkEndpointHost);
+    XS_CHECK(
+        manager.Register(invalid_host) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::InvalidInnerNetworkEndpointHost);
 
-    xs::node::ProcessRegistryRegistration invalid_port =
+    xs::node::InnerNetworkSessionRegistration invalid_port =
         MakeRegistration(xs::core::ProcessType::Gate, "Gate0", "route-a");
     invalid_port.inner_network_endpoint.port = 0U;
-    XS_CHECK(registry.Register(invalid_port) == xs::node::ProcessRegistryErrorCode::InvalidInnerNetworkEndpointPort);
+    XS_CHECK(
+        manager.Register(invalid_port) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::InvalidInnerNetworkEndpointPort);
 
-    const xs::node::ProcessRegistryRegistration gate_registration =
+    const xs::node::InnerNetworkSessionRegistration gate_registration =
         MakeRegistration(xs::core::ProcessType::Gate, "Gate0", "route-a");
-    XS_CHECK(registry.Register(gate_registration) == xs::node::ProcessRegistryErrorCode::None);
+    XS_CHECK(manager.Register(gate_registration) == xs::node::InnerNetworkSessionManagerErrorCode::None);
 
-    const xs::node::ProcessRegistryRegistration duplicate_node =
+    const xs::node::InnerNetworkSessionRegistration duplicate_node =
         MakeRegistration(xs::core::ProcessType::Game, "Gate0", "route-b");
-    XS_CHECK(registry.Register(duplicate_node) == xs::node::ProcessRegistryErrorCode::NodeIdConflict);
+    XS_CHECK(manager.Register(duplicate_node) == xs::node::InnerNetworkSessionManagerErrorCode::NodeIdConflict);
 
-    const xs::node::ProcessRegistryRegistration duplicate_routing =
+    const xs::node::InnerNetworkSessionRegistration duplicate_routing =
         MakeRegistration(xs::core::ProcessType::Game, "Game0", "route-a");
-    XS_CHECK(registry.Register(duplicate_routing) == xs::node::ProcessRegistryErrorCode::RoutingIdConflict);
+    XS_CHECK(
+        manager.Register(duplicate_routing) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::RoutingIdConflict);
 }
 
 void TestUpdatesAndRemovesByNodeIdAndRoutingId()
 {
-    xs::node::ProcessRegistry registry;
-    const xs::node::ProcessRegistryRegistration registration =
+    xs::node::InnerNetworkSessionManager manager;
+    const xs::node::InnerNetworkSessionRegistration registration =
         MakeRegistration(xs::core::ProcessType::Game, "Game0", "route-game");
 
-    XS_CHECK(registry.Register(registration) == xs::node::ProcessRegistryErrorCode::None);
+    XS_CHECK(manager.Register(registration) == xs::node::InnerNetworkSessionManagerErrorCode::None);
 
     const xs::net::LoadSnapshot updated_load = MakeLoadSnapshot(8U, 9U, 10U, 11U, 12U);
     XS_CHECK(
-        registry.UpdateHeartbeatByNodeId("Game0", 999U, updated_load) ==
-        xs::node::ProcessRegistryErrorCode::None);
+        manager.UpdateHeartbeatByNodeId("Game0", 999U, updated_load) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::None);
     XS_CHECK(
-        registry.UpdateInnerNetworkReadyByRoutingId(MakeRoutingId("route-game"), true) ==
-        xs::node::ProcessRegistryErrorCode::None);
+        manager.UpdateInnerNetworkReadyByRoutingId(MakeRoutingId("route-game"), true) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::None);
 
-    const xs::node::ProcessRegistryEntry* entry = registry.FindByNodeId("Game0");
+    const xs::node::InnerNetworkSession* entry = manager.FindByNodeId("Game0");
     XS_CHECK(entry != nullptr);
     if (entry != nullptr)
     {
@@ -217,36 +225,37 @@ void TestUpdatesAndRemovesByNodeIdAndRoutingId()
     }
 
     XS_CHECK(
-        registry.UpdateHeartbeatByRoutingId(MakeRoutingId("missing"), 1U, updated_load) ==
-        xs::node::ProcessRegistryErrorCode::RoutingIdNotFound);
+        manager.UpdateHeartbeatByRoutingId(MakeRoutingId("missing"), 1U, updated_load) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::RoutingIdNotFound);
     XS_CHECK(
-        registry.UpdateInnerNetworkReadyByNodeId("Missing", true) ==
-        xs::node::ProcessRegistryErrorCode::NodeNotFound);
+        manager.UpdateInnerNetworkReadyByNodeId("Missing", true) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::NodeNotFound);
     XS_CHECK(
-        registry.UnregisterByRoutingId(MakeRoutingId("route-game")) ==
-        xs::node::ProcessRegistryErrorCode::None);
-    XS_CHECK(registry.size() == 0U);
-    XS_CHECK(!registry.ContainsNodeId("Game0"));
+        manager.UnregisterByRoutingId(MakeRoutingId("route-game")) ==
+        xs::node::InnerNetworkSessionManagerErrorCode::None);
+    XS_CHECK(manager.size() == 0U);
+    XS_CHECK(!manager.ContainsNodeId("Game0"));
 
-    XS_CHECK(registry.UnregisterByNodeId("Game0") == xs::node::ProcessRegistryErrorCode::NodeNotFound);
+    XS_CHECK(manager.UnregisterByNodeId("Game0") == xs::node::InnerNetworkSessionManagerErrorCode::NodeNotFound);
 }
 
 void TestClearAndErrorMessages()
 {
-    xs::node::ProcessRegistry registry;
-    XS_CHECK(registry.Snapshot().empty());
+    xs::node::InnerNetworkSessionManager manager;
+    XS_CHECK(manager.Snapshot().empty());
 
     XS_CHECK(
-        xs::node::ProcessRegistryErrorMessage(xs::node::ProcessRegistryErrorCode::RoutingIdNotFound) ==
-        std::string_view("Process registry entry was not found for the routingId."));
+        xs::node::InnerNetworkSessionManagerErrorMessage(
+            xs::node::InnerNetworkSessionManagerErrorCode::RoutingIdNotFound) ==
+        std::string_view("Inner network session manager session was not found for the routingId."));
 
-    const xs::node::ProcessRegistryRegistration gate_registration =
+    const xs::node::InnerNetworkSessionRegistration gate_registration =
         MakeRegistration(xs::core::ProcessType::Gate, "Gate0", "");
-    XS_CHECK(registry.Register(gate_registration) == xs::node::ProcessRegistryErrorCode::None);
-    XS_CHECK(!registry.ContainsRoutingId(MakeRoutingId("")));
-    registry.Clear();
-    XS_CHECK(registry.size() == 0U);
-    XS_CHECK(registry.Snapshot().empty());
+    XS_CHECK(manager.Register(gate_registration) == xs::node::InnerNetworkSessionManagerErrorCode::None);
+    XS_CHECK(!manager.ContainsRoutingId(MakeRoutingId("")));
+    manager.Clear();
+    XS_CHECK(manager.size() == 0U);
+    XS_CHECK(manager.Snapshot().empty());
 }
 
 } // namespace
@@ -260,7 +269,7 @@ int main()
 
     if (g_failures != 0)
     {
-        std::cerr << g_failures << " process registry test(s) failed.\n";
+        std::cerr << g_failures << " inner network session manager test(s) failed.\n";
         return EXIT_FAILURE;
     }
 

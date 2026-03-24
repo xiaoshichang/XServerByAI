@@ -458,7 +458,7 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
     gm_node.StopAndJoin();
     XS_CHECK_MSG(gm_node.run_result() == xs::node::NodeErrorCode::None, gm_node.run_error().data());
 
-    const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
+    const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
     XS_CHECK(snapshot.size() == 1u);
     XS_CHECK(snapshot.front().process_type == xs::core::ProcessType::Game);
     XS_CHECK(snapshot.front().node_id == "Game0");
@@ -588,7 +588,7 @@ void TestGmNodeRejectsDuplicateNodeId()
     gm_node.StopAndJoin();
     XS_CHECK_MSG(gm_node.run_result() == xs::node::NodeErrorCode::None, gm_node.run_error().data());
 
-    const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
+    const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
     XS_CHECK(snapshot.size() == 1u);
     XS_CHECK(snapshot.front().node_id == "Gate0");
     XS_CHECK(snapshot.front().pid == 2001u);
@@ -710,10 +710,10 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     gm_node.StopAndJoin();
     XS_CHECK_MSG(gm_node.run_result() == xs::node::NodeErrorCode::None, gm_node.run_error().data());
 
-    const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
+    const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
     XS_CHECK(snapshot.size() == 2u);
 
-    const auto gate_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::ProcessRegistryEntry& entry) {
+    const auto gate_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::InnerNetworkSession& entry) {
         return entry.node_id == "Gate0";
     });
     XS_CHECK(gate_entry != snapshot.end());
@@ -724,7 +724,7 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
         XS_CHECK(ByteSpanEqualsText(gate_entry->routing_id, "gm-route-gate-success"));
     }
 
-    const auto game_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::ProcessRegistryEntry& entry) {
+    const auto game_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::InnerNetworkSession& entry) {
         return entry.node_id == "Game0";
     });
     XS_CHECK(game_entry != snapshot.end());

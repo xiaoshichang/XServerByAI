@@ -17,8 +17,8 @@ add_library(node STATIC
     NodeCommon.h
     NodeCreateHelper.cpp
     NodeCreateHelper.h
-    ProcessRegistry.cpp
-    ProcessRegistry.h
+    InnerNetworkSessionManager.cpp
+    InnerNetworkSessionManager.h
     ServerNode.cpp
     ServerNode.h
 )

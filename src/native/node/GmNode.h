@@ -1,7 +1,7 @@
 #pragma once
 
 #include "GmControlHttpService.h"
-#include "ProcessRegistry.h"
+#include "InnerNetworkSessionManager.h"
 #include "ServerNode.h"
 
 #include <cstdint>
@@ -19,7 +19,7 @@ class GmNode final : public ServerNode
     explicit GmNode(NodeCommandLineArgs args);
     ~GmNode() override;
 
-    [[nodiscard]] std::vector<ProcessRegistryEntry> registry_snapshot() const;
+    [[nodiscard]] std::vector<InnerNetworkSession> registry_snapshot() const;
 
   protected:
     [[nodiscard]] xs::core::ProcessType role_process_type() const noexcept override;

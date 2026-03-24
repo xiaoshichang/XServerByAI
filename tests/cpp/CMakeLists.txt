@@ -221,15 +221,18 @@ target_link_libraries(xs_node_gm_inner_service_tests PRIVATE node ipc net)
 add_test(NAME xs_node_gm_inner_service_tests COMMAND xs_node_gm_inner_service_tests)
 
 ###############################
-# xs_node_process_registry_tests
+# xs_node_inner_network_session_manager_tests
 ###############################
-add_executable(xs_node_process_registry_tests
-    node_process_registry_tests.cpp
+add_executable(xs_node_inner_network_session_manager_tests
+    node_inner_network_session_manager_tests.cpp
 )
 
-target_link_libraries(xs_node_process_registry_tests PRIVATE node)
+target_link_libraries(xs_node_inner_network_session_manager_tests PRIVATE node)
 
-add_test(NAME xs_node_process_registry_tests COMMAND xs_node_process_registry_tests)
+add_test(
+    NAME xs_node_inner_network_session_manager_tests
+    COMMAND xs_node_inner_network_session_manager_tests
+)
 
 ###############################
 # Managed runtime test assets

@@ -17,7 +17,7 @@
 namespace xs::node
 {
 
-enum class ProcessRegistryErrorCode : std::uint8_t
+enum class InnerNetworkSessionManagerErrorCode : std::uint8_t
 {
     None = 0,
     InvalidArgument,
@@ -31,7 +31,8 @@ enum class ProcessRegistryErrorCode : std::uint8_t
     RoutingIdNotFound,
 };
 
-[[nodiscard]] std::string_view ProcessRegistryErrorMessage(ProcessRegistryErrorCode code) noexcept;
+[[nodiscard]] std::string_view InnerNetworkSessionManagerErrorMessage(
+    InnerNetworkSessionManagerErrorCode code) noexcept;
 
 using RoutingID = std::vector<std::byte>;
 
@@ -76,29 +77,26 @@ struct InnerNetworkSession
     bool register_in_flight{false};
 };
 
-using ProcessRegistryRegistration = InnerNetworkSessionRegistration;
-using ProcessRegistryEntry = InnerNetworkSession;
-
-class ProcessRegistry final
+class InnerNetworkSessionManager final
 {
   public:
-    [[nodiscard]] ProcessRegistryErrorCode Register(const InnerNetworkSessionRegistration& registration);
-    [[nodiscard]] ProcessRegistryErrorCode UnregisterByNodeId(std::string_view node_id);
-    [[nodiscard]] ProcessRegistryErrorCode UnregisterByRoutingId(std::span<const std::byte> routing_id);
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode Register(const InnerNetworkSessionRegistration& registration);
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode UnregisterByNodeId(std::string_view node_id);
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode UnregisterByRoutingId(std::span<const std::byte> routing_id);
 
-    [[nodiscard]] ProcessRegistryErrorCode UpdateHeartbeatByNodeId(
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode UpdateHeartbeatByNodeId(
         std::string_view node_id,
         std::uint64_t last_heartbeat_at_unix_ms,
         const xs::net::LoadSnapshot& load);
-    [[nodiscard]] ProcessRegistryErrorCode UpdateHeartbeatByRoutingId(
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode UpdateHeartbeatByRoutingId(
         std::span<const std::byte> routing_id,
         std::uint64_t last_heartbeat_at_unix_ms,
         const xs::net::LoadSnapshot& load);
 
-    [[nodiscard]] ProcessRegistryErrorCode UpdateInnerNetworkReadyByNodeId(
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode UpdateInnerNetworkReadyByNodeId(
         std::string_view node_id,
         bool inner_network_ready);
-    [[nodiscard]] ProcessRegistryErrorCode UpdateInnerNetworkReadyByRoutingId(
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode UpdateInnerNetworkReadyByRoutingId(
         std::span<const std::byte> routing_id,
         bool inner_network_ready);
 

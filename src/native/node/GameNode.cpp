@@ -125,16 +125,18 @@ NodeErrorCode GameNode::OnInit()
     runtime_state_.managed_assembly_name = config->managed.assembly_name;
     runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
     inner_network_remote_sessions().Clear();
-    const ProcessRegistryErrorCode session_result =
+    const InnerNetworkSessionManagerErrorCode session_result =
         inner_network_remote_sessions().Register(
             {
                 .process_type = xs::core::ProcessType::Gm,
                 .node_id = std::string(kGmRemoteNodeId),
                 .inner_network_endpoint = ToNetEndpoint(gm_endpoint),
             });
-    if (session_result != ProcessRegistryErrorCode::None)
+    if (session_result != InnerNetworkSessionManagerErrorCode::None)
     {
-        return SetError(NodeErrorCode::NodeInitFailed, std::string(ProcessRegistryErrorMessage(session_result)));
+        return SetError(
+            NodeErrorCode::NodeInitFailed,
+            std::string(InnerNetworkSessionManagerErrorMessage(session_result)));
     }
 
     InnerNetworkOptions inner_options;

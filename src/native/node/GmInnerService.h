@@ -2,7 +2,7 @@
 
 #include "InnerNetwork.h"
 #include "NodeCommon.h"
-#include "ProcessRegistry.h"
+#include "InnerNetworkSessionManager.h"
 
 #include "Logging.h"
 #include "MainEventLoop.h"
@@ -47,10 +47,10 @@ class GmInnerService final
     [[nodiscard]] NodeErrorCode Run();
     [[nodiscard]] NodeErrorCode Uninit();
 
-    [[nodiscard]] ProcessRegistry& process_registry() noexcept;
-    [[nodiscard]] const ProcessRegistry& process_registry() const noexcept;
-    [[nodiscard]] ProcessRegistryErrorCode RegisterProcess(ProcessRegistryRegistration registration);
-    [[nodiscard]] ProcessRegistryErrorCode UnregisterProcessByNodeId(std::string_view node_id);
+    [[nodiscard]] InnerNetworkSessionManager& inner_network_session_manager() noexcept;
+    [[nodiscard]] const InnerNetworkSessionManager& inner_network_session_manager() const noexcept;
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode RegisterProcess(InnerNetworkSessionRegistration registration);
+    [[nodiscard]] InnerNetworkSessionManagerErrorCode UnregisterProcessByNodeId(std::string_view node_id);
     void HandleInnerMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
@@ -81,7 +81,7 @@ class GmInnerService final
     xs::core::Logger& logger_;
     InnerNetwork& inner_network_;
     GmInnerServiceOptions options_{};
-    ProcessRegistry process_registry_{};
+    InnerNetworkSessionManager inner_network_session_manager_{};
     std::unordered_map<std::string, std::uint64_t> invalidated_routing_ids_{};
     std::string last_error_message_{};
     xs::core::TimerID timeout_scan_timer_id_{0};

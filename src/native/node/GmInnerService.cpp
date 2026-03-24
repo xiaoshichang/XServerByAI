@@ -187,25 +187,25 @@ NodeErrorCode GmInnerService::Uninit()
     return NodeErrorCode::None;
 }
 
-ProcessRegistry& GmInnerService::process_registry() noexcept
+InnerNetworkSessionManager& GmInnerService::inner_network_session_manager() noexcept
 {
-    return process_registry_;
+    return inner_network_session_manager_;
 }
 
-const ProcessRegistry& GmInnerService::process_registry() const noexcept
+const InnerNetworkSessionManager& GmInnerService::inner_network_session_manager() const noexcept
 {
-    return process_registry_;
+    return inner_network_session_manager_;
 }
 
-ProcessRegistryErrorCode GmInnerService::RegisterProcess(ProcessRegistryRegistration registration)
+InnerNetworkSessionManagerErrorCode GmInnerService::RegisterProcess(InnerNetworkSessionRegistration registration)
 {
     if (registration.last_heartbeat_at_unix_ms == 0U)
     {
         registration.last_heartbeat_at_unix_ms = CurrentUnixTimeMilliseconds();
     }
 
-    const ProcessRegistryErrorCode result = process_registry_.Register(registration);
-    if (result == ProcessRegistryErrorCode::None && !registration.routing_id.empty())
+    const InnerNetworkSessionManagerErrorCode result = inner_network_session_manager_.Register(registration);
+    if (result == InnerNetworkSessionManagerErrorCode::None && !registration.routing_id.empty())
     {
         invalidated_routing_ids_.erase(MakeRoutingKey(registration.routing_id));
     }
@@ -213,12 +213,12 @@ ProcessRegistryErrorCode GmInnerService::RegisterProcess(ProcessRegistryRegistra
     return result;
 }
 
-ProcessRegistryErrorCode GmInnerService::UnregisterProcessByNodeId(std::string_view node_id)
+InnerNetworkSessionManagerErrorCode GmInnerService::UnregisterProcessByNodeId(std::string_view node_id)
 {
-    const ProcessRegistryEntry* entry = process_registry_.FindByNodeId(node_id);
+    const InnerNetworkSession* entry = inner_network_session_manager_.FindByNodeId(node_id);
     RoutingID routing_id = entry != nullptr ? entry->routing_id : RoutingID{};
-    const ProcessRegistryErrorCode result = process_registry_.UnregisterByNodeId(node_id);
-    if (result == ProcessRegistryErrorCode::None && !routing_id.empty())
+    const InnerNetworkSessionManagerErrorCode result = inner_network_session_manager_.UnregisterByNodeId(node_id);
+    if (result == InnerNetworkSessionManagerErrorCode::None && !routing_id.empty())
     {
         RememberInvalidatedRoutingId(routing_id, CurrentUnixTimeMilliseconds());
     }
@@ -437,7 +437,7 @@ void GmInnerService::HandleHeartbeatMessage(
         return;
     }
 
-    const ProcessRegistryEntry* entry = process_registry_.FindByRoutingId(routing_id);
+    const InnerNetworkSession* entry = inner_network_session_manager_.FindByRoutingId(routing_id);
     if (entry == nullptr)
     {
         const bool invalidated = ContainsInvalidatedRoutingId(routing_id);
@@ -451,15 +451,15 @@ void GmInnerService::HandleHeartbeatMessage(
         return;
     }
 
-    const ProcessRegistryErrorCode update_result =
-        process_registry_.UpdateHeartbeatByRoutingId(routing_id, now_unix_ms, request.load);
-    if (update_result != ProcessRegistryErrorCode::None)
+    const InnerNetworkSessionManagerErrorCode update_result =
+        inner_network_session_manager_.UpdateHeartbeatByRoutingId(routing_id, now_unix_ms, request.load);
+    if (update_result != InnerNetworkSessionManagerErrorCode::None)
     {
         send_heartbeat_error(
             kInnerNodeNotRegistered,
             kInnerNodeNotRegisteredName,
             true,
-            "GM inner service lost the active registry entry while handling heartbeat.");
+            "GM inner service lost the active inner network session while handling heartbeat.");
         return;
     }
 
@@ -506,8 +506,8 @@ void GmInnerService::HandleTimeoutScan()
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
     PruneExpiredInvalidatedRoutingIds(now_unix_ms);
 
-    const std::vector<ProcessRegistryEntry> snapshot = process_registry_.Snapshot();
-    for (const ProcessRegistryEntry& entry : snapshot)
+    const std::vector<InnerNetworkSession> snapshot = inner_network_session_manager_.Snapshot();
+    for (const InnerNetworkSession& entry : snapshot)
     {
         if (entry.last_heartbeat_at_unix_ms > now_unix_ms)
         {
@@ -520,8 +520,9 @@ void GmInnerService::HandleTimeoutScan()
             continue;
         }
 
-        const ProcessRegistryErrorCode unregister_result = process_registry_.UnregisterByNodeId(entry.node_id);
-        if (unregister_result != ProcessRegistryErrorCode::None)
+        const InnerNetworkSessionManagerErrorCode unregister_result =
+            inner_network_session_manager_.UnregisterByNodeId(entry.node_id);
+        if (unregister_result != InnerNetworkSessionManagerErrorCode::None)
         {
             continue;
         }
@@ -535,7 +536,7 @@ void GmInnerService::HandleTimeoutScan()
         };
         Log(
             xs::core::LogLevel::Warn,
-            "GM inner service evicted a timed-out process registry entry.",
+            "GM inner service evicted a timed-out inner network session.",
             context,
             kInnerChannelInvalid,
             kInnerChannelInvalidName);

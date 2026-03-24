@@ -713,13 +713,13 @@ void TestGateNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
     }));
 
     XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gm_node]() {
-        const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
+        const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
         return snapshot.size() == 1u && snapshot.front().node_id == "Gate0";
     }));
 
     std::uint64_t initial_heartbeat_at_unix_ms = 0U;
     {
-        const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
+        const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
         XS_CHECK(snapshot.size() == 1u);
         if (snapshot.size() == 1u)
         {
@@ -731,7 +731,7 @@ void TestGateNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
     }
 
     XS_CHECK(WaitUntil(std::chrono::seconds(7), [&gm_node, initial_heartbeat_at_unix_ms]() {
-        const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
+        const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
         return snapshot.size() == 1u && snapshot.front().last_heartbeat_at_unix_ms > initial_heartbeat_at_unix_ms;
     }));
     std::this_thread::sleep_for(std::chrono::milliseconds(250));

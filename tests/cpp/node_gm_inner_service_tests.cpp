@@ -98,12 +98,12 @@ void CleanupTestDirectory(const std::filesystem::path& path)
     return now_unix_ms > 0 ? static_cast<std::uint64_t>(now_unix_ms) : 0U;
 }
 
-[[nodiscard]] xs::node::ProcessRegistryRegistration MakeRegistration(
+[[nodiscard]] xs::node::InnerNetworkSessionRegistration MakeRegistration(
     std::string node_id,
     std::string routing_id,
     std::uint64_t last_heartbeat_at_unix_ms)
 {
-    return xs::node::ProcessRegistryRegistration{
+    return xs::node::InnerNetworkSessionRegistration{
         .process_type = xs::core::ProcessType::Game,
         .node_id = std::move(node_id),
         .pid = 1001U,
@@ -224,7 +224,7 @@ void TestTimeoutScanEvictsExpiredEntry()
         });
 
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
-    const xs::node::ProcessRegistryRegistration expired_registration =
+    const xs::node::InnerNetworkSessionRegistration expired_registration =
         MakeRegistration("Game0", "route-expired", now_unix_ms - 100U);
 
     xs::core::MainEventLoopHooks hooks;
@@ -232,7 +232,8 @@ void TestTimeoutScanEvictsExpiredEntry()
         if (inner_network.Init() != xs::node::NodeErrorCode::None ||
             inner_network.Run() != xs::node::NodeErrorCode::None ||
             service.Init() != xs::node::NodeErrorCode::None ||
-            service.RegisterProcess(expired_registration) != xs::node::ProcessRegistryErrorCode::None ||
+            service.RegisterProcess(expired_registration) !=
+                xs::node::InnerNetworkSessionManagerErrorCode::None ||
             service.Run() != xs::node::NodeErrorCode::None)
         {
             if (error_message != nullptr)
@@ -266,7 +267,7 @@ void TestTimeoutScanEvictsExpiredEntry()
     const xs::core::MainEventLoopErrorCode run_result = event_loop.Run(std::move(hooks), &error_message);
     XS_CHECK_MSG(run_result == xs::core::MainEventLoopErrorCode::None, error_message.c_str());
 
-    XS_CHECK(!service.process_registry().ContainsNodeId("Game0"));
+    XS_CHECK(!service.inner_network_session_manager().ContainsNodeId("Game0"));
     XS_CHECK(service.ContainsInvalidatedRoutingId(MakeRoutingId("route-expired")));
 
     CleanupTestDirectory(base_path);
@@ -317,7 +318,7 @@ void TestHeartbeatResponsesOverInnerNetwork()
             service.Init() != xs::node::NodeErrorCode::None ||
             inner_network.Run() != xs::node::NodeErrorCode::None ||
             service.RegisterProcess(MakeRegistration("Game0", "route-active", CurrentUnixTimeMilliseconds())) !=
-                xs::node::ProcessRegistryErrorCode::None ||
+                xs::node::InnerNetworkSessionManagerErrorCode::None ||
             service.Run() != xs::node::NodeErrorCode::None)
         {
             if (error_message != nullptr)
@@ -455,7 +456,8 @@ void TestHeartbeatResponsesOverInnerNetwork()
         XS_CHECK_MSG(false, response.label.c_str());
     }
 
-    const xs::node::ProcessRegistryEntry* active_entry = service.process_registry().FindByNodeId("Game0");
+    const xs::node::InnerNetworkSession* active_entry =
+        service.inner_network_session_manager().FindByNodeId("Game0");
     XS_CHECK(active_entry != nullptr);
     if (active_entry != nullptr)
     {

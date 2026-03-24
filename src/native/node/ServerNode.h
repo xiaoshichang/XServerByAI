@@ -6,7 +6,7 @@
 #include "InnerNetwork.h"
 #include "Logging.h"
 #include "MainEventLoop.h"
-#include "ProcessRegistry.h"
+#include "InnerNetworkSessionManager.h"
 
 #include <cstdint>
 #include <memory>
@@ -46,8 +46,8 @@ class ServerNode
     [[nodiscard]] xs::core::MainEventLoop& event_loop() const noexcept;
     [[nodiscard]] InnerNetwork* inner_network() noexcept;
     [[nodiscard]] const InnerNetwork* inner_network() const noexcept;
-    [[nodiscard]] ProcessRegistry& inner_network_remote_sessions() noexcept;
-    [[nodiscard]] const ProcessRegistry& inner_network_remote_sessions() const noexcept;
+    [[nodiscard]] InnerNetworkSessionManager& inner_network_remote_sessions() noexcept;
+    [[nodiscard]] const InnerNetworkSessionManager& inner_network_remote_sessions() const noexcept;
     [[nodiscard]] NodeErrorCode InitInnerNetwork(InnerNetworkOptions options);
     [[nodiscard]] NodeErrorCode RunInnerNetwork();
     [[nodiscard]] NodeErrorCode UninitInnerNetwork();
@@ -71,7 +71,7 @@ class ServerNode
     std::unique_ptr<xs::core::Logger> logger_{};
     std::unique_ptr<xs::core::MainEventLoop> event_loop_{};
     std::unique_ptr<InnerNetwork> inner_network_{};
-    ProcessRegistry inner_network_remote_sessions_{};
+    InnerNetworkSessionManager inner_network_remote_sessions_{};
     std::string last_error_message_{};
     bool initialized_{false};
 };

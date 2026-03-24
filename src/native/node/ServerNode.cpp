@@ -436,12 +436,12 @@ const InnerNetwork* ServerNode::inner_network() const noexcept
     return inner_network_.get();
 }
 
-ProcessRegistry& ServerNode::inner_network_remote_sessions() noexcept
+InnerNetworkSessionManager& ServerNode::inner_network_remote_sessions() noexcept
 {
     return inner_network_remote_sessions_;
 }
 
-const ProcessRegistry& ServerNode::inner_network_remote_sessions() const noexcept
+const InnerNetworkSessionManager& ServerNode::inner_network_remote_sessions() const noexcept
 {
     return inner_network_remote_sessions_;
 }
