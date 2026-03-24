@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Logging.h"
+#include "MainEventLoop.h"
+#include "ZmqActiveConnector.h"
 #include "message/InnerMessageTypes.h"
 
 #include <cstddef>
@@ -32,9 +35,9 @@ enum class ProcessRegistryErrorCode : std::uint8_t
 
 using RoutingID = std::vector<std::byte>;
 
-struct ProcessRegistryRegistration
+struct InnerNetworkSessionRegistration
 {
-    std::uint16_t process_type{0};
+    xs::core::ProcessType process_type{xs::core::ProcessType::Gm};
     std::string node_id{};
     std::uint32_t pid{0};
     std::uint64_t started_at_unix_ms{0};
@@ -47,9 +50,9 @@ struct ProcessRegistryRegistration
     bool inner_network_ready{false};
 };
 
-struct ProcessRegistryEntry
+struct InnerNetworkSession
 {
-    xs::net::InnerProcessType process_type{xs::net::InnerProcessType::Gate};
+    xs::core::ProcessType process_type{xs::core::ProcessType::Gm};
     std::string node_id{};
     std::uint32_t pid{0};
     std::uint64_t started_at_unix_ms{0};
@@ -60,12 +63,26 @@ struct ProcessRegistryEntry
     RoutingID routing_id{};
     std::uint64_t last_heartbeat_at_unix_ms{0};
     bool inner_network_ready{false};
+    xs::ipc::ZmqConnectionState connection_state{xs::ipc::ZmqConnectionState::Stopped};
+    std::uint32_t next_seq{1U};
+    std::uint32_t register_seq{0U};
+    std::uint32_t heartbeat_seq{0U};
+    std::uint32_t heartbeat_interval_ms{0U};
+    std::uint32_t heartbeat_timeout_ms{0U};
+    std::uint64_t last_server_now_unix_ms{0U};
+    xs::core::TimerID heartbeat_timer_id{0};
+    std::string last_protocol_error{};
+    bool registered{false};
+    bool register_in_flight{false};
 };
+
+using ProcessRegistryRegistration = InnerNetworkSessionRegistration;
+using ProcessRegistryEntry = InnerNetworkSession;
 
 class ProcessRegistry final
 {
   public:
-    [[nodiscard]] ProcessRegistryErrorCode Register(const ProcessRegistryRegistration& registration);
+    [[nodiscard]] ProcessRegistryErrorCode Register(const InnerNetworkSessionRegistration& registration);
     [[nodiscard]] ProcessRegistryErrorCode UnregisterByNodeId(std::string_view node_id);
     [[nodiscard]] ProcessRegistryErrorCode UnregisterByRoutingId(std::span<const std::byte> routing_id);
 
@@ -85,21 +102,20 @@ class ProcessRegistry final
         std::span<const std::byte> routing_id,
         bool inner_network_ready);
 
-    [[nodiscard]] const ProcessRegistryEntry* FindByNodeId(std::string_view node_id) const;
-    [[nodiscard]] const ProcessRegistryEntry* FindByRoutingId(std::span<const std::byte> routing_id) const;
+    [[nodiscard]] const InnerNetworkSession* FindByNodeId(std::string_view node_id) const;
+    [[nodiscard]] const InnerNetworkSession* FindByRoutingId(std::span<const std::byte> routing_id) const;
+    [[nodiscard]] InnerNetworkSession* FindMutableByNodeId(std::string_view node_id);
+    [[nodiscard]] InnerNetworkSession* FindMutableByRoutingId(std::span<const std::byte> routing_id);
 
     [[nodiscard]] bool ContainsNodeId(std::string_view node_id) const;
     [[nodiscard]] bool ContainsRoutingId(std::span<const std::byte> routing_id) const;
-    [[nodiscard]] std::vector<ProcessRegistryEntry> Snapshot() const;
+    [[nodiscard]] std::vector<InnerNetworkSession> Snapshot() const;
     [[nodiscard]] std::size_t size() const noexcept;
 
     void Clear() noexcept;
 
   private:
-    [[nodiscard]] ProcessRegistryEntry* FindMutableByNodeId(std::string_view node_id);
-    [[nodiscard]] ProcessRegistryEntry* FindMutableByRoutingId(std::span<const std::byte> routing_id);
-
-    std::map<std::string, ProcessRegistryEntry, std::less<>> entries_by_node_id_{};
+    std::map<std::string, InnerNetworkSession, std::less<>> entries_by_node_id_{};
     std::unordered_map<std::string, std::string> node_id_by_routing_key_{};
 };
 

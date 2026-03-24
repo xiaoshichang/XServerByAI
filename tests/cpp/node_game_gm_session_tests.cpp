@@ -696,7 +696,7 @@ void TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
         XS_CHECK(snapshot.size() == 1u);
         if (snapshot.size() == 1u)
         {
-            XS_CHECK(snapshot.front().process_type == xs::net::InnerProcessType::Game);
+            XS_CHECK(snapshot.front().process_type == xs::core::ProcessType::Game);
             XS_CHECK(snapshot.front().inner_network_endpoint.port == 7100u);
             XS_CHECK(snapshot.front().last_heartbeat_at_unix_ms != 0U);
             initial_heartbeat_at_unix_ms = snapshot.front().last_heartbeat_at_unix_ms;
@@ -707,6 +707,7 @@ void TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
         const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
         return snapshot.size() == 1u && snapshot.front().last_heartbeat_at_unix_ms > initial_heartbeat_at_unix_ms;
     }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
     game_node.StopAndJoin();
     XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());

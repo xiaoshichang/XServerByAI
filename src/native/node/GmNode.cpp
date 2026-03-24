@@ -1,12 +1,15 @@
 #include "GmNode.h"
 
 #include "BinarySerialization.h"
+#include "InnerNetwork.h"
 #include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
 
 #include <array>
+#include <chrono>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -19,9 +22,11 @@ namespace
 
 inline constexpr std::uint32_t kDefaultHeartbeatIntervalMs = 5000u;
 inline constexpr std::uint32_t kDefaultHeartbeatTimeoutMs = 15000u;
+inline constexpr auto kDefaultTimeoutScanInterval = std::chrono::milliseconds(1000);
 
 inline constexpr std::int32_t kInnerProcessTypeInvalid = 3000;
 inline constexpr std::int32_t kInnerNodeIdConflict = 3001;
+inline constexpr std::int32_t kInnerNodeNotRegistered = 3003;
 inline constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
 inline constexpr std::int32_t kInnerChannelInvalid = 3004;
 inline constexpr std::int32_t kInnerRequestInvalid = 3005;
@@ -54,10 +59,22 @@ std::string BuildPacketFlagsText(std::uint16_t flags)
     return std::to_string(flags);
 }
 
+std::string ToString(std::uint64_t value)
+{
+    return std::to_string(value);
+}
+
 std::uint64_t CurrentServerNowUnixMs() noexcept
 {
     const std::int64_t now = xs::core::ToUnixTimeMilliseconds(xs::core::UtcNow());
     return now < 0 ? 0u : static_cast<std::uint64_t>(now);
+}
+
+std::string MakeRoutingKey(std::span<const std::byte> routing_id)
+{
+    return std::string(
+        reinterpret_cast<const char*>(routing_id.data()),
+        reinterpret_cast<const char*>(routing_id.data() + routing_id.size()));
 }
 
 bool HasPacketFlag(std::uint16_t flags, xs::net::PacketFlag flag) noexcept
@@ -94,6 +111,37 @@ bool TryReadRawPacketHeader(
 
     *header = parsed_header;
     return true;
+}
+
+bool IsHeartbeatRequestPacket(const xs::net::PacketHeader& header) noexcept
+{
+    return header.magic == xs::net::kPacketMagic &&
+           header.version == xs::net::kPacketVersion &&
+           header.msg_id == xs::net::kInnerHeartbeatMsgId;
+}
+
+std::uint16_t HeartbeatResponseFlags(bool is_error) noexcept
+{
+    std::uint16_t flags = static_cast<std::uint16_t>(xs::net::PacketFlag::Response);
+    if (is_error)
+    {
+        flags |= static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
+    }
+
+    return flags;
+}
+
+std::optional<xs::core::ProcessType> ToCoreProcessType(std::uint16_t process_type) noexcept
+{
+    switch (static_cast<xs::net::InnerProcessType>(process_type))
+    {
+    case xs::net::InnerProcessType::Gate:
+        return xs::core::ProcessType::Gate;
+    case xs::net::InnerProcessType::Game:
+        return xs::core::ProcessType::Game;
+    }
+
+    return std::nullopt;
 }
 
 std::string_view InnerErrorName(std::int32_t error_code) noexcept
@@ -208,12 +256,7 @@ GmNode::~GmNode() = default;
 
 std::vector<ProcessRegistryEntry> GmNode::registry_snapshot() const
 {
-    if (inner_service_ == nullptr)
-    {
-        return {};
-    }
-
-    return inner_service_->process_registry().Snapshot();
+    return inner_network_remote_sessions().Snapshot();
 }
 
 xs::core::ProcessType GmNode::role_process_type() const noexcept
@@ -257,28 +300,17 @@ NodeErrorCode GmNode::OnInit()
     options.mode = InnerNetworkMode::PassiveListener;
     options.local_endpoint = BuildTcpEndpoint(endpoint);
 
-    inner_network_ = std::make_unique<InnerNetwork>(event_loop(), logger(), std::move(options));
+    invalidated_routing_ids_.clear();
+    timeout_scan_timer_id_ = 0;
+    inner_network_remote_sessions().Clear();
 
-    const NodeErrorCode init_result = inner_network_->Init();
+    const NodeErrorCode init_result = InitInnerNetwork(std::move(options));
     if (init_result != NodeErrorCode::None)
     {
-        const std::string error_message = std::string(inner_network_->last_error_message());
-        inner_network_.reset();
-        return SetError(init_result, error_message);
+        return init_result;
     }
 
-    inner_service_ = std::make_unique<GmInnerService>(event_loop(), logger(), *inner_network_);
-    const NodeErrorCode inner_init_result = inner_service_->Init();
-    if (inner_init_result != NodeErrorCode::None)
-    {
-        const std::string error_message = std::string(inner_service_->last_error_message());
-        inner_service_.reset();
-        (void)inner_network_->Uninit();
-        inner_network_.reset();
-        return SetError(inner_init_result, error_message);
-    }
-
-    inner_network_->SetMessageHandler([this](std::span<const std::byte> routing_id, std::span<const std::byte> payload) {
+    inner_network()->SetMessageHandler([this](std::span<const std::byte> routing_id, std::span<const std::byte> payload) {
         HandleInnerMessage(routing_id, payload);
     });
 
@@ -287,9 +319,8 @@ NodeErrorCode GmNode::OnInit()
     control_options.node_id = std::string(node_id());
     control_options.status_provider = [this]() {
         GmControlHttpStatusSnapshot snapshot;
-        snapshot.inner_network_endpoint = inner_network_ != nullptr ? std::string(inner_network_->bound_endpoint()) : "";
-        snapshot.registered_process_count =
-            inner_service_ != nullptr ? static_cast<std::uint64_t>(inner_service_->process_registry().size()) : 0u;
+        snapshot.inner_network_endpoint = inner_network() != nullptr ? std::string(inner_network()->bound_endpoint()) : "";
+        snapshot.registered_process_count = static_cast<std::uint64_t>(inner_network_remote_sessions().size());
         snapshot.running = true;
         return snapshot;
     };
@@ -303,9 +334,8 @@ NodeErrorCode GmNode::OnInit()
     {
         const std::string error_message = std::string(control_http_service_->last_error_message());
         control_http_service_.reset();
-        inner_service_.reset();
-        (void)inner_network_->Uninit();
-        inner_network_.reset();
+        (void)UninitInnerNetwork();
+        inner_network_remote_sessions().Clear();
         return SetError(control_init_result, error_message);
     }
 
@@ -315,37 +345,44 @@ NodeErrorCode GmNode::OnInit()
 
 NodeErrorCode GmNode::OnRun()
 {
-    if (inner_network_ == nullptr || inner_service_ == nullptr || control_http_service_ == nullptr)
+    if (inner_network() == nullptr || control_http_service_ == nullptr)
     {
         return SetError(NodeErrorCode::InvalidArgument, "GM node must be initialized before Run().");
     }
 
-    const NodeErrorCode run_result = inner_network_->Run();
+    const NodeErrorCode run_result = RunInnerNetwork();
     if (run_result != NodeErrorCode::None)
     {
-        return SetError(run_result, std::string(inner_network_->last_error_message()));
+        return run_result;
     }
 
-    const NodeErrorCode inner_run_result = inner_service_->Run();
-    if (inner_run_result != NodeErrorCode::None)
+    const xs::core::TimerCreateResult timeout_scan_result =
+        event_loop().timers().CreateRepeating(kDefaultTimeoutScanInterval, [this]() {
+            HandleTimeoutScan();
+        });
+    if (!xs::core::IsTimerID(timeout_scan_result))
     {
-        const std::string error_message = std::string(inner_service_->last_error_message());
-        (void)inner_network_->Uninit();
-        return SetError(inner_run_result, error_message);
+        (void)UninitInnerNetwork();
+        return SetError(
+            NodeErrorCode::NodeRunFailed,
+            "Failed to create GM timeout scan timer: " +
+                std::string(xs::core::TimerErrorMessage(xs::core::TimerErrorFromCreateResult(timeout_scan_result))));
     }
+    timeout_scan_timer_id_ = timeout_scan_result;
 
     const NodeErrorCode control_run_result = control_http_service_->Run();
     if (control_run_result != NodeErrorCode::None)
     {
         const std::string error_message = std::string(control_http_service_->last_error_message());
-        (void)inner_service_->Uninit();
-        (void)inner_network_->Uninit();
+        (void)event_loop().timers().Cancel(timeout_scan_timer_id_);
+        timeout_scan_timer_id_ = 0;
+        (void)UninitInnerNetwork();
         return SetError(control_run_result, error_message);
     }
 
     const std::array<xs::core::LogContextField, 3> runtime_context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"innerNetworkEndpoint", std::string(inner_network_->bound_endpoint())},
+        xs::core::LogContextField{"innerNetworkEndpoint", std::string(inner_network()->bound_endpoint())},
         xs::core::LogContextField{"controlNetworkEndpoint", std::string(control_http_service_->bound_endpoint())},
     };
     logger().Log(xs::core::LogLevel::Info, "runtime", "GM node entered runtime state.", runtime_context);
@@ -356,6 +393,12 @@ NodeErrorCode GmNode::OnRun()
 
 NodeErrorCode GmNode::OnUninit()
 {
+    if (timeout_scan_timer_id_ > 0)
+    {
+        (void)event_loop().timers().Cancel(timeout_scan_timer_id_);
+        timeout_scan_timer_id_ = 0;
+    }
+
     if (control_http_service_ != nullptr)
     {
         const NodeErrorCode result = control_http_service_->Uninit();
@@ -367,27 +410,16 @@ NodeErrorCode GmNode::OnUninit()
         }
     }
 
-    if (inner_service_ != nullptr)
+    if (inner_network() != nullptr)
     {
-        const NodeErrorCode result = inner_service_->Uninit();
-        const std::string error_message = std::string(inner_service_->last_error_message());
-        inner_service_.reset();
+        const NodeErrorCode result = UninitInnerNetwork();
         if (result != NodeErrorCode::None)
         {
-            return SetError(result, error_message);
+            return result;
         }
     }
 
-    if (inner_network_ != nullptr)
-    {
-        const NodeErrorCode result = inner_network_->Uninit();
-        const std::string error_message = std::string(inner_network_->last_error_message());
-        inner_network_.reset();
-        if (result != NodeErrorCode::None)
-        {
-            return SetError(result, error_message);
-        }
-    }
+    invalidated_routing_ids_.clear();
 
     ClearError();
     return NodeErrorCode::None;
@@ -397,21 +429,16 @@ void GmNode::HandleInnerMessage(
     std::span<const std::byte> routing_id,
     std::span<const std::byte> payload)
 {
-    if (inner_service_ == nullptr)
-    {
-        return;
-    }
-
     xs::net::PacketHeader raw_header{};
     if (!TryReadRawPacketHeader(payload, &raw_header))
     {
-        inner_service_->HandleInnerMessage(routing_id, payload);
+        HandleHeartbeatMessage(routing_id, payload);
         return;
     }
 
     if (raw_header.msg_id == xs::net::kInnerHeartbeatMsgId)
     {
-        inner_service_->HandleInnerMessage(routing_id, payload);
+        HandleHeartbeatMessage(routing_id, payload);
         return;
     }
 
@@ -428,7 +455,6 @@ void GmNode::HandleInnerMessage(
 
     if (packet.header.msg_id != xs::net::kInnerRegisterMsgId)
     {
-        inner_service_->HandleInnerMessage(routing_id, payload);
         return;
     }
 
@@ -465,7 +491,12 @@ void GmNode::HandleInnerMessage(
             return false;
         }
 
-        const NodeErrorCode send_result = inner_network_->Send(routing_id, response_buffer);
+        if (inner_network() == nullptr)
+        {
+            return false;
+        }
+
+        const NodeErrorCode send_result = inner_network()->Send(routing_id, response_buffer);
         if (send_result != NodeErrorCode::None)
         {
             std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, response_buffer.size());
@@ -539,8 +570,15 @@ void GmNode::HandleInnerMessage(
     }
 
     const std::uint64_t server_now_unix_ms = CurrentServerNowUnixMs();
+    const std::optional<xs::core::ProcessType> process_type = ToCoreProcessType(request.process_type);
+    if (!process_type.has_value())
+    {
+        send_error_response(kInnerProcessTypeInvalid, &request);
+        return;
+    }
+
     ProcessRegistryRegistration registration{
-        .process_type = request.process_type,
+        .process_type = *process_type,
         .node_id = request.node_id,
         .pid = request.pid,
         .started_at_unix_ms = request.started_at_unix_ms,
@@ -553,7 +591,7 @@ void GmNode::HandleInnerMessage(
         .inner_network_ready = false,
     };
 
-    const ProcessRegistryErrorCode register_result = inner_service_->RegisterProcess(std::move(registration));
+    const ProcessRegistryErrorCode register_result = inner_network_remote_sessions().Register(std::move(registration));
     if (register_result != ProcessRegistryErrorCode::None)
     {
         const std::optional<std::int32_t> error_code = MapProcessRegistryErrorToInnerError(register_result);
@@ -570,6 +608,18 @@ void GmNode::HandleInnerMessage(
         }
 
         return;
+    }
+
+    invalidated_routing_ids_.erase(MakeRoutingKey(routing_id));
+    InnerNetworkSession* session = inner_network_remote_sessions().FindMutableByNodeId(request.node_id);
+    if (session != nullptr)
+    {
+        session->registered = true;
+        session->connection_state = ipc::ZmqConnectionState::Connected;
+        session->heartbeat_interval_ms = kDefaultHeartbeatIntervalMs;
+        session->heartbeat_timeout_ms = kDefaultHeartbeatTimeoutMs;
+        session->last_server_now_unix_ms = server_now_unix_ms;
+        session->last_protocol_error.clear();
     }
 
     const xs::net::RegisterSuccessResponse response{
@@ -596,6 +646,289 @@ void GmNode::HandleInnerMessage(
 
     std::vector<xs::core::LogContextField> context = BuildRegisterContext(routing_id, packet.header.seq, &request);
     logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted register request.", context);
+}
+
+void GmNode::HandleHeartbeatMessage(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
+    if (routing_id.empty())
+    {
+        return;
+    }
+
+    const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
+    PruneExpiredInvalidatedRoutingIds(now_unix_ms);
+
+    xs::net::PacketHeader raw_header{};
+    if (!TryReadRawPacketHeader(payload, &raw_header))
+    {
+        const std::array<xs::core::LogContextField, 2> context{
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM inner service ignored a payload without a complete packet header.", context);
+        return;
+    }
+
+    if (!IsHeartbeatRequestPacket(raw_header))
+    {
+        return;
+    }
+
+    auto send_heartbeat_error = [this, routing_id, &raw_header](
+                                    std::int32_t error_code,
+                                    std::string_view error_name,
+                                    bool require_full_register,
+                                    std::string_view log_message) {
+        const xs::net::HeartbeatErrorResponse response{
+            .error_code = error_code,
+            .retry_after_ms = 0U,
+            .require_full_register = require_full_register,
+        };
+        std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> response_body{};
+        if (xs::net::EncodeHeartbeatErrorResponse(response, response_body) != xs::net::HeartbeatCodecErrorCode::None)
+        {
+            return;
+        }
+
+        const xs::net::PacketHeader response_header = xs::net::MakePacketHeader(
+            xs::net::kInnerHeartbeatMsgId,
+            raw_header.seq,
+            HeartbeatResponseFlags(true),
+            static_cast<std::uint32_t>(response_body.size()));
+        std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kHeartbeatErrorResponseSize> response_packet{};
+        if (xs::net::EncodePacket(response_header, response_body, response_packet) != xs::net::PacketCodecErrorCode::None)
+        {
+            return;
+        }
+
+        if (inner_network() == nullptr)
+        {
+            return;
+        }
+
+        const NodeErrorCode send_result = inner_network()->Send(routing_id, response_packet);
+        const std::array<xs::core::LogContextField, 2> context{
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"seq", ToString(static_cast<std::uint64_t>(raw_header.seq))},
+        };
+        if (send_result != NodeErrorCode::None)
+        {
+            logger().Log(
+                xs::core::LogLevel::Warn,
+                "inner",
+                "GM inner service failed to send heartbeat error response.",
+                context,
+                error_code,
+                error_name);
+            return;
+        }
+
+        logger().Log(xs::core::LogLevel::Warn, "inner", log_message, context, error_code, error_name);
+    };
+
+    if (!xs::net::IsValidPacketFlags(raw_header.flags) ||
+        raw_header.flags != 0U ||
+        raw_header.seq == xs::net::kPacketSeqNone)
+    {
+        send_heartbeat_error(
+            kInnerRequestInvalid,
+            "Inner.RequestInvalid",
+            false,
+            "GM inner service rejected an invalid heartbeat request.");
+        return;
+    }
+
+    xs::net::PacketView packet{};
+    const xs::net::PacketCodecErrorCode decode_packet_result = xs::net::DecodePacket(payload, &packet);
+    if (decode_packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        send_heartbeat_error(
+            kInnerRequestInvalid,
+            "Inner.RequestInvalid",
+            false,
+            "GM inner service rejected a malformed heartbeat packet.");
+        return;
+    }
+
+    xs::net::HeartbeatRequest request{};
+    const xs::net::HeartbeatCodecErrorCode decode_request_result =
+        xs::net::DecodeHeartbeatRequest(packet.payload, &request);
+    if (decode_request_result != xs::net::HeartbeatCodecErrorCode::None)
+    {
+        send_heartbeat_error(
+            kInnerRequestInvalid,
+            "Inner.RequestInvalid",
+            false,
+            "GM inner service rejected a malformed heartbeat payload.");
+        return;
+    }
+
+    InnerNetworkSession* session = inner_network_remote_sessions().FindMutableByRoutingId(routing_id);
+    if (session == nullptr)
+    {
+        const bool invalidated = ContainsInvalidatedRoutingId(routing_id);
+        send_heartbeat_error(
+            invalidated ? kInnerChannelInvalid : kInnerNodeNotRegistered,
+            invalidated ? "Inner.ChannelInvalid" : "Inner.NodeNotRegistered",
+            true,
+            invalidated
+                ? "GM inner service rejected heartbeat on an invalidated inner channel."
+                : "GM inner service rejected heartbeat from an unknown inner channel.");
+        return;
+    }
+
+    session->load = request.load;
+    session->last_heartbeat_at_unix_ms = now_unix_ms;
+    session->registered = true;
+    session->connection_state = ipc::ZmqConnectionState::Connected;
+    session->heartbeat_interval_ms = kDefaultHeartbeatIntervalMs;
+    session->heartbeat_timeout_ms = kDefaultHeartbeatTimeoutMs;
+    session->last_server_now_unix_ms = now_unix_ms;
+    session->last_protocol_error.clear();
+
+    const xs::net::HeartbeatSuccessResponse response{
+        .heartbeat_interval_ms = kDefaultHeartbeatIntervalMs,
+        .heartbeat_timeout_ms = kDefaultHeartbeatTimeoutMs,
+        .server_now_unix_ms = now_unix_ms,
+    };
+    std::array<std::byte, xs::net::kHeartbeatSuccessResponseSize> response_body{};
+    if (xs::net::EncodeHeartbeatSuccessResponse(response, response_body) != xs::net::HeartbeatCodecErrorCode::None)
+    {
+        return;
+    }
+
+    const xs::net::PacketHeader response_header = xs::net::MakePacketHeader(
+        xs::net::kInnerHeartbeatMsgId,
+        packet.header.seq,
+        HeartbeatResponseFlags(false),
+        static_cast<std::uint32_t>(response_body.size()));
+    std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kHeartbeatSuccessResponseSize> response_packet{};
+    if (xs::net::EncodePacket(response_header, response_body, response_packet) != xs::net::PacketCodecErrorCode::None)
+    {
+        return;
+    }
+
+    if (inner_network() == nullptr)
+    {
+        return;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(routing_id, response_packet);
+    const std::array<xs::core::LogContextField, 4> context{
+        xs::core::LogContextField{"nodeId", std::string(session->node_id)},
+        xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+        xs::core::LogContextField{"seq", ToString(static_cast<std::uint64_t>(packet.header.seq))},
+        xs::core::LogContextField{"loadScore", ToString(static_cast<std::uint64_t>(request.load.load_score))},
+    };
+    if (send_result != NodeErrorCode::None)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM inner service failed to send heartbeat success response.", context);
+        return;
+    }
+
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM inner service refreshed heartbeat state.", context);
+}
+
+void GmNode::HandleTimeoutScan()
+{
+    const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
+    PruneExpiredInvalidatedRoutingIds(now_unix_ms);
+
+    const std::vector<ProcessRegistryEntry> snapshot = inner_network_remote_sessions().Snapshot();
+    for (const ProcessRegistryEntry& entry : snapshot)
+    {
+        if (entry.last_heartbeat_at_unix_ms == 0U || entry.last_heartbeat_at_unix_ms > now_unix_ms)
+        {
+            continue;
+        }
+
+        const std::uint64_t elapsed_ms = now_unix_ms - entry.last_heartbeat_at_unix_ms;
+        if (elapsed_ms < static_cast<std::uint64_t>(kDefaultHeartbeatTimeoutMs))
+        {
+            continue;
+        }
+
+        const ProcessRegistryErrorCode unregister_result = inner_network_remote_sessions().UnregisterByNodeId(entry.node_id);
+        if (unregister_result != ProcessRegistryErrorCode::None)
+        {
+            continue;
+        }
+
+        RememberInvalidatedRoutingId(entry.routing_id, now_unix_ms);
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", entry.node_id},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(entry.routing_id.size()))},
+            xs::core::LogContextField{"lastHeartbeatAtUnixMs", ToString(entry.last_heartbeat_at_unix_ms)},
+            xs::core::LogContextField{"elapsedMs", ToString(elapsed_ms)},
+        };
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "inner",
+            "GM inner service evicted a timed-out process registry entry.",
+            context,
+            kInnerChannelInvalid,
+            "Inner.ChannelInvalid");
+    }
+}
+
+void GmNode::RememberInvalidatedRoutingId(
+    std::span<const std::byte> routing_id,
+    std::uint64_t now_unix_ms)
+{
+    if (routing_id.empty())
+    {
+        return;
+    }
+
+    const std::uint64_t retention_ms = InvalidatedRoutingRetentionMs();
+    const std::uint64_t expires_at_unix_ms =
+        retention_ms > std::numeric_limits<std::uint64_t>::max() - now_unix_ms
+            ? std::numeric_limits<std::uint64_t>::max()
+            : now_unix_ms + retention_ms;
+
+    invalidated_routing_ids_[MakeRoutingKey(routing_id)] = expires_at_unix_ms;
+}
+
+void GmNode::PruneExpiredInvalidatedRoutingIds(std::uint64_t now_unix_ms)
+{
+    for (auto iterator = invalidated_routing_ids_.begin(); iterator != invalidated_routing_ids_.end();)
+    {
+        if (iterator->second <= now_unix_ms)
+        {
+            iterator = invalidated_routing_ids_.erase(iterator);
+            continue;
+        }
+
+        ++iterator;
+    }
+}
+
+bool GmNode::ContainsInvalidatedRoutingId(std::span<const std::byte> routing_id) const
+{
+    if (routing_id.empty())
+    {
+        return false;
+    }
+
+    const auto iterator = invalidated_routing_ids_.find(MakeRoutingKey(routing_id));
+    if (iterator == invalidated_routing_ids_.end())
+    {
+        return false;
+    }
+
+    return iterator->second > CurrentUnixTimeMilliseconds();
+}
+
+std::uint64_t GmNode::CurrentUnixTimeMilliseconds() const noexcept
+{
+    return CurrentServerNowUnixMs();
+}
+
+std::uint64_t GmNode::InvalidatedRoutingRetentionMs() const noexcept
+{
+    return static_cast<std::uint64_t>(kDefaultHeartbeatTimeoutMs);
 }
 
 } // namespace xs::node

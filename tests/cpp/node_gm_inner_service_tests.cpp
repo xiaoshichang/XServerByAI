@@ -104,7 +104,7 @@ void CleanupTestDirectory(const std::filesystem::path& path)
     std::uint64_t last_heartbeat_at_unix_ms)
 {
     return xs::node::ProcessRegistryRegistration{
-        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Game),
+        .process_type = xs::core::ProcessType::Game,
         .node_id = std::move(node_id),
         .pid = 1001U,
         .started_at_unix_ms = CurrentUnixTimeMilliseconds(),

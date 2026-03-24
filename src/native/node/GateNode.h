@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ClientNetwork.h"
-#include "InnerNetwork.h"
 #include "ServerNode.h"
 
 #include <cstdint>
@@ -40,21 +39,11 @@ class GateNode final : public ServerNode
     [[nodiscard]] NodeErrorCode OnUninit() override;
 
   private:
-    struct GmSessionState final
+    struct RuntimeState final
     {
-        std::uint32_t next_seq{1U};
-        std::uint32_t register_seq{0U};
-        std::uint32_t heartbeat_seq{0U};
-        std::uint32_t heartbeat_interval_ms{0U};
-        std::uint32_t heartbeat_timeout_ms{0U};
         std::uint64_t started_at_unix_ms{0U};
-        std::uint64_t last_server_now_unix_ms{0U};
-        xs::core::TimerID heartbeat_timer_id{0};
         std::string build_version{"dev"};
         std::vector<std::string> capability_tags{};
-        std::string last_protocol_error{};
-        bool registered{false};
-        bool register_in_flight{false};
     };
 
     void HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state);
@@ -70,14 +59,15 @@ class GateNode final : public ServerNode
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
     [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
+    [[nodiscard]] InnerNetworkSession* gm_session() noexcept;
+    [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
     std::string gm_inner_remote_endpoint_{};
     std::string configured_inner_endpoint_{};
     xs::core::EndpointConfig configured_inner_endpoint_config_{};
-    std::unique_ptr<InnerNetwork> inner_network_{};
     std::unique_ptr<ClientNetwork> client_network_{};
     ipc::ZmqConnectionState gm_inner_connection_state_cache_{ipc::ZmqConnectionState::Stopped};
-    GmSessionState gm_session_state_{};
+    RuntimeState runtime_state_{};
     std::uint64_t cluster_ready_epoch_{0U};
     std::uint64_t last_cluster_ready_server_now_unix_ms_{0U};
     bool cluster_ready_{false};

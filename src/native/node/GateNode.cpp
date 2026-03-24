@@ -1,5 +1,6 @@
 #include "GateNode.h"
 
+#include "InnerNetwork.h"
 #include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
@@ -22,6 +23,7 @@ namespace
 {
 
 constexpr std::string_view kGateBuildVersion = "dev";
+constexpr std::string_view kGmRemoteNodeId = "GM";
 constexpr std::uint16_t kResponseFlags = static_cast<std::uint16_t>(xs::net::PacketFlag::Response);
 constexpr std::uint16_t kErrorResponseFlags =
     kResponseFlags | static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
@@ -78,7 +80,8 @@ std::string_view GateNode::configured_inner_endpoint() const noexcept
 
 ipc::ZmqConnectionState GateNode::gm_inner_connection_state() const noexcept
 {
-    return inner_network_ != nullptr ? inner_network_->connection_state() : ipc::ZmqConnectionState::Stopped;
+    const InnerNetworkSession* session = gm_session();
+    return session != nullptr ? session->connection_state : ipc::ZmqConnectionState::Stopped;
 }
 
 bool GateNode::cluster_ready() const noexcept
@@ -150,47 +153,58 @@ NodeErrorCode GateNode::OnInit()
     configured_inner_endpoint_ = BuildTcpEndpoint(inner_endpoint);
     configured_inner_endpoint_config_ = inner_endpoint;
     gm_inner_connection_state_cache_ = ipc::ZmqConnectionState::Stopped;
-    gm_session_state_ = GmSessionState{};
-    gm_session_state_.build_version = std::string(kGateBuildVersion);
-    gm_session_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
+    runtime_state_ = RuntimeState{};
+    runtime_state_.build_version = std::string(kGateBuildVersion);
+    runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
     cluster_ready_epoch_ = 0U;
     last_cluster_ready_server_now_unix_ms_ = 0U;
     cluster_ready_ = false;
+
+    inner_network_remote_sessions().Clear();
+    const ProcessRegistryErrorCode session_result =
+        inner_network_remote_sessions().Register(
+            {
+                .process_type = xs::core::ProcessType::Gm,
+                .node_id = std::string(kGmRemoteNodeId),
+                .inner_network_endpoint = ToNetEndpoint(gm_endpoint),
+            });
+    if (session_result != ProcessRegistryErrorCode::None)
+    {
+        return SetError(NodeErrorCode::NodeInitFailed, std::string(ProcessRegistryErrorMessage(session_result)));
+    }
 
     InnerNetworkOptions inner_options;
     inner_options.mode = InnerNetworkMode::ActiveConnector;
     inner_options.local_endpoint = configured_inner_endpoint_;
     inner_options.remote_endpoint = gm_inner_remote_endpoint_;
 
-    inner_network_ = std::make_unique<InnerNetwork>(event_loop(), logger(), std::move(inner_options));
-    inner_network_->SetConnectionStateHandler([this](ipc::ZmqConnectionState state) {
-        HandleInnerConnectionStateChanged(state);
-    });
-    inner_network_->SetMessageHandler([this](std::vector<std::byte>, std::vector<std::byte> payload) {
-        HandleInnerMessage(payload);
-    });
-
     ClientNetworkOptions client_options;
     client_options.listen_endpoint = BuildEndpointText(client_endpoint);
     client_options.kcp = cluster_config().kcp;
     client_network_ = std::make_unique<ClientNetwork>(event_loop(), logger(), std::move(client_options));
 
-    const NodeErrorCode inner_result = inner_network_->Init();
+    const NodeErrorCode inner_result = InitInnerNetwork(std::move(inner_options));
     if (inner_result != NodeErrorCode::None)
     {
-        const std::string error_message = std::string(inner_network_->last_error_message());
-        inner_network_.reset();
         client_network_.reset();
-        return SetError(inner_result, error_message);
+        inner_network_remote_sessions().Clear();
+        return inner_result;
     }
+
+    inner_network()->SetConnectionStateHandler([this](ipc::ZmqConnectionState state) {
+        HandleInnerConnectionStateChanged(state);
+    });
+    inner_network()->SetMessageHandler([this](std::vector<std::byte>, std::vector<std::byte> payload) {
+        HandleInnerMessage(payload);
+    });
 
     const NodeErrorCode client_result = client_network_->Init();
     if (client_result != NodeErrorCode::None)
     {
         const std::string error_message = std::string(client_network_->last_error_message());
-        (void)inner_network_->Uninit();
-        inner_network_.reset();
+        (void)UninitInnerNetwork();
         client_network_.reset();
+        inner_network_remote_sessions().Clear();
         return SetError(client_result, error_message);
     }
 
@@ -200,8 +214,8 @@ NodeErrorCode GateNode::OnInit()
         xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
         xs::core::LogContextField{"clientListenEndpoint", std::string(client_network_->configured_endpoint())},
         xs::core::LogContextField{"kcpMtu", std::to_string(cluster_config().kcp.mtu)},
-        xs::core::LogContextField{"startedAtUnixMs", ToString(gm_session_state_.started_at_unix_ms)},
-        xs::core::LogContextField{"buildVersion", gm_session_state_.build_version},
+        xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
+        xs::core::LogContextField{"buildVersion", runtime_state_.build_version},
     };
     logger().Log(xs::core::LogLevel::Info, "runtime", "Gate node configured runtime skeleton.", context);
 
@@ -211,15 +225,15 @@ NodeErrorCode GateNode::OnInit()
 
 NodeErrorCode GateNode::OnRun()
 {
-    if (inner_network_ == nullptr || client_network_ == nullptr)
+    if (inner_network() == nullptr || client_network_ == nullptr)
     {
         return SetError(NodeErrorCode::InvalidArgument, "Gate node must be initialized before Run().");
     }
 
-    const NodeErrorCode inner_result = inner_network_->Run();
+    const NodeErrorCode inner_result = RunInnerNetwork();
     if (inner_result != NodeErrorCode::None)
     {
-        return SetError(inner_result, std::string(inner_network_->last_error_message()));
+        return inner_result;
     }
 
     const std::array<xs::core::LogContextField, 7> context{
@@ -256,14 +270,12 @@ NodeErrorCode GateNode::OnUninit()
         }
     }
 
-    if (inner_network_ != nullptr)
+    if (inner_network() != nullptr)
     {
-        const NodeErrorCode result = inner_network_->Uninit();
-        const std::string error_message = std::string(inner_network_->last_error_message());
-        inner_network_.reset();
+        const NodeErrorCode result = UninitInnerNetwork();
         if (result != NodeErrorCode::None)
         {
-            return SetError(result, error_message);
+            return result;
         }
     }
 
@@ -273,14 +285,21 @@ NodeErrorCode GateNode::OnUninit()
 
 void GateNode::HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state)
 {
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
     gm_inner_connection_state_cache_ = state;
+    session->connection_state = state;
 
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gmInnerState", std::string(ipc::ZmqConnectionStateName(state))},
         xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
-        xs::core::LogContextField{"registered", gm_session_state_.registered ? "true" : "false"},
+        xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Gate node observed GM inner connection state change.", context);
 
@@ -290,7 +309,7 @@ void GateNode::HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state)
         return;
     }
 
-    if (!gm_session_state_.registered && !gm_session_state_.register_in_flight)
+    if (!session->registered && !session->register_in_flight)
     {
         (void)SendRegisterRequest();
     }
@@ -298,6 +317,12 @@ void GateNode::HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state)
 
 void GateNode::HandleInnerMessage(std::span<const std::byte> payload)
 {
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
     xs::net::PacketView packet{};
     const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
@@ -311,7 +336,7 @@ void GateNode::HandleInnerMessage(std::span<const std::byte> payload)
             },
             xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
         };
-        gm_session_state_.last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
         logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored malformed GM inner packet.", context);
         return;
     }
@@ -335,7 +360,7 @@ void GateNode::HandleInnerMessage(std::span<const std::byte> payload)
                 std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state_cache_)),
             },
         };
-        gm_session_state_.last_protocol_error = "GM response envelope is invalid.";
+        session->last_protocol_error = "GM response envelope is invalid.";
         logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM response with an invalid envelope.", context);
         return;
     }
@@ -363,6 +388,12 @@ void GateNode::HandleInnerMessage(std::span<const std::byte> payload)
 
 void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
 {
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
     if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
     {
         const std::array<xs::core::LogContextField, 5> context{
@@ -372,20 +403,20 @@ void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
-        gm_session_state_.last_protocol_error = "GM clusterReady notify envelope is invalid.";
+        session->last_protocol_error = "GM clusterReady notify envelope is invalid.";
         logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify with an invalid envelope.", context);
         return;
     }
 
-    if (!gm_session_state_.registered)
+    if (!session->registered)
     {
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
             xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"registered", gm_session_state_.registered ? "true" : "false"},
+            xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
             xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
-        gm_session_state_.last_protocol_error = "GM clusterReady notify arrived before Gate registration completed.";
+        session->last_protocol_error = "GM clusterReady notify arrived before Gate registration completed.";
         logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify before registration completed.", context);
         return;
     }
@@ -404,7 +435,7 @@ void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
-        gm_session_state_.last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
+        session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
         logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM cluster ready notify.", context);
         return;
     }
@@ -425,14 +456,14 @@ void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
     cluster_ready_epoch_ = notify.ready_epoch;
     cluster_ready_ = notify.cluster_ready;
     last_cluster_ready_server_now_unix_ms_ = notify.server_now_unix_ms;
-    gm_session_state_.last_protocol_error.clear();
+    session->last_protocol_error.clear();
 
     if (client_network_ != nullptr)
     {
         const NodeErrorCode client_result = cluster_ready_ ? client_network_->Run() : client_network_->Stop();
         if (client_result != NodeErrorCode::None)
         {
-            gm_session_state_.last_protocol_error = std::string(client_network_->last_error_message());
+            session->last_protocol_error = std::string(client_network_->last_error_message());
 
             const std::array<xs::core::LogContextField, 6> context{
                 xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
@@ -464,19 +495,25 @@ void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
 
 void GateNode::HandleRegisterResponse(const xs::net::PacketView& packet)
 {
-    if (gm_session_state_.register_seq == 0U || packet.header.seq != gm_session_state_.register_seq)
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    if (session->register_seq == 0U || packet.header.seq != session->register_seq)
     {
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"expectedSeq", std::to_string(gm_session_state_.register_seq)},
+            xs::core::LogContextField{"expectedSeq", std::to_string(session->register_seq)},
             xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
         logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored a stale GM register response.", context);
         return;
     }
 
-    gm_session_state_.register_in_flight = false;
-    gm_session_state_.register_seq = 0U;
+    session->register_in_flight = false;
+    session->register_seq = 0U;
 
     if (packet.header.flags == kErrorResponseFlags)
     {
@@ -494,13 +531,13 @@ void GateNode::HandleRegisterResponse(const xs::net::PacketView& packet)
                 },
                 xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
             };
-            gm_session_state_.last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
+            session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
             logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM register error response.", context);
             return;
         }
 
-        gm_session_state_.registered = false;
-        gm_session_state_.last_protocol_error =
+        session->registered = false;
+        session->last_protocol_error =
             "GM rejected register request with error code " + std::to_string(response.error_code) + ".";
 
         const std::array<xs::core::LogContextField, 6> context{
@@ -524,8 +561,8 @@ void GateNode::HandleRegisterResponse(const xs::net::PacketView& packet)
         xs::net::DecodeRegisterSuccessResponse(packet.payload, &response);
     if (decode_result != xs::net::RegisterCodecErrorCode::None)
     {
-        gm_session_state_.registered = false;
-        gm_session_state_.last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
+    session->registered = false;
+    session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
 
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
@@ -540,12 +577,13 @@ void GateNode::HandleRegisterResponse(const xs::net::PacketView& packet)
         return;
     }
 
-    gm_session_state_.registered = true;
-    gm_session_state_.heartbeat_interval_ms = response.heartbeat_interval_ms;
-    gm_session_state_.heartbeat_timeout_ms = response.heartbeat_timeout_ms;
-    gm_session_state_.last_server_now_unix_ms = response.server_now_unix_ms;
-    gm_session_state_.last_protocol_error.clear();
-    gm_session_state_.heartbeat_seq = 0U;
+    session->registered = true;
+    session->heartbeat_interval_ms = response.heartbeat_interval_ms;
+    session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
+    session->last_server_now_unix_ms = response.server_now_unix_ms;
+    session->last_heartbeat_at_unix_ms = CurrentUnixTimeMilliseconds();
+    session->last_protocol_error.clear();
+    session->heartbeat_seq = 0U;
 
     StartOrResetHeartbeatTimer(response.heartbeat_interval_ms);
 
@@ -562,18 +600,24 @@ void GateNode::HandleRegisterResponse(const xs::net::PacketView& packet)
 
 void GateNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
 {
-    if (gm_session_state_.heartbeat_seq == 0U || packet.header.seq != gm_session_state_.heartbeat_seq)
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    if (session->heartbeat_seq == 0U || packet.header.seq != session->heartbeat_seq)
     {
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"expectedSeq", std::to_string(gm_session_state_.heartbeat_seq)},
+            xs::core::LogContextField{"expectedSeq", std::to_string(session->heartbeat_seq)},
             xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
         logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored a stale GM heartbeat response.", context);
         return;
     }
 
-    gm_session_state_.heartbeat_seq = 0U;
+    session->heartbeat_seq = 0U;
 
     if (packet.header.flags == kErrorResponseFlags)
     {
@@ -591,12 +635,12 @@ void GateNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
                 },
                 xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
             };
-            gm_session_state_.last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
+            session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
             logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM heartbeat error response.", context);
             return;
         }
 
-        gm_session_state_.last_protocol_error =
+        session->last_protocol_error =
             "GM rejected heartbeat with error code " + std::to_string(response.error_code) + ".";
 
         const std::array<xs::core::LogContextField, 6> context{
@@ -639,20 +683,21 @@ void GateNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
-        gm_session_state_.last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
+        session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
         logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM heartbeat success response.", context);
         return;
     }
 
     const bool heartbeat_config_changed =
-        gm_session_state_.heartbeat_interval_ms != response.heartbeat_interval_ms ||
-        gm_session_state_.heartbeat_timeout_ms != response.heartbeat_timeout_ms ||
-        gm_session_state_.heartbeat_timer_id == 0;
+        session->heartbeat_interval_ms != response.heartbeat_interval_ms ||
+        session->heartbeat_timeout_ms != response.heartbeat_timeout_ms ||
+        session->heartbeat_timer_id == 0;
 
-    gm_session_state_.heartbeat_interval_ms = response.heartbeat_interval_ms;
-    gm_session_state_.heartbeat_timeout_ms = response.heartbeat_timeout_ms;
-    gm_session_state_.last_server_now_unix_ms = response.server_now_unix_ms;
-    gm_session_state_.last_protocol_error.clear();
+    session->heartbeat_interval_ms = response.heartbeat_interval_ms;
+    session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
+    session->last_server_now_unix_ms = response.server_now_unix_ms;
+    session->last_heartbeat_at_unix_ms = CurrentUnixTimeMilliseconds();
+    session->last_protocol_error.clear();
 
     if (heartbeat_config_changed)
     {
@@ -672,8 +717,10 @@ void GateNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
 
 bool GateNode::SendRegisterRequest()
 {
-    if (inner_network_ == nullptr || gm_inner_connection_state_cache_ != ipc::ZmqConnectionState::Connected ||
-        gm_session_state_.register_in_flight)
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr || inner_network() == nullptr ||
+        gm_inner_connection_state_cache_ != ipc::ZmqConnectionState::Connected ||
+        session->register_in_flight)
     {
         return false;
     }
@@ -683,10 +730,10 @@ bool GateNode::SendRegisterRequest()
         .process_flags = 0U,
         .node_id = std::string(node_id()),
         .pid = pid(),
-        .started_at_unix_ms = gm_session_state_.started_at_unix_ms,
+        .started_at_unix_ms = runtime_state_.started_at_unix_ms,
         .inner_network_endpoint = ToNetEndpoint(configured_inner_endpoint_config_),
-        .build_version = gm_session_state_.build_version,
-        .capability_tags = gm_session_state_.capability_tags,
+        .build_version = runtime_state_.build_version,
+        .capability_tags = runtime_state_.capability_tags,
         .load = xs::net::LoadSnapshot{},
     };
 
@@ -695,7 +742,7 @@ bool GateNode::SendRegisterRequest()
         xs::net::GetRegisterRequestWireSize(request, &payload_size);
     if (size_result != xs::net::RegisterCodecErrorCode::None)
     {
-        gm_session_state_.last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(size_result));
+        session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(size_result));
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(size_result))},
@@ -709,7 +756,7 @@ bool GateNode::SendRegisterRequest()
     const xs::net::RegisterCodecErrorCode encode_result = xs::net::EncodeRegisterRequest(request, payload);
     if (encode_result != xs::net::RegisterCodecErrorCode::None)
     {
-        gm_session_state_.last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(encode_result));
+        session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(encode_result));
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(encode_result))},
@@ -730,7 +777,7 @@ bool GateNode::SendRegisterRequest()
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
-        gm_session_state_.last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
@@ -741,10 +788,10 @@ bool GateNode::SendRegisterRequest()
         return false;
     }
 
-    const NodeErrorCode send_result = inner_network_->Send({}, packet);
+    const NodeErrorCode send_result = inner_network()->Send({}, packet);
     if (send_result != NodeErrorCode::None)
     {
-        gm_session_state_.last_protocol_error = std::string(inner_network_->last_error_message());
+        session->last_protocol_error = std::string(inner_network()->last_error_message());
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
@@ -755,15 +802,15 @@ bool GateNode::SendRegisterRequest()
         return false;
     }
 
-    gm_session_state_.register_in_flight = true;
-    gm_session_state_.register_seq = seq;
-    gm_session_state_.last_protocol_error.clear();
+    session->register_in_flight = true;
+    session->register_seq = seq;
+    session->last_protocol_error.clear();
 
     const std::array<xs::core::LogContextField, 6> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"seq", std::to_string(seq)},
-        xs::core::LogContextField{"startedAtUnixMs", ToString(gm_session_state_.started_at_unix_ms)},
-        xs::core::LogContextField{"buildVersion", gm_session_state_.build_version},
+        xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
+        xs::core::LogContextField{"buildVersion", runtime_state_.build_version},
         xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
     };
@@ -773,9 +820,10 @@ bool GateNode::SendRegisterRequest()
 
 bool GateNode::SendHeartbeatRequest()
 {
-    if (inner_network_ == nullptr || !gm_session_state_.registered ||
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr || inner_network() == nullptr || !session->registered ||
         gm_inner_connection_state_cache_ != ipc::ZmqConnectionState::Connected ||
-        gm_session_state_.heartbeat_seq != 0U)
+        session->heartbeat_seq != 0U)
     {
         return false;
     }
@@ -790,7 +838,7 @@ bool GateNode::SendHeartbeatRequest()
     const xs::net::HeartbeatCodecErrorCode encode_result = xs::net::EncodeHeartbeatRequest(request, payload);
     if (encode_result != xs::net::HeartbeatCodecErrorCode::None)
     {
-        gm_session_state_.last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(encode_result));
+        session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(encode_result));
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"codecError", std::string(xs::net::HeartbeatCodecErrorMessage(encode_result))},
@@ -810,7 +858,7 @@ bool GateNode::SendHeartbeatRequest()
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
-        gm_session_state_.last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
@@ -821,10 +869,10 @@ bool GateNode::SendHeartbeatRequest()
         return false;
     }
 
-    const NodeErrorCode send_result = inner_network_->Send({}, packet);
+    const NodeErrorCode send_result = inner_network()->Send({}, packet);
     if (send_result != NodeErrorCode::None)
     {
-        gm_session_state_.last_protocol_error = std::string(inner_network_->last_error_message());
+        session->last_protocol_error = std::string(inner_network()->last_error_message());
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
@@ -835,8 +883,8 @@ bool GateNode::SendHeartbeatRequest()
         return false;
     }
 
-    gm_session_state_.heartbeat_seq = seq;
-    gm_session_state_.last_protocol_error.clear();
+    session->heartbeat_seq = seq;
+    session->last_protocol_error.clear();
 
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
@@ -851,14 +899,22 @@ bool GateNode::SendHeartbeatRequest()
 
 void GateNode::ResetGmSessionState()
 {
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        ResetClusterReadyState();
+        return;
+    }
+
     CancelHeartbeatTimer();
-    gm_session_state_.registered = false;
-    gm_session_state_.register_in_flight = false;
-    gm_session_state_.register_seq = 0U;
-    gm_session_state_.heartbeat_seq = 0U;
-    gm_session_state_.heartbeat_interval_ms = 0U;
-    gm_session_state_.heartbeat_timeout_ms = 0U;
-    gm_session_state_.last_server_now_unix_ms = 0U;
+    session->registered = false;
+    session->register_in_flight = false;
+    session->register_seq = 0U;
+    session->heartbeat_seq = 0U;
+    session->heartbeat_interval_ms = 0U;
+    session->heartbeat_timeout_ms = 0U;
+    session->last_server_now_unix_ms = 0U;
+    session->last_heartbeat_at_unix_ms = 0U;
     ResetClusterReadyState();
 }
 
@@ -873,13 +929,23 @@ void GateNode::ResetClusterReadyState()
         const NodeErrorCode result = client_network_->Stop();
         if (result != NodeErrorCode::None)
         {
-            gm_session_state_.last_protocol_error = std::string(client_network_->last_error_message());
+            InnerNetworkSession* session = gm_session();
+            if (session != nullptr)
+            {
+                session->last_protocol_error = std::string(client_network_->last_error_message());
+            }
         }
     }
 }
 
 void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
 {
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
     CancelHeartbeatTimer();
 
     const xs::core::TimerCreateResult timer_result =
@@ -888,25 +954,25 @@ void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
         });
     if (!xs::core::IsTimerID(timer_result))
     {
-        gm_session_state_.last_protocol_error =
+        session->last_protocol_error =
             "Failed to create GM heartbeat timer: " +
             std::string(xs::core::TimerErrorMessage(xs::core::TimerErrorFromCreateResult(timer_result)));
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
-            xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(gm_session_state_.heartbeat_timeout_ms)},
+            xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
             xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
         logger().Log(xs::core::LogLevel::Error, "inner", "Gate node failed to schedule GM heartbeat timer.", context);
         return;
     }
 
-    gm_session_state_.heartbeat_timer_id = timer_result;
+    session->heartbeat_timer_id = timer_result;
 
     const std::array<xs::core::LogContextField, 4> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
-        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(gm_session_state_.heartbeat_timeout_ms)},
+        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
         xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Gate node scheduled GM heartbeat timer.", context);
@@ -914,25 +980,32 @@ void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
 
 void GateNode::CancelHeartbeatTimer() noexcept
 {
-    if (gm_session_state_.heartbeat_timer_id > 0)
+    InnerNetworkSession* session = gm_session();
+    if (session != nullptr && session->heartbeat_timer_id > 0)
     {
-        (void)event_loop().timers().Cancel(gm_session_state_.heartbeat_timer_id);
-        gm_session_state_.heartbeat_timer_id = 0;
+        (void)event_loop().timers().Cancel(session->heartbeat_timer_id);
+        session->heartbeat_timer_id = 0;
     }
 }
 
 std::uint32_t GateNode::ConsumeNextInnerSequence() noexcept
 {
-    std::uint32_t seq = gm_session_state_.next_seq;
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return 1U;
+    }
+
+    std::uint32_t seq = session->next_seq;
     if (seq == xs::net::kPacketSeqNone)
     {
         seq = 1U;
     }
 
-    gm_session_state_.next_seq = seq + 1U;
-    if (gm_session_state_.next_seq == xs::net::kPacketSeqNone)
+    session->next_seq = seq + 1U;
+    if (session->next_seq == xs::net::kPacketSeqNone)
     {
-        gm_session_state_.next_seq = 1U;
+        session->next_seq = 1U;
     }
 
     return seq;
@@ -941,6 +1014,16 @@ std::uint32_t GateNode::ConsumeNextInnerSequence() noexcept
 std::uint64_t GateNode::CurrentUnixTimeMilliseconds() const noexcept
 {
     return CurrentUnixTimeMillisecondsValue();
+}
+
+InnerNetworkSession* GateNode::gm_session() noexcept
+{
+    return inner_network_remote_sessions().FindMutableByNodeId(kGmRemoteNodeId);
+}
+
+const InnerNetworkSession* GateNode::gm_session() const noexcept
+{
+    return inner_network_remote_sessions().FindByNodeId(kGmRemoteNodeId);
 }
 
 } // namespace xs::node

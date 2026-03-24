@@ -460,7 +460,7 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
 
     const std::vector<xs::node::ProcessRegistryEntry> snapshot = gm_node.node().registry_snapshot();
     XS_CHECK(snapshot.size() == 1u);
-    XS_CHECK(snapshot.front().process_type == xs::net::InnerProcessType::Game);
+    XS_CHECK(snapshot.front().process_type == xs::core::ProcessType::Game);
     XS_CHECK(snapshot.front().node_id == "Game0");
     XS_CHECK(snapshot.front().pid == 1001u);
     XS_CHECK(snapshot.front().started_at_unix_ms == 2002u);
@@ -719,7 +719,7 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     XS_CHECK(gate_entry != snapshot.end());
     if (gate_entry != snapshot.end())
     {
-        XS_CHECK(gate_entry->process_type == xs::net::InnerProcessType::Gate);
+        XS_CHECK(gate_entry->process_type == xs::core::ProcessType::Gate);
         XS_CHECK(gate_entry->inner_network_endpoint.port == 7000u);
         XS_CHECK(ByteSpanEqualsText(gate_entry->routing_id, "gm-route-gate-success"));
     }
@@ -730,7 +730,7 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     XS_CHECK(game_entry != snapshot.end());
     if (game_entry != snapshot.end())
     {
-        XS_CHECK(game_entry->process_type == xs::net::InnerProcessType::Game);
+        XS_CHECK(game_entry->process_type == xs::core::ProcessType::Game);
         XS_CHECK(game_entry->inner_network_endpoint.port == 7100u);
         XS_CHECK(ByteSpanEqualsText(game_entry->routing_id, "gm-route-game-success"));
     }

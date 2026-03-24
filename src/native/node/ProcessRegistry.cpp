@@ -14,14 +14,17 @@ namespace
         reinterpret_cast<const char*>(routing_id.data() + routing_id.size()));
 }
 
-[[nodiscard]] ProcessRegistryErrorCode ValidateProcessType(std::uint16_t process_type) noexcept
+[[nodiscard]] ProcessRegistryErrorCode ValidateProcessType(xs::core::ProcessType process_type) noexcept
 {
-    if (!xs::net::IsValidInnerProcessType(process_type))
+    switch (process_type)
     {
-        return ProcessRegistryErrorCode::InvalidProcessType;
+    case xs::core::ProcessType::Gm:
+    case xs::core::ProcessType::Gate:
+    case xs::core::ProcessType::Game:
+        return ProcessRegistryErrorCode::None;
     }
 
-    return ProcessRegistryErrorCode::None;
+    return ProcessRegistryErrorCode::InvalidProcessType;
 }
 
 [[nodiscard]] ProcessRegistryErrorCode ValidateNodeId(std::string_view node_id) noexcept
@@ -60,7 +63,7 @@ namespace
 }
 
 [[nodiscard]] ProcessRegistryErrorCode ValidateRegistration(
-    const ProcessRegistryRegistration& registration) noexcept
+    const InnerNetworkSessionRegistration& registration) noexcept
 {
     const ProcessRegistryErrorCode process_type_result = ValidateProcessType(registration.process_type);
     if (process_type_result != ProcessRegistryErrorCode::None)
@@ -88,7 +91,7 @@ std::string_view ProcessRegistryErrorMessage(ProcessRegistryErrorCode code) noex
     case ProcessRegistryErrorCode::InvalidArgument:
         return "Process registry argument is invalid.";
     case ProcessRegistryErrorCode::InvalidProcessType:
-        return "Process registry only supports Gate or Game entries.";
+        return "Process registry only supports GM, Gate, or Game entries.";
     case ProcessRegistryErrorCode::InvalidNodeId:
         return "Process registry nodeId must not be empty.";
     case ProcessRegistryErrorCode::InvalidInnerNetworkEndpointHost:
@@ -108,7 +111,7 @@ std::string_view ProcessRegistryErrorMessage(ProcessRegistryErrorCode code) noex
     return "Unknown process registry error.";
 }
 
-ProcessRegistryErrorCode ProcessRegistry::Register(const ProcessRegistryRegistration& registration)
+ProcessRegistryErrorCode ProcessRegistry::Register(const InnerNetworkSessionRegistration& registration)
 {
     const ProcessRegistryErrorCode validation_result = ValidateRegistration(registration);
     if (validation_result != ProcessRegistryErrorCode::None)
@@ -130,8 +133,8 @@ ProcessRegistryErrorCode ProcessRegistry::Register(const ProcessRegistryRegistra
         }
     }
 
-    ProcessRegistryEntry entry;
-    entry.process_type = static_cast<xs::net::InnerProcessType>(registration.process_type);
+    InnerNetworkSession entry;
+    entry.process_type = registration.process_type;
     entry.node_id = registration.node_id;
     entry.pid = registration.pid;
     entry.started_at_unix_ms = registration.started_at_unix_ms;
@@ -268,7 +271,7 @@ ProcessRegistryErrorCode ProcessRegistry::UpdateInnerNetworkReadyByRoutingId(
     return ProcessRegistryErrorCode::None;
 }
 
-const ProcessRegistryEntry* ProcessRegistry::FindByNodeId(std::string_view node_id) const
+const InnerNetworkSession* ProcessRegistry::FindByNodeId(std::string_view node_id) const
 {
     auto iterator = entries_by_node_id_.find(node_id);
     if (iterator == entries_by_node_id_.end())
@@ -279,7 +282,7 @@ const ProcessRegistryEntry* ProcessRegistry::FindByNodeId(std::string_view node_
     return &iterator->second;
 }
 
-const ProcessRegistryEntry* ProcessRegistry::FindByRoutingId(std::span<const std::byte> routing_id) const
+const InnerNetworkSession* ProcessRegistry::FindByRoutingId(std::span<const std::byte> routing_id) const
 {
     if (routing_id.empty())
     {
@@ -305,9 +308,9 @@ bool ProcessRegistry::ContainsRoutingId(std::span<const std::byte> routing_id) c
     return FindByRoutingId(routing_id) != nullptr;
 }
 
-std::vector<ProcessRegistryEntry> ProcessRegistry::Snapshot() const
+std::vector<InnerNetworkSession> ProcessRegistry::Snapshot() const
 {
-    std::vector<ProcessRegistryEntry> snapshot;
+    std::vector<InnerNetworkSession> snapshot;
     snapshot.reserve(entries_by_node_id_.size());
 
     for (const auto& [node_id, entry] : entries_by_node_id_)
@@ -330,7 +333,7 @@ void ProcessRegistry::Clear() noexcept
     node_id_by_routing_key_.clear();
 }
 
-ProcessRegistryEntry* ProcessRegistry::FindMutableByNodeId(std::string_view node_id)
+InnerNetworkSession* ProcessRegistry::FindMutableByNodeId(std::string_view node_id)
 {
     auto iterator = entries_by_node_id_.find(node_id);
     if (iterator == entries_by_node_id_.end())
@@ -341,7 +344,7 @@ ProcessRegistryEntry* ProcessRegistry::FindMutableByNodeId(std::string_view node
     return &iterator->second;
 }
 
-ProcessRegistryEntry* ProcessRegistry::FindMutableByRoutingId(std::span<const std::byte> routing_id)
+InnerNetworkSession* ProcessRegistry::FindMutableByRoutingId(std::span<const std::byte> routing_id)
 {
     if (routing_id.empty())
     {

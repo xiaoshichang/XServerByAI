@@ -1,13 +1,13 @@
 #pragma once
 
 #include "GmControlHttpService.h"
-#include "GmInnerService.h"
-#include "InnerNetwork.h"
 #include "ProcessRegistry.h"
 #include "ServerNode.h"
 
+#include <cstdint>
 #include <memory>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace xs::node
@@ -31,9 +31,20 @@ class GmNode final : public ServerNode
     void HandleInnerMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
+    void HandleHeartbeatMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
+    void HandleTimeoutScan();
+    void RememberInvalidatedRoutingId(
+        std::span<const std::byte> routing_id,
+        std::uint64_t now_unix_ms);
+    void PruneExpiredInvalidatedRoutingIds(std::uint64_t now_unix_ms);
+    [[nodiscard]] bool ContainsInvalidatedRoutingId(std::span<const std::byte> routing_id) const;
+    [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
+    [[nodiscard]] std::uint64_t InvalidatedRoutingRetentionMs() const noexcept;
 
-    std::unique_ptr<InnerNetwork> inner_network_{};
-    std::unique_ptr<GmInnerService> inner_service_{};
+    std::unordered_map<std::string, std::uint64_t> invalidated_routing_ids_{};
+    xs::core::TimerID timeout_scan_timer_id_{0};
     std::unique_ptr<GmControlHttpService> control_http_service_{};
 };
 

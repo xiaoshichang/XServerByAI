@@ -1,5 +1,7 @@
 #include "ServerNode.h"
 
+#include "InnerNetwork.h"
+
 #include <asio/post.hpp>
 
 #include <exception>
@@ -424,6 +426,83 @@ xs::core::MainEventLoop& ServerNode::event_loop() const noexcept
     return *event_loop_;
 }
 
+InnerNetwork* ServerNode::inner_network() noexcept
+{
+    return inner_network_.get();
+}
+
+const InnerNetwork* ServerNode::inner_network() const noexcept
+{
+    return inner_network_.get();
+}
+
+ProcessRegistry& ServerNode::inner_network_remote_sessions() noexcept
+{
+    return inner_network_remote_sessions_;
+}
+
+const ProcessRegistry& ServerNode::inner_network_remote_sessions() const noexcept
+{
+    return inner_network_remote_sessions_;
+}
+
+NodeErrorCode ServerNode::InitInnerNetwork(InnerNetworkOptions options)
+{
+    if (inner_network_ != nullptr)
+    {
+        return SetError(NodeErrorCode::InvalidArgument, "Inner network is already initialized.");
+    }
+
+    inner_network_ = std::make_unique<InnerNetwork>(event_loop(), logger(), std::move(options));
+    const NodeErrorCode init_result = inner_network_->Init();
+    if (init_result != NodeErrorCode::None)
+    {
+        const std::string error_message = std::string(inner_network_->last_error_message());
+        inner_network_.reset();
+        return SetError(init_result, error_message);
+    }
+
+    ClearError();
+    return NodeErrorCode::None;
+}
+
+NodeErrorCode ServerNode::RunInnerNetwork()
+{
+    if (inner_network_ == nullptr)
+    {
+        return SetError(NodeErrorCode::InvalidArgument, "Inner network must be initialized before Run().");
+    }
+
+    const NodeErrorCode run_result = inner_network_->Run();
+    if (run_result != NodeErrorCode::None)
+    {
+        return SetError(run_result, std::string(inner_network_->last_error_message()));
+    }
+
+    ClearError();
+    return NodeErrorCode::None;
+}
+
+NodeErrorCode ServerNode::UninitInnerNetwork()
+{
+    if (inner_network_ == nullptr)
+    {
+        ClearError();
+        return NodeErrorCode::None;
+    }
+
+    const NodeErrorCode result = inner_network_->Uninit();
+    const std::string error_message = std::string(inner_network_->last_error_message());
+    inner_network_.reset();
+    if (result != NodeErrorCode::None)
+    {
+        return SetError(result, error_message);
+    }
+
+    ClearError();
+    return NodeErrorCode::None;
+}
+
 NodeErrorCode ServerNode::SetError(NodeErrorCode code, std::string message)
 {
     if (message.empty())
@@ -445,6 +524,9 @@ void ServerNode::ClearError() noexcept
 
 void ServerNode::ReleaseCoreState() noexcept
 {
+    inner_network_.reset();
+    inner_network_remote_sessions_.Clear();
+
     if (logger_ != nullptr)
     {
         try

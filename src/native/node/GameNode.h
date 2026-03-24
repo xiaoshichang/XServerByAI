@@ -1,6 +1,5 @@
 #pragma once
 
-#include "InnerNetwork.h"
 #include "ServerNode.h"
 
 #include <cstddef>
@@ -44,21 +43,7 @@ class GameNode final : public ServerNode
         std::uint64_t started_at_unix_ms{0U};
         std::string build_version{"dev"};
         std::string managed_assembly_name{"XServer.Managed.GameLogic"};
-        std::string last_protocol_error{};
-    };
-
-    struct GmSessionState final
-    {
-        std::uint32_t next_seq{1U};
-        std::uint32_t register_seq{0U};
-        std::uint32_t heartbeat_seq{0U};
-        std::uint32_t heartbeat_interval_ms{0U};
-        std::uint32_t heartbeat_timeout_ms{0U};
-        std::uint64_t last_server_now_unix_ms{0U};
-        xs::core::TimerID heartbeat_timer_id{0};
         std::vector<std::string> capability_tags{};
-        bool registered{false};
-        bool register_in_flight{false};
     };
 
     void HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state);
@@ -73,14 +58,14 @@ class GameNode final : public ServerNode
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
     [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
+    [[nodiscard]] InnerNetworkSession* gm_session() noexcept;
+    [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
     std::string gm_inner_remote_endpoint_{};
     std::string configured_inner_endpoint_{};
     xs::core::EndpointConfig configured_inner_endpoint_config_{};
-    std::unique_ptr<InnerNetwork> inner_network_{};
     ipc::ZmqConnectionState gm_inner_connection_state_cache_{ipc::ZmqConnectionState::Stopped};
     RuntimeState runtime_state_{};
-    GmSessionState gm_session_state_{};
 };
 
 } // namespace xs::node
