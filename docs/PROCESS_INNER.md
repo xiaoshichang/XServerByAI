@@ -7,9 +7,8 @@
 所有消息默认承载在 ZeroMQ over TCP 的 `Inner` 链路上；消息边界、包头与 flags 规则以 `docs/PACKET_HEADER.md` 为准。
 
 **适用范围**
-1. 当前文档覆盖 `Inner.ProcessRegister`（`1000`）、`Inner.ProcessHeartbeat`（`1100`）、`Inner.ClusterReadyNotify`（`1201`）、`Inner.ServerStubOwnershipSync`（`1202`）与 `Inner.GameServiceReadyReport`（`1203`）。
-2. `Inner.ProcessRegister` / `Inner.ProcessHeartbeat` 是共享消息：既用于 `Gate/Game -> GM`，也用于 `Game -> Gate` 的启动期闭环。
-3. 当前启动闭环不再依赖 `Gate -> GM` 的 `GameDirectoryQuery` / `GameDirectoryNotify`；旧目录查询设计已退出关键路径。
+1. 当前文档覆盖 `Inner.NodeRegister`（`1000`）、`Inner.NodeHeartbeat`（`1100`）、`Inner.ClusterReadyNotify`（`1201`）、`Inner.ServerStubOwnershipSync`（`1202`）与 `Inner.GameServiceReadyReport`（`1203`）。
+2. `Inner.NodeRegister` / `Inner.NodeHeartbeat` 是共享消息：既用于 `Gate/Game -> GM`，也用于 `Game -> Gate` 的启动期闭环。
 
 **通用编码约定**
 1. 所有整数字段统一使用网络字节序。
@@ -66,7 +65,7 @@
 | `ready` | `bool` | 当前 Stub 是否已 ready |
 | `entryFlags` | `uint32` | 保留，当前必须为 `0` |
 
-**Inner.ProcessRegister（`msgId = 1000`）**
+**Inner.NodeRegister（`msgId = 1000`）**
 1. 用途：建立一条新的启动控制面注册会话，可用于 `Gate/Game -> GM`，也可用于 `Game -> Gate`。
 2. 发送前提：发起方必须已经建立到底层 `Inner` 对端的可用链路。
 3. 成功语义：接收方接受这条注册会话，并返回后续心跳参数。
@@ -101,7 +100,7 @@
 | `errorCode` | `int32` | 失败原因，取值见 `docs/ERROR_CODE.md` |
 | `retryAfterMs` | `uint32` | 建议重试等待时间；`0` 表示未提供 |
 
-**Inner.ProcessHeartbeat（`msgId = 1100`）**
+**Inner.NodeHeartbeat（`msgId = 1100`）**
 1. 用途：维护已建立的注册会话，并附带轻量负载刷新。
 2. 发送前提：只有在同一链路上收到对应注册成功响应后，才允许开始发送心跳。
 3. 成功语义：接收方确认当前注册仍然有效，并可刷新心跳参数。
@@ -184,4 +183,5 @@
 7. `Gate` 对客户端入口的开放只取决于最新的 `Inner.ClusterReadyNotify`；本地配置齐全、局部链路可用或单个 `Game` ready 都不足以替代这一结论。
 8. 当前默认心跳参数为 `heartbeatIntervalMs = 5000`、`heartbeatTimeoutMs = 15000`；响应方可以覆盖，但必须满足 `heartbeatIntervalMs < heartbeatTimeoutMs`。
 9. `statusFlags`、`ServerStubOwnershipEntry.entryFlags` 与 `ServerStubReadyEntry.entryFlags` 当前都必须为 `0`。
-10. 当前启动关键路径不再使用 `Inner.GameDirectoryQuery` / `Inner.GameDirectoryNotify`；若未来需要额外的目录快照或增量同步协议，应以新的扩展条目重新登记，而不是重新恢复旧的启动假设。
+10. 若未来需要额外的目录快照或增量同步协议，应以新的扩展条目重新登记，而不是复用当前已登记的启动编排消息。
+

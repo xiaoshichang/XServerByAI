@@ -44,13 +44,11 @@
 
 | msgId | CanonicalName | Direction | Owner | Status | Description |
 | --- | --- | --- | --- | --- | --- |
-| `1000` | `Inner.ProcessRegister` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 启动期注册请求；成功或失败响应都复用同一 `msgId` |
-| `1100` | `Inner.ProcessHeartbeat` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 注册后的周期心跳与轻量负载上报；响应复用同一 `msgId` |
+| `1000` | `Inner.NodeRegister` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 启动期注册请求；成功或失败响应都复用同一 `msgId` |
+| `1100` | `Inner.NodeHeartbeat` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 注册后的周期心跳与轻量负载上报；响应复用同一 `msgId` |
 | `1201` | `Inner.ClusterReadyNotify` | `GM -> Gate/Game` | `GM` | `Active` | `GM` 下发集群 ready 结论；单向通知，无响应 `msgId` |
 | `1202` | `Inner.ServerStubOwnershipSync` | `GM -> Game` | `GM` | `Active` | `GM` 下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照 |
 | `1203` | `Inner.GameServiceReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `assignmentEpoch` 下的本地 assigned `ServerStubEntity` ready 聚合结果 |
-| `1204` | `Inner.GameDirectoryQuery` | `Deprecated` | `deprecated` | `Deprecated` | 历史上预留给 `Gate -> GM` 的目录查询；当前启动流已改为 `Game -> Gate` 注册维护目录，不再使用 |
-| `1205` | `Inner.GameDirectoryNotify` | `Deprecated` | `deprecated` | `Deprecated` | 历史上预留给 `GM -> Gate` 的目录推送；当前启动流不再使用 |
 
 **已登记 Relay 消息**
 
@@ -61,12 +59,12 @@
 
 **命名规范**
 1. 每个消息都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Action>` 或 `<Area>.<Subject>.<Action>`。
-2. `<Area>` 必须与所属号段的责任域一致，例如 `Inner.ProcessRegister`、`Relay.ForwardToGame`、`Inner.ClusterReadyNotify`。
+2. `<Area>` 必须与所属号段的责任域一致，例如 `Inner.NodeRegister`、`Relay.ForwardToGame`、`Inner.ClusterReadyNotify`。
 3. 请求 / 查询 / 命令名称不追加 `Request` 或 `Response` 后缀；响应使用相同 `msgId`，只通过 `Response` 标志位区分。
 4. 单向事件统一使用 `Notify` 后缀；面向客户端的主动下行消息统一使用 `Push` 后缀；仅在明确扇出语义时使用 `Broadcast`。
 5. 避免使用 `Handle`、`Do`、`Process` 这类宽泛动词，优先使用 `Register`、`Heartbeat`、`Forward`、`Join`、`Leave`、`Sync` 等领域动词。
 6. 缩写只允许使用已在项目中固定的名词，例如 `GM`、`Gate`、`Game`、`KCP`；其余名称优先使用完整单词。
-7. 文档中的规范英文名应直接映射为代码常量名，去掉 `.` 后保持 `PascalCase`，例如 `Inner.ProcessRegister` → `InnerProcessRegister`。
+7. 文档中的规范英文名应直接映射为代码常量名，去掉 `.` 后保持 `PascalCase`，例如 `Inner.NodeRegister` → `InnerNodeRegister`。
 
 **登记要求**
 1. 任何新增正式 `msgId` 的功能条目，都必须在本文件追加登记记录后才能合入。
@@ -79,3 +77,4 @@
 | msgId | CanonicalName | Direction | Owner | Status | Description |
 | --- | --- | --- | --- | --- | --- |
 | `<value>` | `<Area>.<Action>` | `<caller -> callee>` | `<owner>` | `<status>` | `<summary>` |
+

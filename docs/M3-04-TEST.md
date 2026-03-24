@@ -1,35 +1,33 @@
-﻿# M3-04 ���Լ�¼
+﻿# M3-04 测试记录
 
-## ��Χ
+## 范围
 
-- ��֧��`M3-04`
-- �����ύ��
-  - `d086807`��`[developer] M3-04 implement GM register request handling and response`
-- ������ݣ�`docs/M3-04.md`
-- ��֤Ŀ�꣺ȷ�� GM �������ѽӹ� `Inner.ProcessRegister`���ܹ������¼�ѭ�������ע��������롢ע���д�롢����ӳ������Ӧ���ͣ������� `docs/PROCESS_INNER.md` / `docs/ERROR_CODE.md` Լ����Э����������塣
+- 分支：`M3-04`
+- 开发提交：
+  - `d086807`：`[developer] M3-04 implement GM register request handling and response`
+- 设计依据：`docs/M3-04.md`
+- 验证目标：确认 `GM` 能接住 `Inner.NodeRegister` 请求、正确写入注册表、映射错误码并返回稳定响应。
 
-## ���Խ��
+## 复测结果
 
-- �������ͨ����`M2-12`��`M3-03` ����ɣ�����ǰ `M3-04` ״̬Ϊ `������`
-- Native ȫ����֤��ִ�в�ͨ����
+- 依赖检查通过：`M2-12`、`M3-03` 已完成；复测时 `M3-04` 状态为 `开发中`
+- Native 全量验证已执行并通过：
   - `cmake -S . -B build -DXS_BUILD_TESTS=ON`
   - `cmake --build build --config Debug`
   - `ctest --test-dir build -C Debug --output-on-failure`
-  - �����`15/15` ����ͨ��
-- ���ο����ύδ���� `XServerByAI.Managed.sln`��`src/managed/` ������ .NET �����ļ������δִ�� managed build
-- �Զ������Ը���ͨ����
-  - `xs_node_gm_register_tests` �˵�����֤ `Game` ע��ɹ���д��ע����`Gate` / `Game` ��ͬһ GM �����˿�������ע��ɹ����ɹ���Ӧ�� `msgId` / `flags` / `seq` ���ԡ��ظ� `nodeId` ���� `3001`���Ƿ� `processType` ���� `3000`���Ƿ� `innerNetworkEndpoint` ���� `3002`�������ֶηǷ����� `3005`���Լ�������������Ⱦע����Ҳ��������Ӧ
-  - `xs_node_gm_node_tests` ����ͨ����˵�� `InnerNetwork` �ļ����������ڡ�·����Ϣ�������¼�ѭ��������û�б�����Ŀ�ع��ƻ�
-  - `xs_net_register_codec_tests` ������ native ��������ͨ����˵������Ŀ��ע����Ӧ����������·���Ľ���û���ƻ����б���������ģ��
-- ���������һ���Լ��ͨ����
-  - `InnerNetwork` �ѱ�¶�ȶ��ġ��յ�·����Ϣ���ص��롰�� routingId �ذ����������Ա���ֻ���� ROUTER ��������
-  - `GmNode` ���ӹ� `msgId = 1000` �� `Response` / `Error` ��־δ��λ��`seq != 0` ��ע�������޷��γ��ȶ�Э�������ĵ��𻵰���¼��־����
-  - ע��ɹ�ʱ��� `routingId`��`lastHeartbeatAtUnixMs`��`innerNetworkReady = false` д�� `ProcessRegistry`��������Ĭ�� `5000ms / 15000ms` ���������� `serverNowUnixMs`
-  - ע��ʧ��ʱ���������ĵ�һ�£�`3000 Inner.ProcessTypeInvalid`��`3001 Inner.NodeIdConflict`��`3002 Inner.InnerNetworkEndpointInvalid`��`3005 Inner.RequestInvalid`
+  - 结果：当时记录的 native 用例全部通过
+- 本次变更未触及 `XServerByAI.Managed.sln`、`src/managed/` 或其他 .NET 工程文件，因此未执行 managed build
+- 自动化测试覆盖通过：
+  - `xs_node_gm_register_tests` 验证 `Gate` / `Game` 注册成功写入注册表、成功响应的 `msgId` / `flags` / `seq` 正确、重复 `nodeId` 返回 `3001`、非法 `processType` 返回 `3000`、非法 `innerNetworkEndpoint` 返回 `3002`、非法 payload 返回 `3005`，以及损坏 packet 不污染注册表
+  - `xs_node_gm_node_tests` 验证 `InnerNetwork` 监听、收包、路由回传与 GM 生命周期骨架没有被本条目回归破坏
+  - `xs_net_register_codec_tests` 继续为注册 payload 的编解码稳定性提供底层保障
+- 行为检查结果：
+  - `InnerNetwork` 已能把 `routingId + payload` 交给 `GmNode`，支撑 ROUTER 链路上的注册处理
+  - `GmNode` 能把注册成功请求写入 `ProcessRegistry`，并初始化 `lastHeartbeatAtUnixMs` 与默认心跳参数
+  - 失败响应已与 `docs/PROCESS_INNER.md` / `docs/ERROR_CODE.md` 保持一致，不再需要测试侧自行猜测错误返回格式
 
-## ���½���
+## 最新结论
 
-- `M3-04` ���ֲ���ͨ����
-- `docs/DEVELOPMENT_PLAN.md` �ѽ� `M3-04` �� `������` ����Ϊ `�����`��
-- ���� `M3-05`��`M3-06`��`M3-12` ����ֱ�Ӹ��ñ���Ŀ�γɵ�ע���д������������Ӧ�����������·��Ӧ������
-
+- `M3-04` 本轮测试通过。
+- `docs/DEVELOPMENT_PLAN.md` 已将 `M3-04` 标记为 `已完成`。
+- 后续 `M3-05` 可以直接在现有注册表与路由标识基础上承接心跳刷新、超时剔除与链路失效语义。

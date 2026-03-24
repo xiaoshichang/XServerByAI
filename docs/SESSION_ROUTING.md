@@ -4,7 +4,7 @@
 
 **适用范围**
 1. 当前模型覆盖 `Gate` 维护的客户端逻辑会话、`Gate` 视角的 `Game` 路由目录，以及后续 `Gate -> Game -> C#` 转发链路。
-2. 当前模型假定 `Game` 通过 `Inner.ProcessRegister` / `Inner.ProcessHeartbeat` 主动向每个 `Gate` 完成注册与心跳；`Gate` 本地路由目录来自这些闭环结果，而不是 `GM` 主动推送的目录快照。
+2. 当前模型假定 `Game` 通过 `Inner.NodeRegister` / `Inner.NodeHeartbeat` 主动向每个 `Gate` 完成注册与心跳；`Gate` 本地路由目录来自这些闭环结果，而不是 `GM` 主动推送的目录快照。
 3. `Gate` 只有在收到 `GM` 下发的 `clusterReady = true` 后，才允许真正接纳客户端会话；但它可以在此之前提前维护 `Game` 目录与内部转发目标。
 
 **基础约定**
@@ -111,3 +111,4 @@
 3. `M4-10` 的会话断开清理应依赖 `gameNodeId -> sessionId[]` 索引，保证 `Game` 路由失效时能快速定位受影响会话。
 4. `M4-11` 的固定绑定策略只允许决定“如何选择首次目标 `Game`”，不应改写 `RouteTarget` 与 `RouteState` 的基础语义。
 5. `M4-12` 的负载感知分配应读取 `GameDirectoryEntry.load`，并只在 `Available` 的目录项中选择候选目标。
+
