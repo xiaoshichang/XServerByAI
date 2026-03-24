@@ -3,6 +3,7 @@
 #include "Json.h"
 #include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
+#include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
 
@@ -653,6 +654,32 @@ std::vector<std::byte> EncodeHeartbeatErrorPacket(
     return packet;
 }
 
+std::vector<std::byte> EncodeClusterReadyNotifyPacket(
+    std::uint64_t ready_epoch,
+    bool cluster_ready)
+{
+    const xs::net::ClusterReadyNotify notify{
+        .ready_epoch = ready_epoch,
+        .cluster_ready = cluster_ready,
+        .status_flags = 0U,
+        .server_now_unix_ms = CurrentUnixTimeMilliseconds(),
+    };
+
+    std::array<std::byte, xs::net::kClusterReadyNotifySize> body{};
+    XS_CHECK(
+        xs::net::EncodeClusterReadyNotify(notify, body) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + body.size());
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerClusterReadyNotifyMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(body.size()));
+    XS_CHECK(xs::net::EncodePacket(header, body, packet) == xs::net::PacketCodecErrorCode::None);
+    return packet;
+}
+
 void TestGateNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gate-gm-session-real-gm");
@@ -726,6 +753,123 @@ void TestGateNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
     XS_CHECK(log_text.find("Gate node accepted GM heartbeat success response.") != std::string::npos);
     XS_CHECK(log_text.find("GM accepted register request.") != std::string::npos);
     XS_CHECK(log_text.find("GM inner service refreshed heartbeat state.") != std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
+
+void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gate-gm-session-cluster-ready");
+
+    RawZmqSocket router(ZMQ_ROUTER);
+    XS_CHECK(router.IsValid());
+
+    const std::string gm_endpoint = router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, ParsePortFromTcpEndpoint(gm_endpoint), AcquireLoopbackPort(), &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGateNode gate_node(config_path);
+    if (!gate_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gate_node]() {
+        return gate_node.node().gm_inner_connection_state() == xs::ipc::ZmqConnectionState::Connected;
+    }));
+    XS_CHECK(!gate_node.node().cluster_ready());
+    XS_CHECK(gate_node.node().cluster_ready_epoch() == 0U);
+    XS_CHECK(!gate_node.node().client_network_running());
+
+    std::vector<std::vector<std::byte>> router_frames;
+    bool register_accepted = false;
+    bool heartbeat_accepted = false;
+    bool cluster_ready_sent = false;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (TryReceiveMultipartMessage(router.socket(), &router_frames))
+        {
+            XS_CHECK(router_frames.size() == 2u);
+            if (router_frames.size() != 2u)
+            {
+                break;
+            }
+
+            xs::net::PacketView packet{};
+            XS_CHECK(xs::net::DecodePacket(router_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+            if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+            {
+                xs::net::RegisterRequest request{};
+                XS_CHECK(xs::net::DecodeRegisterRequest(packet.payload, &request) == xs::net::RegisterCodecErrorCode::None);
+                XS_CHECK(request.node_id == "Gate0");
+                register_accepted = true;
+
+                const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
+            }
+            else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+            {
+                xs::net::HeartbeatRequest request{};
+                XS_CHECK(
+                    xs::net::DecodeHeartbeatRequest(packet.payload, &request) == xs::net::HeartbeatCodecErrorCode::None);
+                XS_CHECK(!gate_node.node().cluster_ready());
+                XS_CHECK(!gate_node.node().client_network_running());
+
+                heartbeat_accepted = true;
+                const std::vector<std::byte> response =
+                    EncodeHeartbeatSuccessPacket(packet.header.seq, 500U, 1500U);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
+
+                if (!cluster_ready_sent)
+                {
+                    const std::vector<std::byte> notify = EncodeClusterReadyNotifyPacket(7U, true);
+                    XS_CHECK(SendRouterReply(router.socket(), router_frames[0], notify));
+                    cluster_ready_sent = true;
+                }
+            }
+        }
+
+        if (cluster_ready_sent && gate_node.node().client_network_running())
+        {
+            break;
+        }
+
+        if (gate_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(register_accepted);
+    XS_CHECK(heartbeat_accepted);
+    XS_CHECK(cluster_ready_sent);
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gate_node]() {
+        return gate_node.node().cluster_ready() &&
+            gate_node.node().cluster_ready_epoch() == 7U &&
+            gate_node.node().client_network_running();
+    }));
+
+    gate_node.StopAndJoin();
+    XS_CHECK_MSG(gate_node.run_result() == xs::node::NodeErrorCode::None, gate_node.run_error().data());
+    XS_CHECK(gate_node.Uninit());
+
+    const std::filesystem::path log_dir = base_path / "logs";
+    XS_CHECK(DirectoryContainsRegularFile(log_dir));
+
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("Gate node accepted GM cluster ready notify.") != std::string::npos);
+    XS_CHECK(log_text.find("Client network placeholder started.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }
@@ -867,6 +1011,7 @@ void TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister()
 int main()
 {
     TestGateNodeRegistersAndRefreshesHeartbeatAgainstRealGm();
+    TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify();
     TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister();
 
     if (g_failures != 0)

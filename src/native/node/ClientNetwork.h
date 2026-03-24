@@ -35,9 +35,11 @@ class ClientNetwork final
 
     [[nodiscard]] NodeErrorCode Init();
     [[nodiscard]] NodeErrorCode Run();
+    [[nodiscard]] NodeErrorCode Stop();
     [[nodiscard]] NodeErrorCode Uninit();
 
     [[nodiscard]] bool initialized() const noexcept;
+    [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] std::string_view configured_endpoint() const noexcept;
     [[nodiscard]] std::string_view last_error_message() const noexcept;
 

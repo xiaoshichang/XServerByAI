@@ -1,4 +1,4 @@
-# 项目说明（初版）
+﻿# 项目说明（初版）
 
 本文档描述 XServerByAI 当前阶段的目标、节点拓扑、网络分层与关键技术边界。当前阶段以“统一节点入口 + 配置基线 + 协议骨架 + 运行时骨架”为主，不展开完整业务玩法实现。
 
@@ -20,12 +20,12 @@
 4. 基础第三方依赖以 vendored 源码或官方 host pack 工件形式统一放在 `3rd/`，当前基线为 `spdlog`、`zeromq/libzmq`、standalone `asio`、header-only `nlohmann/json` 与 .NET 官方 `dotnet_host`（`nethost` / `hostfxr` headers + platform `nethost` link artifacts）。
 
 **节点角色**
-1. `GM`：集群协调节点，负责注册、心跳、ready 聚合、ownership 分配与路由目录维护。
-2. `Gate`：客户端接入节点，负责 `Client` 网络、会话管理与 Gate/Game 中继。
-3. `Game`：业务承载节点，负责托管逻辑、实体状态与本地 ready 上报。
+1. `GM`：集群协调节点，负责注册、心跳、ownership 分配、ready 聚合与 `clusterReady` 编排。
+2. `Gate`：客户端接入节点，负责 `Client` 网络、会话管理、维护已注册 `Game` 目录以及 Gate/Game 中继。
+3. `Game`：业务承载节点，负责托管逻辑、实体状态、对全部 `Gate` 的注册/心跳以及本地 ready 上报。
 
 **网络分层命名**
-1. `Inner`：节点与节点之间的网络，当前主要承载 `GM <-> Gate/Game` 的注册、心跳和路由消息。
+1. `Inner`：节点与节点之间的网络，当前主要承载 `GM <-> Gate/Game` 与 `Game -> Gate` 的注册、心跳及启动编排消息。
 2. `Control`：ctrl 工具与 `GM` 之间的管理网络。当前阶段已落地 `GM` 本地 HTTP 管理接口，并统一沿用 `ControlNetwork`、`controlNetwork.listenEndpoint` 命名。
 3. `Client`：`Gate` 与客户端之间的网络，对应 `ClientNetwork`、`clientNetwork.listenEndpoint` 与集群级 `kcp`。
 
@@ -37,7 +37,7 @@
 **拓扑**
 1. 当前默认拓扑为 `1 GM + N Gate + M Game`，其中 `N >= 1`、`M >= 1`。
 2. `GM` 与每个 `Gate` / `Game` 通过 `Inner` 网络直接通信。
-3. `Gate` 与 `Game` 之间通过 `Inner` 网络形成全互连中继平面。
+3. `Gate` 与 `Game` 之间通过 `Inner` 网络形成“`Game` 主动注册到全部 `Gate`”的中继平面。
 4. 客户端只与 `Gate` 的 `Client` 网络通信。
 5. `Gate` 与 `Gate`、`Game` 与 `Game` 当前不直接形成业务通道。
 
@@ -53,7 +53,7 @@
 4. `gm.controlNetwork.listenEndpoint` 表示 `GM` 的本地 HTTP 管理接口监听地址。
 5. `gate.<NodeID>` 同时包含 `innerNetwork.listenEndpoint` 与 `clientNetwork.listenEndpoint`。
 6. `game.<NodeID>` 包含 `innerNetwork.listenEndpoint` 与可选 `managed.assemblyName`。
-6. 当前仓库样例配置位于 `configs/local-dev.json`。
+7. 当前仓库样例配置位于 `configs/local-dev.json`。
 
 **协议与运行时**
 1. 节点间消息统一使用二进制包头与消息体编码，包头定义见 `docs/PACKET_HEADER.md`。

@@ -1,4 +1,4 @@
-# MSG_ID
+﻿# MSG_ID
 
 本文档定义 XServerByAI 当前阶段 `msgId` 的分段方式、规范命名方式与登记规则。所有内部协议、Gate↔Client 协议与后续 C# 实体消息在分配编号前都应先更新本文件。
 
@@ -14,7 +14,7 @@
 | 范围 | 类别 | 用途 |
 | --- | --- | --- |
 | `1-999` | 协议保留 | 协议层公共语义、基础兼容控制、通用保留位配套消息 |
-| `1000-1999` | Inner 网络 | GM ↔ Gate/Game 的注册、心跳、Stub ownership、ready 上报与路由编排消息 |
+| `1000-1999` | Inner 网络 | `GM ↔ Gate/Game` 与 `Game ↔ Gate` 的注册、心跳、Stub ownership、ready 上报与启动编排消息 |
 | `2000-3999` | 内部中转 | Gate ↔ Game 封装、会话事件、内部 RPC 与转发消息 |
 | `4000-9999` | 客户端接入 | Gate ↔ Client 的鉴权、会话、基础服务与通用推送 |
 | `10000-39999` | 预留 | 预留 |
@@ -26,9 +26,9 @@
 
 | 范围 | 预留对象 | 说明 | 关联条目 |
 | --- | --- | --- | --- |
-| `1000-1099` | 进程注册 / 注销 | GM Inner 网络的进程生命周期消息 | `M1-09`, `M3-04` |
-| `1100-1199` | 心跳 / 健康检查 | 心跳、超时探测、状态上报 | `M1-09`, `M3-05` |
-| `1200-1299` | 启动编排 / 路由下发 | GM 下发集群就绪状态、Stub ownership、Game 服务 ready 聚合结果关联消息、Game 节点路由目录与路由变更 | `M3-06`, `M3-12`, `M3-14`, `M3-15` |
+| `1000-1099` | 进程 / 链路注册 | `GM` 协调与 `Game -> Gate` 启动链路的注册消息 | `M1-09`, `M3-04`, `M3-13` |
+| `1100-1199` | 心跳 / 健康检查 | `GM` 协调与 `Game -> Gate` 启动链路的心跳消息 | `M1-09`, `M3-05`, `M3-13` |
+| `1200-1299` | 启动编排 / 集群就绪 | `GM` 下发集群就绪状态、Stub ownership、Game 服务 ready 聚合结果及相关扩展 | `M3-06`, `M3-12`, `M3-14`, `M3-15` |
 | `2000-2099` | Gate↔Game 封装 | 请求转发、响应回传、内部 RPC 信封 | `M1-10`, `M4-06`, `M4-07` |
 | `2100-2199` | 会话事件 | 绑定、关闭、路由丢失、踢出、重连等会话与路由状态变化 | `M1-12`, `M4-10`, `M4-16`, `M5-08` |
 | `4000-4199` | 客户端会话基础 | 鉴权、客户端心跳、基础 Push | `M4-03`, `M4-15` |
@@ -44,13 +44,13 @@
 
 | msgId | CanonicalName | Direction | Owner | Status | Description |
 | --- | --- | --- | --- | --- | --- |
-| `1000` | `Inner.ProcessRegister` | `Gate/Game -> GM` | `GM` | `Active` | 进程注册请求；成功或失败响应都复用同一 `msgId` |
-| `1100` | `Inner.ProcessHeartbeat` | `Gate/Game -> GM` | `GM` | `Active` | 注册后的周期心跳与轻量负载上报；响应复用同一 `msgId` |
-| `1201` | `Inner.ClusterReadyNotify` | `GM -> Gate/Game` | `GM` | `Active` | GM 下发集群 ready 结论；单向通知，无响应 `msgId` |
-| `1202` | `Inner.ServerStubOwnershipSync` | `GM -> Game` | `GM` | `Active` | GM 下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照 |
+| `1000` | `Inner.ProcessRegister` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 启动期注册请求；成功或失败响应都复用同一 `msgId` |
+| `1100` | `Inner.ProcessHeartbeat` | `Gate/Game -> GM`, `Game -> Gate` | `GM`, `Gate` | `Active` | 注册后的周期心跳与轻量负载上报；响应复用同一 `msgId` |
+| `1201` | `Inner.ClusterReadyNotify` | `GM -> Gate/Game` | `GM` | `Active` | `GM` 下发集群 ready 结论；单向通知，无响应 `msgId` |
+| `1202` | `Inner.ServerStubOwnershipSync` | `GM -> Game` | `GM` | `Active` | `GM` 下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照 |
 | `1203` | `Inner.GameServiceReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `assignmentEpoch` 下的本地 assigned `ServerStubEntity` ready 聚合结果 |
-| `1204` | `Inner.GameDirectoryQuery` | `Gate -> GM` | `gate` | `Active` | `Gate` 查询当前 `Game` 路由目录，并可请求建立后续变化订阅；响应复用同一 `msgId` |
-| `1205` | `Inner.GameDirectoryNotify` | `GM -> Gate` | `GM` | `Active` | GM 向已订阅 `Gate` 推送新的全量 `Game` 路由目录快照 |
+| `1204` | `Inner.GameDirectoryQuery` | `Deprecated` | `deprecated` | `Deprecated` | 历史上预留给 `Gate -> GM` 的目录查询；当前启动流已改为 `Game -> Gate` 注册维护目录，不再使用 |
+| `1205` | `Inner.GameDirectoryNotify` | `Deprecated` | `deprecated` | `Deprecated` | 历史上预留给 `GM -> Gate` 的目录推送；当前启动流不再使用 |
 
 **已登记 Relay 消息**
 
@@ -79,5 +79,3 @@
 | msgId | CanonicalName | Direction | Owner | Status | Description |
 | --- | --- | --- | --- | --- | --- |
 | `<value>` | `<Area>.<Action>` | `<caller -> callee>` | `<owner>` | `<status>` | `<summary>` |
-
-

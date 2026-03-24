@@ -2,6 +2,7 @@
 
 #include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
+#include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
 
@@ -80,6 +81,21 @@ ipc::ZmqConnectionState GateNode::gm_inner_connection_state() const noexcept
     return inner_network_ != nullptr ? inner_network_->connection_state() : ipc::ZmqConnectionState::Stopped;
 }
 
+bool GateNode::cluster_ready() const noexcept
+{
+    return cluster_ready_;
+}
+
+std::uint64_t GateNode::cluster_ready_epoch() const noexcept
+{
+    return cluster_ready_epoch_;
+}
+
+bool GateNode::client_network_running() const noexcept
+{
+    return client_network_ != nullptr && client_network_->running();
+}
+
 xs::core::ProcessType GateNode::role_process_type() const noexcept
 {
     return xs::core::ProcessType::Gate;
@@ -137,6 +153,9 @@ NodeErrorCode GateNode::OnInit()
     gm_session_state_ = GmSessionState{};
     gm_session_state_.build_version = std::string(kGateBuildVersion);
     gm_session_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
+    cluster_ready_epoch_ = 0U;
+    last_cluster_ready_server_now_unix_ms_ = 0U;
+    cluster_ready_ = false;
 
     InnerNetworkOptions inner_options;
     inner_options.mode = InnerNetworkMode::ActiveConnector;
@@ -203,13 +222,7 @@ NodeErrorCode GateNode::OnRun()
         return SetError(inner_result, std::string(inner_network_->last_error_message()));
     }
 
-    const NodeErrorCode client_result = client_network_->Run();
-    if (client_result != NodeErrorCode::None)
-    {
-        return SetError(client_result, std::string(client_network_->last_error_message()));
-    }
-
-    const std::array<xs::core::LogContextField, 5> context{
+    const std::array<xs::core::LogContextField, 7> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
@@ -218,6 +231,8 @@ NodeErrorCode GateNode::OnRun()
             std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
         },
         xs::core::LogContextField{"clientListenEndpoint", std::string(client_network_->configured_endpoint())},
+        xs::core::LogContextField{"clusterReady", cluster_ready_ ? "true" : "false"},
+        xs::core::LogContextField{"clientNetworkRunning", client_network_->running() ? "true" : "false"},
     };
     logger().Log(xs::core::LogLevel::Info, "runtime", "Gate node entered runtime state.", context);
 
@@ -301,6 +316,12 @@ void GateNode::HandleInnerMessage(std::span<const std::byte> payload)
         return;
     }
 
+    if (packet.header.msg_id == xs::net::kInnerClusterReadyNotifyMsgId)
+    {
+        HandleClusterReadyNotify(packet);
+        return;
+    }
+
     if ((packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags) ||
         packet.header.seq == xs::net::kPacketSeqNone)
     {
@@ -338,6 +359,107 @@ void GateNode::HandleInnerMessage(std::span<const std::byte> payload)
         xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored an unsupported GM response packet.", context);
+}
+
+void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
+{
+    if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+        };
+        gm_session_state_.last_protocol_error = "GM clusterReady notify envelope is invalid.";
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify with an invalid envelope.", context);
+        return;
+    }
+
+    if (!gm_session_state_.registered)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"registered", gm_session_state_.registered ? "true" : "false"},
+            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+        };
+        gm_session_state_.last_protocol_error = "GM clusterReady notify arrived before Gate registration completed.";
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify before registration completed.", context);
+        return;
+    }
+
+    xs::net::ClusterReadyNotify notify{};
+    const xs::net::InnerClusterCodecErrorCode decode_result =
+        xs::net::DecodeClusterReadyNotify(packet.payload, &notify);
+    if (decode_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{
+                "codecError",
+                std::string(xs::net::InnerClusterCodecErrorMessage(decode_result)),
+            },
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+        };
+        gm_session_state_.last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM cluster ready notify.", context);
+        return;
+    }
+
+    if (notify.ready_epoch < cluster_ready_epoch_)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
+            xs::core::LogContextField{"currentReadyEpoch", ToString(cluster_ready_epoch_)},
+            xs::core::LogContextField{"clusterReady", notify.cluster_ready ? "true" : "false"},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+        };
+        logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored stale GM cluster ready notify.", context);
+        return;
+    }
+
+    cluster_ready_epoch_ = notify.ready_epoch;
+    cluster_ready_ = notify.cluster_ready;
+    last_cluster_ready_server_now_unix_ms_ = notify.server_now_unix_ms;
+    gm_session_state_.last_protocol_error.clear();
+
+    if (client_network_ != nullptr)
+    {
+        const NodeErrorCode client_result = cluster_ready_ ? client_network_->Run() : client_network_->Stop();
+        if (client_result != NodeErrorCode::None)
+        {
+            gm_session_state_.last_protocol_error = std::string(client_network_->last_error_message());
+
+            const std::array<xs::core::LogContextField, 6> context{
+                xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
+                xs::core::LogContextField{"clusterReady", notify.cluster_ready ? "true" : "false"},
+                xs::core::LogContextField{
+                    "clientListenEndpoint",
+                    std::string(client_network_->configured_endpoint()),
+                },
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
+                xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+                xs::core::LogContextField{"clientNetworkRunning", client_network_->running() ? "true" : "false"},
+            };
+            logger().Log(xs::core::LogLevel::Error, "inner", "Gate node failed to apply GM cluster ready notify to client network.", context);
+            return;
+        }
+    }
+
+    const std::array<xs::core::LogContextField, 7> context{
+        xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
+        xs::core::LogContextField{"clusterReady", notify.cluster_ready ? "true" : "false"},
+        xs::core::LogContextField{"statusFlags", std::to_string(notify.status_flags)},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(notify.server_now_unix_ms)},
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+        xs::core::LogContextField{"clientNetworkRunning", client_network_running() ? "true" : "false"},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Gate node accepted GM cluster ready notify.", context);
 }
 
 void GateNode::HandleRegisterResponse(const xs::net::PacketView& packet)
@@ -737,6 +859,23 @@ void GateNode::ResetGmSessionState()
     gm_session_state_.heartbeat_interval_ms = 0U;
     gm_session_state_.heartbeat_timeout_ms = 0U;
     gm_session_state_.last_server_now_unix_ms = 0U;
+    ResetClusterReadyState();
+}
+
+void GateNode::ResetClusterReadyState()
+{
+    cluster_ready_epoch_ = 0U;
+    last_cluster_ready_server_now_unix_ms_ = 0U;
+    cluster_ready_ = false;
+
+    if (client_network_ != nullptr && client_network_->running())
+    {
+        const NodeErrorCode result = client_network_->Stop();
+        if (result != NodeErrorCode::None)
+        {
+            gm_session_state_.last_protocol_error = std::string(client_network_->last_error_message());
+        }
+    }
 }
 
 void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)

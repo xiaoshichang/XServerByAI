@@ -83,17 +83,43 @@ class ClientNetwork::Impl final
                 "ClientNetwork must be initialized before Run().");
         }
 
+        if (running_)
+        {
+            ClearError(last_error_message_);
+            return NodeErrorCode::None;
+        }
+
         const std::array<xs::core::LogContextField, 1> context{
             xs::core::LogContextField{"listenEndpoint", ToEndpointText(options_.listen_endpoint)},
         };
         logger_.Log(xs::core::LogLevel::Info, "client.network", "Client network placeholder started.", context);
 
+        running_ = true;
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
+    }
+
+    [[nodiscard]] NodeErrorCode Stop()
+    {
+        if (!initialized_ || !running_)
+        {
+            ClearError(last_error_message_);
+            return NodeErrorCode::None;
+        }
+
+        const std::array<xs::core::LogContextField, 1> context{
+            xs::core::LogContextField{"listenEndpoint", ToEndpointText(options_.listen_endpoint)},
+        };
+        logger_.Log(xs::core::LogLevel::Info, "client.network", "Client network placeholder stopped.", context);
+
+        running_ = false;
         ClearError(last_error_message_);
         return NodeErrorCode::None;
     }
 
     [[nodiscard]] NodeErrorCode Uninit() noexcept
     {
+        running_ = false;
         initialized_ = false;
         ClearError(last_error_message_);
         return NodeErrorCode::None;
@@ -102,6 +128,11 @@ class ClientNetwork::Impl final
     [[nodiscard]] bool initialized() const noexcept
     {
         return initialized_;
+    }
+
+    [[nodiscard]] bool running() const noexcept
+    {
+        return running_;
     }
 
     [[nodiscard]] std::string_view configured_endpoint() const noexcept
@@ -117,9 +148,10 @@ class ClientNetwork::Impl final
   private:
     xs::core::MainEventLoop& event_loop_;
     xs::core::Logger& logger_;
-    ClientNetworkOptions options_{};
+    ClientNetworkOptions options_{};    
     std::string last_error_message_{};
     bool initialized_{false};
+    bool running_{false};
 };
 
 ClientNetwork::ClientNetwork(
@@ -142,6 +174,16 @@ NodeErrorCode ClientNetwork::Run()
     return impl_->Run();
 }
 
+NodeErrorCode ClientNetwork::Stop()
+{
+    if (impl_ != nullptr)
+    {
+        return impl_->Stop();
+    }
+
+    return NodeErrorCode::None;
+}
+
 NodeErrorCode ClientNetwork::Uninit()
 {
     if (impl_ != nullptr)
@@ -155,6 +197,11 @@ NodeErrorCode ClientNetwork::Uninit()
 bool ClientNetwork::initialized() const noexcept
 {
     return impl_ != nullptr && impl_->initialized();
+}
+
+bool ClientNetwork::running() const noexcept
+{
+    return impl_ != nullptr && impl_->running();
 }
 
 std::string_view ClientNetwork::configured_endpoint() const noexcept
