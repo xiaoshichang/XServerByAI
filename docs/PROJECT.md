@@ -64,7 +64,8 @@
 **托管互操作**
 1. 当前阶段只有 `Game` 进程承载 CLR。
 2. 默认托管程序集名为 `XServer.Managed.GameLogic`。
-3. ABI 与导出函数约定见 `docs/MANAGED_INTEROP.md`。
+3. `src/managed/Foundation` 承载通用契约与互操作共享类型，`src/managed/Framework` 承载 `ServerEntity` / `ServerStubEntity` 等分布式实体框架公共抽象，`src/managed/GameLogic` 承载业务逻辑并依赖 `Framework`。
+4. ABI 与导出函数约定见 `docs/MANAGED_INTEROP.md`。
 
 **关联文档**
 1. 配置与日志：`docs/CONFIG_LOGGING.md`

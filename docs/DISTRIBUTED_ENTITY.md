@@ -1,11 +1,11 @@
-﻿# DISTRIBUTED_ENTITY
+# DISTRIBUTED_ENTITY
 
 本文档定义 XServerByAI 当前阶段 C# 业务层采用的分布式实体架构、核心概念与职责边界。后续 `M5-03` 至 `M5-16` 在实现实体基类、注册表、消息分发、实体路由、Tick、持久化与 Stub 示例时，应以本文件作为统一语义基线。
 
 **适用范围**
 1. 当前架构允许多机多进程部署，开发期默认以单机多进程形态联调与测试；业务实体默认运行在 Game 进程内，Gate 与 GM 不承载业务实体状态。
 2. 当前只定义单服务器组内的实体 ownership、消息分发、迁移属性与路由关系；服务器组本身可部署在单机或多机环境中，但仍不定义跨服务器组迁移、跨机房复制或 active-active 多写模型。
-3. 当前阶段不引入 Game↔Game 直接业务通信；跨节点实体调用统一复用现有内部 RPC 链路，其中动态 `Proxy` 调用需要 Gate 做二次寻址。
+3. 当前阶段不引入 Game↔Game 直接业务通信；跨节点实体调用统一先检查目标实体是否在本地，若不在本地则一律经 Gate 中转。`Mailbox` 携带静态目标 `GameNodeId` 供 Gate 直接转发，`Proxy` 携带路由表所在 Gate 信息并由 Gate 按当前 ownership 查表后再转发。
 4. 实体架构与 Gate 会话/路由模型解耦：会话与节点目录语义见 `docs/SESSION_ROUTING.md`，实体架构只消费稳定的 `sessionId`、`playerId`、`gameNodeId` 与 `routeEpoch` 等语义。
 
 **核心概念**
@@ -16,8 +16,8 @@
 | `MobilityType` | 实体迁移属性，取值为 `Migratable` 或 `Pinned`。只有 `Migratable` 实体允许显式切换 `OwnerGameNodeId`。 |
 | `OwnerGameNodeId` | 当前持有该实体活动实例的 Game `NodeID`。它表达单活 ownership，而不是网络连接句柄或注册租约。 |
 | `Activation` | 某个逻辑实体在 Game 进程内被装载后的内存实例。一个 `EntityKey` 在任意时刻最多只能存在一个活动 `Activation`。 |
-| `Mailbox` | 静态实体地址。适用于 `Pinned` 实体或已经由 `GM` 在启动阶段完成归属分配的 `ServerStubEntity`；调用方无需经 Gate 做动态 owner 查询即可确定目标实体。 |
-| `Proxy` | 动态实体引用。适用于 `Migratable` 实体；调用时需要先转发到 Gate，再由 Gate 按当前 ownership 解析到所在 Game。 |
+| `Mailbox` | 静态实体地址。适用于 `Pinned` 实体或已经由 `GM` 在启动阶段完成归属分配的 `ServerStubEntity`；应携带目标 `GameNodeId`（或等价目标地址）。调用方总是先做本地查找，远程时经 Gate 按该静态目标直接转发。 |
+| `Proxy` | 动态实体引用。适用于 `Migratable` 实体；应携带路由表所在的 Gate 信息。调用方总是先做本地查找，远程时先发往该 Gate，再由 Gate 按当前 ownership 解析到所在 Game。 |
 | `ExecutionLane` | 实体的串行执行上下文。来自客户端消息、内部事件、Tick 与异步回调都应先进入实体所属的串行调度，再修改实体状态。 |
 | `RouteHint` | 上游路由提供的实体定位线索，例如 `playerId`、`spaceId`、服务名或 shard key。它只负责帮助定位目标实体，不直接替代实体状态。 |
 
@@ -41,7 +41,7 @@
 4. 迁移是业务框架的显式操作，而不是传输层的静默副作用；是否支持某个实体类型迁移，应由框架层和实体类型共同声明。
 
 **职责边界**
-1. `Gate` 负责客户端连接、KCP 会话、鉴权、路由选择与消息转发；它可以知道 `sessionId -> playerId` 以及可迁移实体 `Proxy` 的当前 owner 线索，但不持有玩家、场景或 Stub 的权威业务状态。客户端入口是否开放只取决于 GM 下发的集群级 ready 结果，而不是 Gate 本地推断。
+1. `Gate` 负责客户端连接、KCP 会话、鉴权、路由选择与消息转发；所有非本地实体调用都必须经 Gate 中转。对于 `Mailbox`，Gate 按地址中给出的目标 `GameNodeId` 直接转发；对于 `Proxy`，Gate 先根据其携带的路由表信息解析当前 owner，再转发到所在 Game。Gate 不持有玩家、场景或 Stub 的权威业务状态。客户端入口是否开放只取决于 GM 下发的集群级 ready 结果，而不是 Gate 本地推断。
 2. `GM` 负责Inner 网络、注册表、配置、节点目录与集群 ready 聚合；它不直接承载业务实体，不参与实体 Tick，也不作为业务消息的执行方。
 3. `Game` 负责持有实体活动实例、维护实体注册表、执行消息分发、推进 Tick、驱动脏标记与衔接持久化接口，是业务状态的唯一运行时宿主；同时负责本地 `ServerStubEntity` 初始化完成后的 ready 判定与上报。
 4. `ServerEntity` 负责封装本实体的领域不变量、属性更新、状态同步钩子与保存/装载边界；框架层不应把这些规则散落到传输层或外部工具类。
@@ -49,13 +49,13 @@
 6. 任何共享可变业务状态都应归属于某个实体实例；禁止通过进程级静态单例、裸全局字典或 Gate 连接对象持有与实体重复的权威状态。
 
 **路由与消息分发模型**
-1. 默认业务链路为 `client session -> Gate -> PlayerEntity Proxy -> current PlayerEntity -> SpaceEntity Mailbox / other ServerEntity / ServerStubEntity Mailbox`。Gate 负责把客户端请求转发到入口 Game，并为动态 `Proxy` 提供当前 owner 解析。
+1. 默认业务链路为 `client session -> Gate -> PlayerEntity Proxy -> current PlayerEntity -> SpaceEntity Mailbox / other ServerEntity / ServerStubEntity Mailbox`。无论调用侧持有 `Mailbox` 还是 `Proxy`，都应先检查目标实体是否在本地；若不在本地，则统一经 Gate 中转。Gate 对 `Mailbox` 按静态目标转发，对 `Proxy` 按路由表解析当前 owner 后转发。
 2. 面向玩家的客户端请求应优先落到 `PlayerEntity`；`PlayerEntity` 作为玩家上下文入口，再决定是否转发给 `SpaceEntity`、其他 `ServerEntity` 或 `ServerStubEntity`。不要让客户端直接绕过玩家上下文操纵场景或其他业务实体。
-3. `Mailbox` 只用于不可迁移实体：例如 `SpaceEntity` 以及已经由 `GM` 在启动阶段完成归属分配的 `ServerStubEntity`。调用侧必须把 `Mailbox` 视为静态地址，而不是可被迁移后的软引用。
-4. `Proxy` 只用于可迁移实体：例如 `PlayerEntity`。调用侧不得把某次解析得到的 `OwnerGameNodeId` 当作长期真值；跨节点调用时应重新经 Gate 解析当前 owner。
-5. 若调用方与目标实体恰好位于同一个 Game，运行时可以做本地短路调用；但语义层面仍应保持 `Mailbox` 与 `Proxy` 的区分，避免把本地优化误当成地址模型。
-6. 跨节点 `Mailbox` 调用可以直接按已知目标 `GameNodeId` 组织内部 RPC，不需要 Gate 做动态定位；底层是否复用统一中转链路不影响其静态寻址语义。跨节点 `Proxy` 调用则必须先经 Gate，再由 Gate 按当前 owner 转发到所在 Game。
-7. `docs/MSG_ID.md` 中 `10000-19999` 对应 Player 语义、`20000-29999` 对应 Space 语义、`30000-34999` 对应 Stub / 全局服务语义；后续具体消息登记应服从这一责任域划分。
+3. `Mailbox` 只用于不可迁移实体：例如 `SpaceEntity` 以及已经由 `GM` 在启动阶段完成归属分配的 `ServerStubEntity`。调用侧必须把 `Mailbox` 视为静态地址，而不是可被迁移后的软引用；`Mailbox` 应携带目标 `GameNodeId` 或等价的目标地址信息，供 Gate 直接转发。
+4. `Proxy` 只用于可迁移实体：例如 `PlayerEntity`。调用侧不得把某次解析得到的 `OwnerGameNodeId` 当作长期真值；`Proxy` 应携带路由表所在 Gate 的地址或标识，跨节点调用时调用侧先将请求送达该 Gate，再由 Gate 重新解析当前 owner。
+5. 若调用方与目标实体恰好位于同一个 Game，运行时必须优先做本地短路调用；只有本地未命中时，才允许进入 Gate 转发路径。但语义层面仍应保持 `Mailbox` 与 `Proxy` 的区分，避免把本地优化误当成地址模型。
+6. 跨节点 `Mailbox` 调用与 `Proxy` 调用都不允许 Game↔Game 直连。`Mailbox` 由 Gate 按地址中给定的 `GameNodeId` 直接转发；`Proxy` 由 Gate 根据路由表解析当前 owner 后再转发。
+7. `docs/MSG_ID.md` 当前只定义底层协议、内部中转与客户端接入相关号段；实体业务层的具体 `msgId` 应由后续统一 RPC 框架负责分配并在稳定后回填文档，避免在当前层直接固化 `Player`、`Space` 或具体 Stub 服务消息。
 8. `Gate` 的客户端连接入口属于集群级 ready gate，而不是实体路由推导的副产物；在 GM 未确认所需 `ServerStubEntity` 全部 ready 前，Gate 不得对客户端开放连接入口。
 
 **生命周期与执行模型**

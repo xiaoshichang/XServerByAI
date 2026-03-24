@@ -1,8 +1,9 @@
-using XServer.Managed.Foundation;
+using XServer.Managed.Framework;
 
-namespace XServer.Managed.GameLogic;
-
-public static class GameLogicAssemblyMarker
+namespace XServer.Managed.GameLogic
 {
-    public static string DependencyName => FoundationAssemblyMarker.Name;
+    public static class GameLogicAssemblyMarker
+    {
+        public static string DependencyName => FrameworkAssemblyMarker.Name;
+    }
 }
