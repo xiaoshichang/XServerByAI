@@ -107,6 +107,11 @@
 | `4008` | `Interop.RuntimeInitializeFailed` | `interop` | `Active` | `host` | `hostfxr_initialize_for_runtime_config` 未能基于目标 `runtimeconfig.json` 初始化 CLR 宿主上下文 |
 | `4009` | `Interop.RuntimeDelegateLoadFailed` | `interop` | `Active` | `host` | `hostfxr_get_runtime_delegate` 未能返回 `load_assembly_and_get_function_pointer` 委托 |
 | `4010` | `Interop.RuntimeContextCloseFailed` | `interop` | `Active` | `host` | `hostfxr_close` 未能正常关闭 `M5-01` 初始化阶段的临时宿主上下文 |
+| `4011` | `Interop.RuntimeNotLoaded` | `interop` | `Active` | `host` | 调用方在 CLR 宿主尚未完成 `Load` 前尝试绑定或解析托管导出入口 |
+| `4012` | `Interop.EntryPointResolveFailed` | `interop` | `Active` | `host` | `load_assembly_and_get_function_pointer` 未能解析 `GameNative*` 必需导出，或返回空函数指针 |
+| `4013` | `Interop.AbiVersionMismatch` | `interop` | `Active` | `host` | `GameNativeGetAbiVersion` 返回值与 native 侧 `XS_MANAGED_ABI_VERSION` 预期不一致 |
+| `4014` | `Interop.EntryPointNotBound` | `interop` | `Active` | `host` | 调用方尝试获取或调用托管导出入口，但当前宿主尚未完成成功绑定 |
+
 **命名规范**
 1. 每个错误码都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Reason>` 或 `<Area>.<Subject>.<Reason>`。
 2. 公共错误优先使用 `Common` 作为域名，例如 `Common.InvalidArgument`、`Common.Timeout`、`Common.RateLimited`。
