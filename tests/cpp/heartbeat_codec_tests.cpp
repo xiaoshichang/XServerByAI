@@ -106,7 +106,7 @@ void TestEncodeRequestProducesExpectedWireBytesAndRoundTrip()
     CheckLoadSnapshotEquals(decoded.load, request.load);
 }
 
-void TestEncodeSuccessAndErrorResponsesRoundTrip()
+void TestEncodeSuccessResponseRoundTrip()
 {
     const xs::net::HeartbeatSuccessResponse success{
         .heartbeat_interval_ms = 5000u,
@@ -134,32 +134,6 @@ void TestEncodeSuccessAndErrorResponsesRoundTrip()
     XS_CHECK(decoded_success.heartbeat_interval_ms == success.heartbeat_interval_ms);
     XS_CHECK(decoded_success.heartbeat_timeout_ms == success.heartbeat_timeout_ms);
     XS_CHECK(decoded_success.server_now_unix_ms == success.server_now_unix_ms);
-
-    const xs::net::HeartbeatErrorResponse error{
-        .error_code = 3004,
-        .retry_after_ms = 250u,
-        .require_full_register = true,
-    };
-
-    std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> error_buffer{};
-    XS_CHECK(
-        xs::net::EncodeHeartbeatErrorResponse(error, error_buffer) ==
-        xs::net::HeartbeatCodecErrorCode::None);
-
-    const std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> expected_error{
-        std::byte{0x00}, std::byte{0x00}, std::byte{0x0B}, std::byte{0xBC},
-        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0xFA},
-        std::byte{0x01},
-    };
-    XS_CHECK(ByteSpanEqualsSpan(error_buffer, expected_error));
-
-    xs::net::HeartbeatErrorResponse decoded_error{};
-    XS_CHECK(
-        xs::net::DecodeHeartbeatErrorResponse(error_buffer, &decoded_error) ==
-        xs::net::HeartbeatCodecErrorCode::None);
-    XS_CHECK(decoded_error.error_code == error.error_code);
-    XS_CHECK(decoded_error.retry_after_ms == error.retry_after_ms);
-    XS_CHECK(decoded_error.require_full_register == error.require_full_register);
 }
 
 void TestRejectsSemanticViolationsAndMalformedBuffers()
@@ -200,6 +174,7 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
     XS_CHECK(
         xs::net::EncodeHeartbeatSuccessResponse(success, success_buffer) ==
         xs::net::HeartbeatCodecErrorCode::None);
+    const auto valid_success_buffer = success_buffer;
     success_buffer[0] = std::byte{0x00};
     success_buffer[1] = std::byte{0x00};
     success_buffer[2] = std::byte{0x3A};
@@ -210,21 +185,11 @@ void TestRejectsSemanticViolationsAndMalformedBuffers()
         xs::net::DecodeHeartbeatSuccessResponse(success_buffer, &decoded_success) ==
         xs::net::HeartbeatCodecErrorCode::InvalidHeartbeatTiming);
 
-    const xs::net::HeartbeatErrorResponse error{
-        .error_code = 3004,
-        .retry_after_ms = 250u,
-        .require_full_register = true,
-    };
-    std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> error_buffer{};
+    std::vector<std::byte> trailing_success(valid_success_buffer.begin(), valid_success_buffer.end());
+    trailing_success.push_back(std::byte{0xEE});
     XS_CHECK(
-        xs::net::EncodeHeartbeatErrorResponse(error, error_buffer) ==
-        xs::net::HeartbeatCodecErrorCode::None);
-    error_buffer[8] = std::byte{0x02};
-
-    xs::net::HeartbeatErrorResponse decoded_error{};
-    XS_CHECK(
-        xs::net::DecodeHeartbeatErrorResponse(error_buffer, &decoded_error) ==
-        xs::net::HeartbeatCodecErrorCode::InvalidBoolValue);
+        xs::net::DecodeHeartbeatSuccessResponse(trailing_success, &decoded_success) ==
+        xs::net::HeartbeatCodecErrorCode::TrailingBytes);
 }
 
 void TestRejectsInvalidArgumentsAndSmallBuffers()
@@ -259,15 +224,11 @@ void TestRejectsInvalidArgumentsAndSmallBuffers()
         xs::net::EncodeHeartbeatRequest(valid_request, short_request_buffer) ==
         xs::net::HeartbeatCodecErrorCode::BufferTooSmall);
 
-    std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> error_buffer{};
     XS_CHECK(
         xs::net::DecodeHeartbeatRequest(request_buffer, nullptr) ==
         xs::net::HeartbeatCodecErrorCode::InvalidArgument);
     XS_CHECK(
         xs::net::DecodeHeartbeatSuccessResponse(success_buffer, nullptr) ==
-        xs::net::HeartbeatCodecErrorCode::InvalidArgument);
-    XS_CHECK(
-        xs::net::DecodeHeartbeatErrorResponse(error_buffer, nullptr) ==
         xs::net::HeartbeatCodecErrorCode::InvalidArgument);
     XS_CHECK(
         xs::net::HeartbeatCodecErrorMessage(xs::net::HeartbeatCodecErrorCode::TrailingBytes) ==
@@ -279,7 +240,7 @@ void TestRejectsInvalidArgumentsAndSmallBuffers()
 int main()
 {
     TestEncodeRequestProducesExpectedWireBytesAndRoundTrip();
-    TestEncodeSuccessAndErrorResponsesRoundTrip();
+    TestEncodeSuccessResponseRoundTrip();
     TestRejectsSemanticViolationsAndMalformedBuffers();
     TestRejectsInvalidArgumentsAndSmallBuffers();
 

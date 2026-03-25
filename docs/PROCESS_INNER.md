@@ -6,7 +6,7 @@
 3. `Game -> Gate`：完成 `Game` 到每个 `Gate` 的注册与心跳闭环，为后续 Gate→Game 转发与启动期 Stub 初始化通信建立可用目标目录。
 4. `Game -> GM` / `GM -> Gate`：完成 mesh ready 上报、服务 ready 上报与 `clusterReady` 聚合下发。
 
-所有消息默认承载在 ZeroMQ over TCP 的 `Inner` 链路上；消息边界、包头与 flags 规则以 `docs/PACKET_HEADER.md` 为准。
+所有消息默认承载在 ZeroMQ over TCP 的 `Inner` 链路上；消息边界、包头与 flags 规则以 `docs/PACKET_HEADER.md` 为准。当前实现允许同一节点同时承担 `Inner` listener 与多个 connector：例如 `Gate` 同时连接 `GM` 并监听来自 `Game` 的连接，`Game` 同时连接 `GM` 与全部目标 `Gate`。
 
 **适用范围**
 1. 当前文档覆盖 `Inner.NodeRegister`（`1000`）、`Inner.NodeHeartbeat`（`1100`）、`Inner.ClusterReadyNotify`（`1201`）、`Inner.ServerStubOwnershipSync`（`1202`）、`Inner.GameServiceReadyReport`（`1203`）、`Inner.ClusterNodesOnlineNotify`（`1204`）与 `Inner.GameGateMeshReadyReport`（`1205`）。
@@ -106,7 +106,8 @@
 1. 用途：维护已建立的注册会话，并附带轻量负载刷新。
 2. 发送前提：只有在同一链路上收到对应注册成功响应后，才允许开始发送心跳。
 3. 成功语义：接收方确认当前注册仍然有效，并可刷新心跳参数。
-4. 失败语义：接收方认为当前会话已失效或不再匹配，发起方应按 `requireFullRegister` 决定是否完整重注册。
+4. 当前不定义失败响应；接收方对未知、畸形或 envelope 非法的心跳只记录并忽略，恢复流程依赖连接状态变化与后续注册逻辑。
+5. 请求包使用普通请求 envelope（`flags = 0`，`seq != 0`）；成功响应使用 `Response` 标记并回显请求 `seq`。`Response + Error` 不属于合法 heartbeat envelope。
 
 心跳请求体：
 
@@ -123,14 +124,6 @@
 | `heartbeatIntervalMs` | `uint32` | 接收方建议的后续心跳周期 |
 | `heartbeatTimeoutMs` | `uint32` | 当前会话使用的超时阈值 |
 | `serverNowUnixMs` | `uint64` | 接收方当前时间 |
-
-心跳失败响应体（`Response + Error`）：
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `errorCode` | `int32` | 失败原因 |
-| `retryAfterMs` | `uint32` | 建议重试等待时间；`0` 表示未提供 |
-| `requireFullRegister` | `bool` | `true` 表示发送方必须丢弃旧会话并重新走完整注册 |
 
 **Inner.ClusterNodesOnlineNotify（`msgId = 1204`）**
 1. 发送时机：`GM` 在“期望 `Game` / `Gate` 节点是否都已完成到 `GM` 的注册与心跳闭环”这一聚合结论发生变化时，向全部 `Game` 下发最新结果。

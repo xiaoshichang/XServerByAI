@@ -73,6 +73,7 @@ struct InnerNetworkSession
     std::uint64_t last_server_now_unix_ms{0U};
     xs::core::TimerID heartbeat_timer_id{0};
     std::string last_protocol_error{};
+    bool heartbeat_timed_out{false};
     bool registered{false};
     bool register_in_flight{false};
 };

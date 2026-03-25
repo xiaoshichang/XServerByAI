@@ -1,7 +1,6 @@
 #include "GateNode.h"
 
 #include "InnerNetwork.h"
-#include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
@@ -50,12 +49,6 @@ std::string RoutingIdToText(std::span<const std::byte> routing_id)
     return std::string(
         reinterpret_cast<const char*>(routing_id.data()),
         reinterpret_cast<const char*>(routing_id.data() + routing_id.size()));
-}
-
-std::uint64_t CurrentUnixTimeMillisecondsValue() noexcept
-{
-    const std::int64_t now_unix_ms = xs::core::ToUnixTimeMilliseconds(xs::core::UtcNow());
-    return now_unix_ms > 0 ? static_cast<std::uint64_t>(now_unix_ms) : 0U;
 }
 
 xs::net::Endpoint ToNetEndpoint(const xs::core::EndpointConfig& endpoint)
@@ -378,9 +371,7 @@ void GateNode::HandleGmMessage(std::span<const std::byte> payload)
         return;
     }
 
-    if ((packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags) ||
-        packet.header.seq == xs::net::kPacketSeqNone)
-    {
+    const auto log_invalid_response_envelope = [&](std::string_view protocol_error, std::string_view log_message) {
         const std::array<xs::core::LogContextField, 5> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
@@ -391,20 +382,51 @@ void GateNode::HandleGmMessage(std::span<const std::byte> payload)
                 std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
             },
         };
-        session->last_protocol_error = "GM response envelope is invalid.";
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM response with an invalid envelope.", context);
+        session->last_protocol_error = std::string(protocol_error);
+        logger().Log(xs::core::LogLevel::Warn, "inner", log_message, context);
+    };
+
+    if (packet.header.seq == xs::net::kPacketSeqNone)
+    {
+        log_invalid_response_envelope(
+            "GM response envelope is invalid.",
+            "Gate node ignored GM response with an invalid envelope.");
         return;
     }
 
     if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
     {
+        if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
+        {
+            log_invalid_response_envelope(
+                "GM response envelope is invalid.",
+                "Gate node ignored GM response with an invalid envelope.");
+            return;
+        }
+
         HandleRegisterResponse(packet);
         return;
     }
 
     if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
     {
+        if (packet.header.flags != kResponseFlags)
+        {
+            log_invalid_response_envelope(
+                "GM heartbeat response envelope is invalid.",
+                "Gate node ignored GM heartbeat response with an invalid envelope.");
+            return;
+        }
+
         HandleHeartbeatResponse(packet);
+        return;
+    }
+
+    if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
+    {
+        log_invalid_response_envelope(
+            "GM response envelope is invalid.",
+            "Gate node ignored GM response with an invalid envelope.");
         return;
     }
 
@@ -658,55 +680,6 @@ void GateNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
     }
 
     session->heartbeat_seq = 0U;
-
-    if (packet.header.flags == kErrorResponseFlags)
-    {
-        xs::net::HeartbeatErrorResponse response{};
-        const xs::net::HeartbeatCodecErrorCode decode_result =
-            xs::net::DecodeHeartbeatErrorResponse(packet.payload, &response);
-        if (decode_result != xs::net::HeartbeatCodecErrorCode::None)
-        {
-            const std::array<xs::core::LogContextField, 4> context{
-                xs::core::LogContextField{"nodeId", std::string(node_id())},
-                xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-                xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-                xs::core::LogContextField{
-                    "codecError",
-                    std::string(xs::net::HeartbeatCodecErrorMessage(decode_result)),
-                },
-            };
-            session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
-            logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM heartbeat error response.", context);
-            return;
-        }
-
-        session->last_protocol_error =
-            "GM rejected heartbeat with error code " + std::to_string(response.error_code) + ".";
-
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"errorCode", std::to_string(response.error_code)},
-            xs::core::LogContextField{"retryAfterMs", std::to_string(response.retry_after_ms)},
-            xs::core::LogContextField{"requireFullRegister", response.require_full_register ? "true" : "false"},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-        };
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Gate node received GM heartbeat error response.",
-            context);
-
-        if (response.require_full_register)
-        {
-            ResetGmSessionState();
-            if (session->connection_state == ipc::ZmqConnectionState::Connected)
-            {
-                (void)SendRegisterRequest();
-            }
-        }
-
-        return;
-    }
 
     xs::net::HeartbeatSuccessResponse response{};
     const xs::net::HeartbeatCodecErrorCode decode_result =
@@ -1051,11 +1024,6 @@ std::uint32_t GateNode::ConsumeNextInnerSequence() noexcept
     }
 
     return seq;
-}
-
-std::uint64_t GateNode::CurrentUnixTimeMilliseconds() const noexcept
-{
-    return CurrentUnixTimeMillisecondsValue();
 }
 
 const xs::core::GateNodeConfig* GateNode::gate_config() const noexcept

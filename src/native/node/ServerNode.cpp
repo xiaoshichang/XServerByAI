@@ -1,6 +1,7 @@
 #include "ServerNode.h"
 
 #include "InnerNetwork.h"
+#include "TimeUtils.h"
 
 #include <asio/post.hpp>
 
@@ -444,6 +445,12 @@ InnerNetworkSessionManager& ServerNode::inner_network_remote_sessions() noexcept
 const InnerNetworkSessionManager& ServerNode::inner_network_remote_sessions() const noexcept
 {
     return inner_network_remote_sessions_;
+}
+
+std::uint64_t ServerNode::CurrentUnixTimeMilliseconds() const noexcept
+{
+    const std::int64_t now_unix_ms = xs::core::ToUnixTimeMilliseconds(xs::core::UtcNow());
+    return now_unix_ms > 0 ? static_cast<std::uint64_t>(now_unix_ms) : 0U;
 }
 
 NodeErrorCode ServerNode::InitInnerNetwork(InnerNetworkOptions options)

@@ -17,8 +17,6 @@ namespace
         return HeartbeatCodecErrorCode::BufferTooSmall;
     case SerializationErrorCode::LengthOverflow:
         return HeartbeatCodecErrorCode::LengthOverflow;
-    case SerializationErrorCode::InvalidBoolValue:
-        return HeartbeatCodecErrorCode::InvalidBoolValue;
     case SerializationErrorCode::InvalidArgument:
         return HeartbeatCodecErrorCode::InvalidArgument;
     }
@@ -114,8 +112,6 @@ std::string_view HeartbeatCodecErrorMessage(HeartbeatCodecErrorCode error_code) 
         return "Buffer does not contain enough bytes for the requested heartbeat operation.";
     case HeartbeatCodecErrorCode::LengthOverflow:
         return "Heartbeat field length exceeds the supported prefix range.";
-    case HeartbeatCodecErrorCode::InvalidBoolValue:
-        return "Heartbeat bool field must be encoded as 0 or 1.";
     case HeartbeatCodecErrorCode::InvalidArgument:
         return "Heartbeat codec output argument must not be null.";
     case HeartbeatCodecErrorCode::InvalidStatusFlags:
@@ -237,51 +233,6 @@ HeartbeatCodecErrorCode DecodeHeartbeatSuccessResponse(
     if (timing_result != HeartbeatCodecErrorCode::None)
     {
         return timing_result;
-    }
-
-    const HeartbeatCodecErrorCode trailing_result = CheckTrailingBytes(reader);
-    if (trailing_result != HeartbeatCodecErrorCode::None)
-    {
-        return trailing_result;
-    }
-
-    *message = parsed_message;
-    return HeartbeatCodecErrorCode::None;
-}
-
-HeartbeatCodecErrorCode EncodeHeartbeatErrorResponse(
-    const HeartbeatErrorResponse& message,
-    std::span<std::byte> buffer) noexcept
-{
-    BinaryWriter writer(buffer);
-    if (!writer.WriteInt32(message.error_code) ||
-        !writer.WriteUInt32(message.retry_after_ms) ||
-        !writer.WriteBool(message.require_full_register))
-    {
-        return MapSerializationError(writer.error());
-    }
-
-    return HeartbeatCodecErrorCode::None;
-}
-
-HeartbeatCodecErrorCode DecodeHeartbeatErrorResponse(
-    std::span<const std::byte> buffer,
-    HeartbeatErrorResponse* message) noexcept
-{
-    if (message == nullptr)
-    {
-        return HeartbeatCodecErrorCode::InvalidArgument;
-    }
-
-    *message = {};
-
-    BinaryReader reader(buffer);
-    HeartbeatErrorResponse parsed_message{};
-    if (!reader.ReadInt32(&parsed_message.error_code) ||
-        !reader.ReadUInt32(&parsed_message.retry_after_ms) ||
-        !reader.ReadBool(&parsed_message.require_full_register))
-    {
-        return MapSerializationError(reader.error());
     }
 
     const HeartbeatCodecErrorCode trailing_result = CheckTrailingBytes(reader);

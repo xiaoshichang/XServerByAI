@@ -60,7 +60,6 @@ class GateNode final : public ServerNode
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
-    [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
     [[nodiscard]] const xs::core::GateNodeConfig* gate_config() const noexcept;
     [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;
     [[nodiscard]] const InnerNetworkSession* remote_session(std::string_view remote_node_id) const noexcept;

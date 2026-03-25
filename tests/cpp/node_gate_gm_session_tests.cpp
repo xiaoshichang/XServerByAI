@@ -605,8 +605,9 @@ std::vector<std::byte> EncodeRegisterSuccessPacket(
     return packet;
 }
 
-std::vector<std::byte> EncodeHeartbeatSuccessPacket(
+std::vector<std::byte> EncodeHeartbeatSuccessPacketWithFlags(
     std::uint32_t seq,
+    std::uint16_t flags,
     std::uint32_t heartbeat_interval_ms,
     std::uint32_t heartbeat_timeout_ms)
 {
@@ -623,35 +624,22 @@ std::vector<std::byte> EncodeHeartbeatSuccessPacket(
     const xs::net::PacketHeader header = xs::net::MakePacketHeader(
         xs::net::kInnerHeartbeatMsgId,
         seq,
-        static_cast<std::uint16_t>(xs::net::PacketFlag::Response),
+        flags,
         static_cast<std::uint32_t>(body.size()));
     XS_CHECK(xs::net::EncodePacket(header, body, packet) == xs::net::PacketCodecErrorCode::None);
     return packet;
 }
 
-std::vector<std::byte> EncodeHeartbeatErrorPacket(
+std::vector<std::byte> EncodeHeartbeatSuccessPacket(
     std::uint32_t seq,
-    std::int32_t error_code,
-    bool require_full_register)
+    std::uint32_t heartbeat_interval_ms,
+    std::uint32_t heartbeat_timeout_ms)
 {
-    const xs::net::HeartbeatErrorResponse response{
-        .error_code = error_code,
-        .retry_after_ms = 0U,
-        .require_full_register = require_full_register,
-    };
-
-    std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> body{};
-    XS_CHECK(xs::net::EncodeHeartbeatErrorResponse(response, body) == xs::net::HeartbeatCodecErrorCode::None);
-
-    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + body.size());
-    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kInnerHeartbeatMsgId,
+    return EncodeHeartbeatSuccessPacketWithFlags(
         seq,
-        static_cast<std::uint16_t>(xs::net::PacketFlag::Response) |
-            static_cast<std::uint16_t>(xs::net::PacketFlag::Error),
-        static_cast<std::uint32_t>(body.size()));
-    XS_CHECK(xs::net::EncodePacket(header, body, packet) == xs::net::PacketCodecErrorCode::None);
-    return packet;
+        static_cast<std::uint16_t>(xs::net::PacketFlag::Response),
+        heartbeat_interval_ms,
+        heartbeat_timeout_ms);
 }
 
 std::vector<std::byte> EncodeClusterReadyNotifyPacket(
@@ -875,9 +863,9 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
     CleanupTestDirectory(base_path);
 }
 
-void TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister()
+void TestGateNodeRejectsHeartbeatResponseWithErrorFlag()
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-gate-gm-session-reregister");
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gate-gm-session-heartbeat-invalid-envelope");
 
     RawZmqSocket router(ZMQ_ROUTER);
     XS_CHECK(router.IsValid());
@@ -900,15 +888,10 @@ void TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister()
     }
 
     std::vector<std::vector<std::byte>> router_frames;
-    std::uint32_t register_request_count = 0U;
-    std::uint32_t heartbeat_request_count = 0U;
-    std::uint32_t first_register_seq = 0U;
-    std::uint32_t second_register_seq = 0U;
-    std::uint32_t first_heartbeat_seq = 0U;
-    std::uint32_t second_heartbeat_seq = 0U;
-    bool sent_terminal_success = false;
+    bool register_accepted = false;
+    bool invalid_heartbeat_sent = false;
 
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
     while (std::chrono::steady_clock::now() < deadline)
     {
         if (TryReceiveMultipartMessage(router.socket(), &router_frames))
@@ -926,19 +909,7 @@ void TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister()
                 xs::net::RegisterRequest request{};
                 XS_CHECK(xs::net::DecodeRegisterRequest(packet.payload, &request) == xs::net::RegisterCodecErrorCode::None);
                 XS_CHECK(request.node_id == "Gate0");
-                XS_CHECK(request.process_type == static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate));
-                XS_CHECK(request.inner_network_endpoint.host == "127.0.0.1");
-                XS_CHECK(request.inner_network_endpoint.port == 7000u);
-
-                ++register_request_count;
-                if (register_request_count == 1U)
-                {
-                    first_register_seq = packet.header.seq;
-                }
-                else if (register_request_count == 2U)
-                {
-                    second_register_seq = packet.header.seq;
-                }
+                register_accepted = true;
 
                 const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U);
                 XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
@@ -948,25 +919,16 @@ void TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister()
                 xs::net::HeartbeatRequest request{};
                 XS_CHECK(
                     xs::net::DecodeHeartbeatRequest(packet.payload, &request) == xs::net::HeartbeatCodecErrorCode::None);
-                XS_CHECK(request.status_flags == 0U);
 
-                ++heartbeat_request_count;
-                if (heartbeat_request_count == 1U)
-                {
-                    first_heartbeat_seq = packet.header.seq;
-                    const std::vector<std::byte> response =
-                        EncodeHeartbeatErrorPacket(packet.header.seq, 3004, true);
-                    XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
-                }
-                else
-                {
-                    second_heartbeat_seq = packet.header.seq;
-                    const std::vector<std::byte> response =
-                        EncodeHeartbeatSuccessPacket(packet.header.seq, 500U, 1500U);
-                    XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
-                    sent_terminal_success = true;
-                    break;
-                }
+                const std::vector<std::byte> response = EncodeHeartbeatSuccessPacketWithFlags(
+                    packet.header.seq,
+                    static_cast<std::uint16_t>(xs::net::PacketFlag::Response) |
+                        static_cast<std::uint16_t>(xs::net::PacketFlag::Error),
+                    500U,
+                    1500U);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
+                invalid_heartbeat_sent = true;
+                break;
             }
         }
 
@@ -978,7 +940,7 @@ void TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister()
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 
-    if (sent_terminal_success)
+    if (invalid_heartbeat_sent)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
     }
@@ -987,22 +949,16 @@ void TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister()
     XS_CHECK_MSG(gate_node.run_result() == xs::node::NodeErrorCode::None, gate_node.run_error().data());
     XS_CHECK(gate_node.Uninit());
 
-    XS_CHECK(register_request_count >= 2U);
-    XS_CHECK(heartbeat_request_count >= 2U);
-    XS_CHECK(first_register_seq != 0U);
-    XS_CHECK(second_register_seq > first_register_seq);
-    XS_CHECK(first_heartbeat_seq > first_register_seq);
-    XS_CHECK(second_heartbeat_seq > second_register_seq);
+    XS_CHECK(register_accepted);
+    XS_CHECK(invalid_heartbeat_sent);
 
     const std::filesystem::path log_dir = base_path / "logs";
     XS_CHECK(DirectoryContainsRegularFile(log_dir));
 
     const std::string log_text = ReadDirectoryText(log_dir);
-    XS_CHECK(log_text.find("Gate node received GM heartbeat error response.") != std::string::npos);
-    XS_CHECK(log_text.find("requireFullRegister=true") != std::string::npos);
-    XS_CHECK(log_text.find("Gate node sent GM register request.") != std::string::npos);
     XS_CHECK(log_text.find("Gate node accepted GM register success response.") != std::string::npos);
-    XS_CHECK(log_text.find("Gate node accepted GM heartbeat success response.") != std::string::npos);
+    XS_CHECK(log_text.find("Gate node ignored GM heartbeat response with an invalid envelope.") != std::string::npos);
+    XS_CHECK(log_text.find("Gate node accepted GM heartbeat success response.") == std::string::npos);
 
     CleanupTestDirectory(base_path);
 }
@@ -1013,7 +969,7 @@ int main()
 {
     TestGateNodeRegistersAndRefreshesHeartbeatAgainstRealGm();
     TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify();
-    TestGateNodeReRegistersAfterHeartbeatRequiresFullRegister();
+    TestGateNodeRejectsHeartbeatResponseWithErrorFlag();
 
     if (g_failures != 0)
     {

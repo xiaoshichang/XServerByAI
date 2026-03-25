@@ -29,7 +29,6 @@ static_assert(std::is_default_constructible_v<xs::net::LoadSnapshot>, "LoadSnaps
 static_assert(std::is_default_constructible_v<xs::net::ClusterReadyNotify>, "ClusterReadyNotify must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::HeartbeatRequest>, "HeartbeatRequest must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::HeartbeatSuccessResponse>, "HeartbeatSuccessResponse must remain default constructible.");
-static_assert(std::is_default_constructible_v<xs::net::HeartbeatErrorResponse>, "HeartbeatErrorResponse must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::RegisterRequest>, "RegisterRequest must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::RegisterSuccessResponse>, "RegisterSuccessResponse must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::RegisterErrorResponse>, "RegisterErrorResponse must remain default constructible.");

@@ -48,6 +48,7 @@ class ServerNode
     [[nodiscard]] const InnerNetwork* inner_network() const noexcept;
     [[nodiscard]] InnerNetworkSessionManager& inner_network_remote_sessions() noexcept;
     [[nodiscard]] const InnerNetworkSessionManager& inner_network_remote_sessions() const noexcept;
+    [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
     [[nodiscard]] NodeErrorCode InitInnerNetwork(InnerNetworkOptions options);
     [[nodiscard]] NodeErrorCode RunInnerNetwork();
     [[nodiscard]] NodeErrorCode UninitInnerNetwork();

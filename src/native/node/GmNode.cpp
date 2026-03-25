@@ -2,14 +2,12 @@
 
 #include "BinarySerialization.h"
 #include "InnerNetwork.h"
-#include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
 
 #include <array>
 #include <chrono>
-#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -64,19 +62,6 @@ std::string ToString(std::uint64_t value)
     return std::to_string(value);
 }
 
-std::uint64_t CurrentServerNowUnixMs() noexcept
-{
-    const std::int64_t now = xs::core::ToUnixTimeMilliseconds(xs::core::UtcNow());
-    return now < 0 ? 0u : static_cast<std::uint64_t>(now);
-}
-
-std::string MakeRoutingKey(std::span<const std::byte> routing_id)
-{
-    return std::string(
-        reinterpret_cast<const char*>(routing_id.data()),
-        reinterpret_cast<const char*>(routing_id.data() + routing_id.size()));
-}
-
 bool HasPacketFlag(std::uint16_t flags, xs::net::PacketFlag flag) noexcept
 {
     return (flags & static_cast<std::uint16_t>(flag)) != 0u;
@@ -118,17 +103,6 @@ bool IsHeartbeatRequestPacket(const xs::net::PacketHeader& header) noexcept
     return header.magic == xs::net::kPacketMagic &&
            header.version == xs::net::kPacketVersion &&
            header.msg_id == xs::net::kInnerHeartbeatMsgId;
-}
-
-std::uint16_t HeartbeatResponseFlags(bool is_error) noexcept
-{
-    std::uint16_t flags = static_cast<std::uint16_t>(xs::net::PacketFlag::Response);
-    if (is_error)
-    {
-        flags |= static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
-    }
-
-    return flags;
 }
 
 std::optional<xs::core::ProcessType> ToCoreProcessType(std::uint16_t process_type) noexcept
@@ -300,7 +274,6 @@ NodeErrorCode GmNode::OnInit()
     InnerNetworkOptions options;
     options.local_endpoint = BuildTcpEndpoint(endpoint);
 
-    invalidated_routing_ids_.clear();
     timeout_scan_timer_id_ = 0;
     inner_network_remote_sessions().Clear();
 
@@ -419,9 +392,6 @@ NodeErrorCode GmNode::OnUninit()
             return result;
         }
     }
-
-    invalidated_routing_ids_.clear();
-
     ClearError();
     return NodeErrorCode::None;
 }
@@ -586,7 +556,7 @@ void GmNode::HandleRegisterMessage(
         return;
     }
 
-    const std::uint64_t server_now_unix_ms = CurrentServerNowUnixMs();
+    const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
     const std::optional<xs::core::ProcessType> process_type = ToCoreProcessType(request.process_type);
     if (!process_type.has_value())
     {
@@ -608,43 +578,97 @@ void GmNode::HandleRegisterMessage(
         .inner_network_ready = false,
     };
 
-    const InnerNetworkSessionManagerErrorCode register_result =
-        inner_network_remote_sessions().Register(std::move(registration));
-    if (register_result != InnerNetworkSessionManagerErrorCode::None)
-    {
-        const std::optional<std::int32_t> error_code =
-            MapInnerNetworkSessionManagerErrorToInnerError(register_result);
-        if (error_code.has_value())
-        {
-            send_error_response(*error_code, &request);
-        }
-        else
-        {
-            std::vector<xs::core::LogContextField> context = BuildRegisterContext(routing_id, packet.header.seq, &request);
-            context.push_back(
-                xs::core::LogContextField{
-                    "sessionManagerError",
-                    std::string(InnerNetworkSessionManagerErrorMessage(register_result))});
-            logger().Log(
-                xs::core::LogLevel::Warn,
-                "inner",
-                "GM rejected register request without a mapped session manager error code.",
-                context);
-        }
+    auto apply_registration_state = [&](InnerNetworkSession& session) {
+        session.process_type = registration.process_type;
+        session.node_id = registration.node_id;
+        session.pid = registration.pid;
+        session.started_at_unix_ms = registration.started_at_unix_ms;
+        session.inner_network_endpoint = registration.inner_network_endpoint;
+        session.build_version = registration.build_version;
+        session.capability_tags = registration.capability_tags;
+        session.load = registration.load;
+        session.routing_id = registration.routing_id;
+        session.last_heartbeat_at_unix_ms = registration.last_heartbeat_at_unix_ms;
+        session.inner_network_ready = registration.inner_network_ready;
+        session.heartbeat_timed_out = false;
+        session.registered = true;
+        session.connection_state = ipc::ZmqConnectionState::Connected;
+        session.heartbeat_interval_ms = kDefaultHeartbeatIntervalMs;
+        session.heartbeat_timeout_ms = kDefaultHeartbeatTimeoutMs;
+        session.last_server_now_unix_ms = server_now_unix_ms;
+        session.last_protocol_error.clear();
+    };
 
-        return;
-    }
-
-    invalidated_routing_ids_.erase(MakeRoutingKey(routing_id));
     InnerNetworkSession* session = inner_network_remote_sessions().FindMutableByNodeId(request.node_id);
     if (session != nullptr)
     {
-        session->registered = true;
-        session->connection_state = ipc::ZmqConnectionState::Connected;
-        session->heartbeat_interval_ms = kDefaultHeartbeatIntervalMs;
-        session->heartbeat_timeout_ms = kDefaultHeartbeatTimeoutMs;
-        session->last_server_now_unix_ms = server_now_unix_ms;
-        session->last_protocol_error.clear();
+        const bool same_routing_id = session->routing_id == registration.routing_id;
+        if (!same_routing_id && !session->heartbeat_timed_out)
+        {
+            send_error_response(kInnerNodeIdConflict, &request);
+            return;
+        }
+
+        if (!same_routing_id)
+        {
+            const InnerNetworkSessionManagerErrorCode unregister_result =
+                inner_network_remote_sessions().UnregisterByNodeId(request.node_id);
+            if (unregister_result != InnerNetworkSessionManagerErrorCode::None)
+            {
+                std::vector<xs::core::LogContextField> context =
+                    BuildRegisterContext(routing_id, packet.header.seq, &request);
+                context.push_back(
+                    xs::core::LogContextField{
+                        "sessionManagerError",
+                        std::string(InnerNetworkSessionManagerErrorMessage(unregister_result))});
+                logger().Log(
+                    xs::core::LogLevel::Warn,
+                    "inner",
+                    "GM failed to replace an existing timed-out register session.",
+                    context);
+                return;
+            }
+
+            session = nullptr;
+        }
+    }
+
+    if (session == nullptr)
+    {
+        const InnerNetworkSessionManagerErrorCode register_result =
+            inner_network_remote_sessions().Register(registration);
+        if (register_result != InnerNetworkSessionManagerErrorCode::None)
+        {
+            const std::optional<std::int32_t> error_code =
+                MapInnerNetworkSessionManagerErrorToInnerError(register_result);
+            if (error_code.has_value())
+            {
+                send_error_response(*error_code, &request);
+            }
+            else
+            {
+                std::vector<xs::core::LogContextField> context =
+                    BuildRegisterContext(routing_id, packet.header.seq, &request);
+                context.push_back(
+                    xs::core::LogContextField{
+                        "sessionManagerError",
+                        std::string(InnerNetworkSessionManagerErrorMessage(register_result))});
+                logger().Log(
+                    xs::core::LogLevel::Warn,
+                    "inner",
+                    "GM rejected register request without a mapped session manager error code.",
+                    context);
+            }
+
+            return;
+        }
+
+        session = inner_network_remote_sessions().FindMutableByNodeId(request.node_id);
+    }
+
+    if (session != nullptr)
+    {
+        apply_registration_state(*session);
     }
 
     const xs::net::RegisterSuccessResponse response{
@@ -683,7 +707,6 @@ void GmNode::HandleHeartbeatMessage(
     }
 
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
-    PruneExpiredInvalidatedRoutingIds(now_unix_ms);
 
     xs::net::PacketHeader raw_header{};
     if (!TryReadRawPacketHeader(payload, &raw_header))
@@ -701,55 +724,14 @@ void GmNode::HandleHeartbeatMessage(
         return;
     }
 
-    auto send_heartbeat_error = [this, routing_id, &raw_header](
-                                    std::int32_t error_code,
-                                    std::string_view error_name,
-                                    bool require_full_register,
-                                    std::string_view log_message) {
-        const xs::net::HeartbeatErrorResponse response{
-            .error_code = error_code,
-            .retry_after_ms = 0U,
-            .require_full_register = require_full_register,
-        };
-        std::array<std::byte, xs::net::kHeartbeatErrorResponseSize> response_body{};
-        if (xs::net::EncodeHeartbeatErrorResponse(response, response_body) != xs::net::HeartbeatCodecErrorCode::None)
-        {
-            return;
-        }
-
-        const xs::net::PacketHeader response_header = xs::net::MakePacketHeader(
-            xs::net::kInnerHeartbeatMsgId,
-            raw_header.seq,
-            HeartbeatResponseFlags(true),
-            static_cast<std::uint32_t>(response_body.size()));
-        std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kHeartbeatErrorResponseSize> response_packet{};
-        if (xs::net::EncodePacket(response_header, response_body, response_packet) != xs::net::PacketCodecErrorCode::None)
-        {
-            return;
-        }
-
-        if (inner_network() == nullptr)
-        {
-            return;
-        }
-
-        const NodeErrorCode send_result = inner_network()->Send(routing_id, response_packet);
+    auto log_heartbeat_rejected = [this, routing_id, &raw_header](
+                                      std::int32_t error_code,
+                                      std::string_view error_name,
+                                      std::string_view log_message) {
         const std::array<xs::core::LogContextField, 2> context{
             xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
             xs::core::LogContextField{"seq", ToString(static_cast<std::uint64_t>(raw_header.seq))},
         };
-        if (send_result != NodeErrorCode::None)
-        {
-            logger().Log(
-                xs::core::LogLevel::Warn,
-                "inner",
-                "GM inner service failed to send heartbeat error response.",
-                context,
-                error_code,
-                error_name);
-            return;
-        }
-
         logger().Log(xs::core::LogLevel::Warn, "inner", log_message, context, error_code, error_name);
     };
 
@@ -757,11 +739,10 @@ void GmNode::HandleHeartbeatMessage(
         raw_header.flags != 0U ||
         raw_header.seq == xs::net::kPacketSeqNone)
     {
-        send_heartbeat_error(
+        log_heartbeat_rejected(
             kInnerRequestInvalid,
             "Inner.RequestInvalid",
-            false,
-            "GM inner service rejected an invalid heartbeat request.");
+            "GM inner service ignored an invalid heartbeat request.");
         return;
     }
 
@@ -769,11 +750,10 @@ void GmNode::HandleHeartbeatMessage(
     const xs::net::PacketCodecErrorCode decode_packet_result = xs::net::DecodePacket(payload, &packet);
     if (decode_packet_result != xs::net::PacketCodecErrorCode::None)
     {
-        send_heartbeat_error(
+        log_heartbeat_rejected(
             kInnerRequestInvalid,
             "Inner.RequestInvalid",
-            false,
-            "GM inner service rejected a malformed heartbeat packet.");
+            "GM inner service ignored a malformed heartbeat packet.");
         return;
     }
 
@@ -782,30 +762,26 @@ void GmNode::HandleHeartbeatMessage(
         xs::net::DecodeHeartbeatRequest(packet.payload, &request);
     if (decode_request_result != xs::net::HeartbeatCodecErrorCode::None)
     {
-        send_heartbeat_error(
+        log_heartbeat_rejected(
             kInnerRequestInvalid,
             "Inner.RequestInvalid",
-            false,
-            "GM inner service rejected a malformed heartbeat payload.");
+            "GM inner service ignored a malformed heartbeat payload.");
         return;
     }
 
     InnerNetworkSession* session = inner_network_remote_sessions().FindMutableByRoutingId(routing_id);
     if (session == nullptr)
     {
-        const bool invalidated = ContainsInvalidatedRoutingId(routing_id);
-        send_heartbeat_error(
-            invalidated ? kInnerChannelInvalid : kInnerNodeNotRegistered,
-            invalidated ? "Inner.ChannelInvalid" : "Inner.NodeNotRegistered",
-            true,
-            invalidated
-                ? "GM inner service rejected heartbeat on an invalidated inner channel."
-                : "GM inner service rejected heartbeat from an unknown inner channel.");
+        log_heartbeat_rejected(
+            kInnerNodeNotRegistered,
+            "Inner.NodeNotRegistered",
+            "GM inner service ignored heartbeat from an unknown inner channel.");
         return;
     }
 
     session->load = request.load;
     session->last_heartbeat_at_unix_ms = now_unix_ms;
+    session->heartbeat_timed_out = false;
     session->registered = true;
     session->connection_state = ipc::ZmqConnectionState::Connected;
     session->heartbeat_interval_ms = kDefaultHeartbeatIntervalMs;
@@ -827,7 +803,7 @@ void GmNode::HandleHeartbeatMessage(
     const xs::net::PacketHeader response_header = xs::net::MakePacketHeader(
         xs::net::kInnerHeartbeatMsgId,
         packet.header.seq,
-        HeartbeatResponseFlags(false),
+        static_cast<std::uint16_t>(xs::net::PacketFlag::Response),
         static_cast<std::uint32_t>(response_body.size()));
     std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kHeartbeatSuccessResponseSize> response_packet{};
     if (xs::net::EncodePacket(response_header, response_body, response_packet) != xs::net::PacketCodecErrorCode::None)
@@ -859,7 +835,6 @@ void GmNode::HandleHeartbeatMessage(
 void GmNode::HandleTimeoutScan()
 {
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
-    PruneExpiredInvalidatedRoutingIds(now_unix_ms);
 
     const std::vector<InnerNetworkSession> snapshot = inner_network_remote_sessions().Snapshot();
     for (const InnerNetworkSession& entry : snapshot)
@@ -875,14 +850,17 @@ void GmNode::HandleTimeoutScan()
             continue;
         }
 
-        const InnerNetworkSessionManagerErrorCode unregister_result =
-            inner_network_remote_sessions().UnregisterByNodeId(entry.node_id);
-        if (unregister_result != InnerNetworkSessionManagerErrorCode::None)
+        InnerNetworkSession* session = inner_network_remote_sessions().FindMutableByNodeId(entry.node_id);
+        if (session == nullptr || session->heartbeat_timed_out)
         {
             continue;
         }
 
-        RememberInvalidatedRoutingId(entry.routing_id, now_unix_ms);
+        session->heartbeat_timed_out = true;
+        session->registered = false;
+        session->connection_state = ipc::ZmqConnectionState::Stopped;
+        session->last_protocol_error = "Heartbeat timed out.";
+
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", entry.node_id},
             xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(entry.routing_id.size()))},
@@ -892,69 +870,9 @@ void GmNode::HandleTimeoutScan()
         logger().Log(
             xs::core::LogLevel::Warn,
             "inner",
-            "GM inner service evicted a timed-out inner network session.",
-            context,
-            kInnerChannelInvalid,
-            "Inner.ChannelInvalid");
+            "GM marked an inner network session as timed out.",
+            context);
     }
-}
-
-void GmNode::RememberInvalidatedRoutingId(
-    std::span<const std::byte> routing_id,
-    std::uint64_t now_unix_ms)
-{
-    if (routing_id.empty())
-    {
-        return;
-    }
-
-    const std::uint64_t retention_ms = InvalidatedRoutingRetentionMs();
-    const std::uint64_t expires_at_unix_ms =
-        retention_ms > std::numeric_limits<std::uint64_t>::max() - now_unix_ms
-            ? std::numeric_limits<std::uint64_t>::max()
-            : now_unix_ms + retention_ms;
-
-    invalidated_routing_ids_[MakeRoutingKey(routing_id)] = expires_at_unix_ms;
-}
-
-void GmNode::PruneExpiredInvalidatedRoutingIds(std::uint64_t now_unix_ms)
-{
-    for (auto iterator = invalidated_routing_ids_.begin(); iterator != invalidated_routing_ids_.end();)
-    {
-        if (iterator->second <= now_unix_ms)
-        {
-            iterator = invalidated_routing_ids_.erase(iterator);
-            continue;
-        }
-
-        ++iterator;
-    }
-}
-
-bool GmNode::ContainsInvalidatedRoutingId(std::span<const std::byte> routing_id) const
-{
-    if (routing_id.empty())
-    {
-        return false;
-    }
-
-    const auto iterator = invalidated_routing_ids_.find(MakeRoutingKey(routing_id));
-    if (iterator == invalidated_routing_ids_.end())
-    {
-        return false;
-    }
-
-    return iterator->second > CurrentUnixTimeMilliseconds();
-}
-
-std::uint64_t GmNode::CurrentUnixTimeMilliseconds() const noexcept
-{
-    return CurrentServerNowUnixMs();
-}
-
-std::uint64_t GmNode::InvalidatedRoutingRetentionMs() const noexcept
-{
-    return static_cast<std::uint64_t>(kDefaultHeartbeatTimeoutMs);
 }
 
 } // namespace xs::node
