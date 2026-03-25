@@ -592,8 +592,6 @@ void TestGameNodeConnectsToGmAndStopsCleanly()
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     XS_CHECK(!game_node.run_completed());
-    XS_CHECK(game_node.node().gm_inner_remote_endpoint() == "tcp://127.0.0.1:" + std::to_string(gm_inner_port));
-    XS_CHECK(game_node.node().configured_inner_endpoint() == "tcp://127.0.0.1:7100");
     XS_CHECK(game_node.node().managed_assembly_name() == "XServer.Managed.GameLogic");
     XS_CHECK(game_node.node().inner_connection_state("Gate0") == xs::ipc::ZmqConnectionState::Connected);
 
@@ -619,8 +617,8 @@ void TestGameNodeConnectsToGmAndStopsCleanly()
     XS_CHECK(log_text.find("Inner network active connector started.") != std::string::npos);
     XS_CHECK(log_text.find("Inner network active connector state changed.") != std::string::npos);
     XS_CHECK(log_text.find("Game node entered runtime state.") != std::string::npos);
-    XS_CHECK(log_text.find("gmInnerRemoteEndpoint=tcp://127.0.0.1:" + std::to_string(gm_inner_port)) != std::string::npos);
-    XS_CHECK(log_text.find("configuredInnerEndpoint=tcp://127.0.0.1:7100") != std::string::npos);
+    XS_CHECK(log_text.find("gmInnerRemoteEndpoint") == std::string::npos);
+    XS_CHECK(log_text.find("configuredInnerEndpoint") == std::string::npos);
     XS_CHECK(log_text.find("gateNodeId=Gate0") != std::string::npos);
     XS_CHECK(log_text.find("managedAssemblyName=XServer.Managed.GameLogic") != std::string::npos);
 

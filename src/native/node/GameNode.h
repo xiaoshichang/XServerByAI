@@ -8,7 +8,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace xs::net
 {
@@ -26,8 +25,6 @@ class GameNode final : public ServerNode
     explicit GameNode(NodeCommandLineArgs args);
     ~GameNode() override;
 
-    [[nodiscard]] std::string_view gm_inner_remote_endpoint() const noexcept;
-    [[nodiscard]] std::string_view configured_inner_endpoint() const noexcept;
     [[nodiscard]] std::string_view managed_assembly_name() const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState inner_connection_state(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState gm_inner_connection_state() const noexcept;
@@ -42,9 +39,7 @@ class GameNode final : public ServerNode
     struct RuntimeState final
     {
         std::uint64_t started_at_unix_ms{0U};
-        std::string build_version{"dev"};
         std::string managed_assembly_name{"XServer.Managed.GameLogic"};
-        std::vector<std::string> capability_tags{};
     };
 
     void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
@@ -64,15 +59,12 @@ class GameNode final : public ServerNode
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
     [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
+    [[nodiscard]] const xs::core::GameNodeConfig* game_config() const noexcept;
     [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;
     [[nodiscard]] const InnerNetworkSession* remote_session(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] InnerNetworkSession* gm_session() noexcept;
     [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
-    std::string gm_inner_remote_endpoint_{};
-    std::string configured_inner_endpoint_{};
-    xs::core::EndpointConfig configured_inner_endpoint_config_{};
-    ipc::ZmqConnectionState gm_inner_connection_state_cache_{ipc::ZmqConnectionState::Stopped};
     RuntimeState runtime_state_{};
 };
 

@@ -590,8 +590,6 @@ void TestGateNodeConnectsToGmAndStopsCleanly()
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     XS_CHECK(!gate_node.run_completed());
-    XS_CHECK(gate_node.node().gm_inner_remote_endpoint() == "tcp://127.0.0.1:" + std::to_string(gm_inner_port));
-    XS_CHECK(gate_node.node().configured_inner_endpoint() == "tcp://127.0.0.1:7000");
     XS_CHECK(gate_node.node().game_inner_listener_state() == xs::ipc::ZmqListenerState::Listening);
     XS_CHECK(!gate_node.node().cluster_ready());
     XS_CHECK(gate_node.node().cluster_ready_epoch() == 0U);
@@ -619,10 +617,11 @@ void TestGateNodeConnectsToGmAndStopsCleanly()
     XS_CHECK(log_text.find("Inner network active connector started.") != std::string::npos);
     XS_CHECK(log_text.find("Inner network active connector state changed.") != std::string::npos);
     XS_CHECK(log_text.find("Client network placeholder initialized.") != std::string::npos);
+    XS_CHECK(log_text.find("gmInnerRemoteEndpoint") == std::string::npos);
+    XS_CHECK(log_text.find("configuredInnerEndpoint") == std::string::npos);
+    XS_CHECK(log_text.find("clientListenEndpoint") == std::string::npos);
     XS_CHECK(log_text.find("Client network placeholder started.") == std::string::npos);
     XS_CHECK(log_text.find("Gate node entered runtime state.") != std::string::npos);
-    XS_CHECK(log_text.find("gmInnerRemoteEndpoint=tcp://127.0.0.1:" + std::to_string(gm_inner_port)) != std::string::npos);
-    XS_CHECK(log_text.find("configuredInnerEndpoint=tcp://127.0.0.1:7000") != std::string::npos);
     XS_CHECK(log_text.find("gameInnerListenerState=Listening") != std::string::npos);
 
     CleanupTestDirectory(base_path);

@@ -58,16 +58,6 @@ GameNode::GameNode(NodeCommandLineArgs args)
 
 GameNode::~GameNode() = default;
 
-std::string_view GameNode::gm_inner_remote_endpoint() const noexcept
-{
-    return gm_inner_remote_endpoint_;
-}
-
-std::string_view GameNode::configured_inner_endpoint() const noexcept
-{
-    return configured_inner_endpoint_;
-}
-
 std::string_view GameNode::managed_assembly_name() const noexcept
 {
     return runtime_state_.managed_assembly_name;
@@ -121,12 +111,7 @@ NodeErrorCode GameNode::OnInit()
             "Game innerNetwork.listenEndpoint.port must be greater than zero.");
     }
 
-    gm_inner_remote_endpoint_ = BuildTcpEndpoint(gm_endpoint);
-    configured_inner_endpoint_ = BuildTcpEndpoint(inner_endpoint);
-    configured_inner_endpoint_config_ = inner_endpoint;
-    gm_inner_connection_state_cache_ = ipc::ZmqConnectionState::Stopped;
     runtime_state_ = RuntimeState{};
-    runtime_state_.build_version = std::string(kGameBuildVersion);
     runtime_state_.managed_assembly_name = config->managed.assembly_name;
     runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
     inner_network_remote_sessions().Clear();
@@ -135,7 +120,7 @@ NodeErrorCode GameNode::OnInit()
     inner_options.connectors.push_back(
         {
             .id = std::string(kGmRemoteNodeId),
-            .remote_endpoint = gm_inner_remote_endpoint_,
+            .remote_endpoint = BuildTcpEndpoint(gm_endpoint),
             .routing_id = std::string(node_id()),
         });
 
@@ -199,10 +184,6 @@ NodeErrorCode GameNode::OnInit()
     const NodeErrorCode init_result = InitInnerNetwork(std::move(inner_options));
     if (init_result != NodeErrorCode::None)
     {
-        gm_inner_remote_endpoint_.clear();
-        configured_inner_endpoint_.clear();
-        configured_inner_endpoint_config_ = xs::core::EndpointConfig{};
-        gm_inner_connection_state_cache_ = ipc::ZmqConnectionState::Stopped;
         inner_network_remote_sessions().Clear();
         ResetRuntimeState();
         ResetGmSessionState();
@@ -217,13 +198,11 @@ NodeErrorCode GameNode::OnInit()
         HandleConnectorMessage(remote_node_id, payload);
     });
 
-    const std::array<xs::core::LogContextField, 7> context{
+    const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-        xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
-        xs::core::LogContextField{"buildVersion", runtime_state_.build_version},
+        xs::core::LogContextField{"buildVersion", std::string(kGameBuildVersion)},
         xs::core::LogContextField{"connectorCount", ToString(inner_network()->connector_count())},
     };
     logger().Log(xs::core::LogLevel::Info, "runtime", "Game node configured runtime skeleton.", context);
@@ -245,10 +224,8 @@ NodeErrorCode GameNode::OnRun()
         return inner_result;
     }
 
-    const std::array<xs::core::LogContextField, 5> context{
+    const std::array<xs::core::LogContextField, 3> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-        xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
         xs::core::LogContextField{
             "gmInnerState",
             std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
@@ -270,14 +247,10 @@ NodeErrorCode GameNode::OnUninit()
 
     ResetGateSessionStates();
     ResetGmSessionState();
-    gm_inner_connection_state_cache_ = ipc::ZmqConnectionState::Stopped;
 
     if (inner_network() != nullptr)
     {
         const NodeErrorCode result = UninitInnerNetwork();
-        gm_inner_remote_endpoint_.clear();
-        configured_inner_endpoint_.clear();
-        configured_inner_endpoint_config_ = xs::core::EndpointConfig{};
         ResetRuntimeState();
         if (result != NodeErrorCode::None)
         {
@@ -286,9 +259,6 @@ NodeErrorCode GameNode::OnUninit()
     }
     else
     {
-        gm_inner_remote_endpoint_.clear();
-        configured_inner_endpoint_.clear();
-        configured_inner_endpoint_config_ = xs::core::EndpointConfig{};
         ResetRuntimeState();
     }
 
@@ -315,14 +285,11 @@ void GameNode::HandleGmConnectionStateChanged(ipc::ZmqConnectionState state)
         return;
     }
 
-    gm_inner_connection_state_cache_ = state;
     session->connection_state = state;
 
-    const std::array<xs::core::LogContextField, 6> context{
+    const std::array<xs::core::LogContextField, 4> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gmInnerState", std::string(ipc::ZmqConnectionStateName(state))},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-        xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
     };
@@ -349,12 +316,10 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
     }
 
     session->connection_state = state;
-    const std::array<xs::core::LogContextField, 5> context{
+    const std::array<xs::core::LogContextField, 3> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
         xs::core::LogContextField{"gateInnerState", std::string(ipc::ZmqConnectionStateName(state))},
-        xs::core::LogContextField{"remoteEndpoint", std::string(inner_network()->remote_endpoint(gate_node_id))},
-        xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed Gate inner connection state change.", context);
 }
@@ -384,13 +349,12 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
 
-        const std::array<xs::core::LogContextField, 5> context{
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-            xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
             xs::core::LogContextField{
                 "gmInnerState",
-                std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state_cache_)),
+                std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
             },
             xs::core::LogContextField{"packetError", session->last_protocol_error},
         };
@@ -402,13 +366,13 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
         packet.header.seq == xs::net::kPacketSeqNone)
     {
         const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
             xs::core::LogContextField{
                 "gmInnerState",
-                std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state_cache_)),
+                std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
             },
         };
         session->last_protocol_error = "GM response envelope is invalid.";
@@ -429,10 +393,10 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
     }
 
     const std::array<xs::core::LogContextField, 4> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
         xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
         xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported GM response packet.", context);
 }
@@ -445,11 +409,10 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         return;
     }
 
-    const std::array<xs::core::LogContextField, 4> context{
+    const std::array<xs::core::LogContextField, 3> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
         xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
-        xs::core::LogContextField{"remoteEndpoint", std::string(inner_network()->remote_endpoint(gate_node_id))},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.", context);
 }
@@ -465,9 +428,9 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
     if (session->register_seq == 0U || packet.header.seq != session->register_seq)
     {
         const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{"expectedSeq", std::to_string(session->register_seq)},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
         logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM register response.", context);
         return;
@@ -484,13 +447,13 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
         if (decode_result != xs::net::RegisterCodecErrorCode::None)
         {
             const std::array<xs::core::LogContextField, 4> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
                 xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
                 xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
                 xs::core::LogContextField{
                     "codecError",
                     std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
                 },
-                xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
             };
             session->registered = false;
             session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
@@ -502,13 +465,11 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
         session->last_protocol_error =
             "GM rejected register request with error code " + std::to_string(response.error_code) + ".";
 
-        const std::array<xs::core::LogContextField, 7> context{
+        const std::array<xs::core::LogContextField, 5> context{
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{"errorCode", std::to_string(response.error_code)},
             xs::core::LogContextField{"retryAfterMs", std::to_string(response.retry_after_ms)},
             xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-            xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
             xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(
@@ -528,13 +489,13 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
         session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
 
         const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{
                 "codecError",
                 std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
             },
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM register success response.", context);
         return;
@@ -550,13 +511,12 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
 
     StartOrResetHeartbeatTimer(response.heartbeat_interval_ms);
 
-    const std::array<xs::core::LogContextField, 7> context{
+    const std::array<xs::core::LogContextField, 6> context{
         xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
         xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
         xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
         xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
         xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM register success response.", context);
@@ -573,9 +533,9 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
     if (session->heartbeat_seq == 0U || packet.header.seq != session->heartbeat_seq)
     {
         const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{"expectedSeq", std::to_string(session->heartbeat_seq)},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         };
         logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM heartbeat response.", context);
         return;
@@ -591,13 +551,13 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         if (decode_result != xs::net::HeartbeatCodecErrorCode::None)
         {
             const std::array<xs::core::LogContextField, 4> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
                 xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
                 xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
                 xs::core::LogContextField{
                     "codecError",
                     std::string(xs::net::HeartbeatCodecErrorMessage(decode_result)),
                 },
-                xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
             };
             session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
             logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM heartbeat error response.", context);
@@ -607,13 +567,12 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         session->last_protocol_error =
             "GM rejected heartbeat with error code " + std::to_string(response.error_code) + ".";
 
-        const std::array<xs::core::LogContextField, 7> context{
+        const std::array<xs::core::LogContextField, 6> context{
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{"errorCode", std::to_string(response.error_code)},
             xs::core::LogContextField{"retryAfterMs", std::to_string(response.retry_after_ms)},
             xs::core::LogContextField{"requireFullRegister", response.require_full_register ? "true" : "false"},
             xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
             xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(
@@ -625,7 +584,7 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         if (response.require_full_register)
         {
             ResetGmSessionState();
-            if (gm_inner_connection_state_cache_ == ipc::ZmqConnectionState::Connected)
+            if (session->connection_state == ipc::ZmqConnectionState::Connected)
             {
                 (void)SendRegisterRequest();
             }
@@ -640,13 +599,13 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
     if (decode_result != xs::net::HeartbeatCodecErrorCode::None)
     {
         const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{
                 "codecError",
                 std::string(xs::net::HeartbeatCodecErrorMessage(decode_result)),
             },
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM heartbeat success response.", context);
@@ -669,13 +628,12 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         StartOrResetHeartbeatTimer(response.heartbeat_interval_ms);
     }
 
-    const std::array<xs::core::LogContextField, 7> context{
+    const std::array<xs::core::LogContextField, 6> context{
         xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
         xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
         xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
         xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
         xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM heartbeat success response.", context);
@@ -685,9 +643,16 @@ bool GameNode::SendRegisterRequest()
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr || inner_network() == nullptr ||
-        gm_inner_connection_state_cache_ != ipc::ZmqConnectionState::Connected ||
+        session->connection_state != ipc::ZmqConnectionState::Connected ||
         session->register_in_flight)
     {
+        return false;
+    }
+
+    const xs::core::GameNodeConfig* config = game_config();
+    if (config == nullptr)
+    {
+        session->last_protocol_error = "Game node configuration is unavailable.";
         return false;
     }
 
@@ -697,9 +662,9 @@ bool GameNode::SendRegisterRequest()
         .node_id = std::string(node_id()),
         .pid = pid(),
         .started_at_unix_ms = runtime_state_.started_at_unix_ms,
-        .inner_network_endpoint = ToNetEndpoint(configured_inner_endpoint_config_),
-        .build_version = runtime_state_.build_version,
-        .capability_tags = runtime_state_.capability_tags,
+        .inner_network_endpoint = ToNetEndpoint(config->inner_network_listen_endpoint),
+        .build_version = std::string(kGameBuildVersion),
+        .capability_tags = {},
         .load = xs::net::LoadSnapshot{},
     };
 
@@ -712,7 +677,7 @@ bool GameNode::SendRegisterRequest()
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(size_result))},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size GM register request.", context);
         return false;
@@ -726,7 +691,7 @@ bool GameNode::SendRegisterRequest()
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(encode_result))},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode GM register request.", context);
         return false;
@@ -748,7 +713,7 @@ bool GameNode::SendRegisterRequest()
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
             xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap GM register request into a packet.", context);
         return false;
@@ -758,12 +723,11 @@ bool GameNode::SendRegisterRequest()
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 5> context{
+        const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-            xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
             xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send GM register request.", context);
         return false;
@@ -773,13 +737,11 @@ bool GameNode::SendRegisterRequest()
     session->register_seq = seq;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 7> context{
+    const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"seq", std::to_string(seq)},
         xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
-        xs::core::LogContextField{"buildVersion", runtime_state_.build_version},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-        xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
+        xs::core::LogContextField{"buildVersion", std::string(kGameBuildVersion)},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent GM register request.", context);
@@ -790,7 +752,7 @@ bool GameNode::SendHeartbeatRequest()
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr || inner_network() == nullptr || !session->registered ||
-        gm_inner_connection_state_cache_ != ipc::ZmqConnectionState::Connected ||
+        session->connection_state != ipc::ZmqConnectionState::Connected ||
         session->heartbeat_seq != 0U)
     {
         return false;
@@ -810,7 +772,7 @@ bool GameNode::SendHeartbeatRequest()
         const std::array<xs::core::LogContextField, 3> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"codecError", std::string(xs::net::HeartbeatCodecErrorMessage(encode_result))},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode GM heartbeat request.", context);
         return false;
@@ -831,7 +793,7 @@ bool GameNode::SendHeartbeatRequest()
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
             xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap GM heartbeat request into a packet.", context);
         return false;
@@ -841,12 +803,11 @@ bool GameNode::SendHeartbeatRequest()
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 5> context{
+        const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-            xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
             xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
         };
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send GM heartbeat request.", context);
         return false;
@@ -855,12 +816,10 @@ bool GameNode::SendHeartbeatRequest()
     session->heartbeat_seq = seq;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 6> context{
+    const std::array<xs::core::LogContextField, 4> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"seq", std::to_string(seq)},
         xs::core::LogContextField{"sentAtUnixMs", ToString(request.sent_at_unix_ms)},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
-        xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent GM heartbeat request.", context);
@@ -938,11 +897,10 @@ void GameNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
         session->last_protocol_error =
             "Failed to create GM heartbeat timer: " +
             std::string(xs::core::TimerErrorMessage(xs::core::TimerErrorFromCreateResult(timer_result)));
-        const std::array<xs::core::LogContextField, 5> context{
+        const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
             xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
-            xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
             xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         };
         logger().Log(xs::core::LogLevel::Error, "inner", "Game node failed to schedule GM heartbeat timer.", context);
@@ -951,11 +909,10 @@ void GameNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
 
     session->heartbeat_timer_id = timer_result;
 
-    const std::array<xs::core::LogContextField, 5> context{
+    const std::array<xs::core::LogContextField, 4> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
         xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
-        xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node scheduled GM heartbeat timer.", context);
@@ -997,6 +954,11 @@ std::uint32_t GameNode::ConsumeNextInnerSequence() noexcept
 std::uint64_t GameNode::CurrentUnixTimeMilliseconds() const noexcept
 {
     return CurrentUnixTimeMillisecondsValue();
+}
+
+const xs::core::GameNodeConfig* GameNode::game_config() const noexcept
+{
+    return dynamic_cast<const xs::core::GameNodeConfig*>(&node_config());
 }
 
 InnerNetworkSession* GameNode::remote_session(std::string_view remote_node_id) noexcept

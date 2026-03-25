@@ -7,7 +7,6 @@
 #include <memory>
 #include <span>
 #include <string>
-#include <vector>
 
 namespace xs::net
 {
@@ -25,8 +24,6 @@ class GateNode final : public ServerNode
     explicit GateNode(NodeCommandLineArgs args);
     ~GateNode() override;
 
-    [[nodiscard]] std::string_view gm_inner_remote_endpoint() const noexcept;
-    [[nodiscard]] std::string_view configured_inner_endpoint() const noexcept;
     [[nodiscard]] ipc::ZmqListenerState game_inner_listener_state() const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState inner_connection_state(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState gm_inner_connection_state() const noexcept;
@@ -44,8 +41,6 @@ class GateNode final : public ServerNode
     struct RuntimeState final
     {
         std::uint64_t started_at_unix_ms{0U};
-        std::string build_version{"dev"};
-        std::vector<std::string> capability_tags{};
     };
 
     void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
@@ -66,16 +61,13 @@ class GateNode final : public ServerNode
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
     [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
+    [[nodiscard]] const xs::core::GateNodeConfig* gate_config() const noexcept;
     [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;
     [[nodiscard]] const InnerNetworkSession* remote_session(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] InnerNetworkSession* gm_session() noexcept;
     [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
-    std::string gm_inner_remote_endpoint_{};
-    std::string configured_inner_endpoint_{};
-    xs::core::EndpointConfig configured_inner_endpoint_config_{};
     std::unique_ptr<ClientNetwork> client_network_{};
-    ipc::ZmqConnectionState gm_inner_connection_state_cache_{ipc::ZmqConnectionState::Stopped};
     RuntimeState runtime_state_{};
     std::uint64_t cluster_ready_epoch_{0U};
     std::uint64_t last_cluster_ready_server_now_unix_ms_{0U};
