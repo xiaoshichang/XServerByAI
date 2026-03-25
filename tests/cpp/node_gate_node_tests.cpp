@@ -1,3 +1,4 @@
+#include "GameNode.h"
 #include "GateNode.h"
 #include "GmNode.h"
 #include "Json.h"
@@ -414,6 +415,82 @@ class RunningGateNode final
     std::string run_error_{};
 };
 
+class RunningGameNode final
+{
+  public:
+    explicit RunningGameNode(const std::filesystem::path& config_path)
+        : node_({
+              .config_path = config_path,
+              .node_id = "Game0",
+          })
+    {
+    }
+
+    ~RunningGameNode()
+    {
+        if (run_thread_.joinable())
+        {
+            node_.RequestStop();
+            run_thread_.join();
+        }
+
+        (void)node_.Uninit();
+    }
+
+    bool Start()
+    {
+        const xs::node::NodeErrorCode init_result = node_.Init();
+        XS_CHECK_MSG(init_result == xs::node::NodeErrorCode::None, node_.last_error_message().data());
+        if (init_result != xs::node::NodeErrorCode::None)
+        {
+            return false;
+        }
+
+        run_thread_ = std::thread([this]() {
+            run_result_ = node_.Run();
+            run_error_ = std::string(node_.last_error_message());
+        });
+        return true;
+    }
+
+    void StopAndJoin()
+    {
+        node_.RequestStop();
+        if (run_thread_.joinable())
+        {
+            run_thread_.join();
+        }
+    }
+
+    bool Uninit()
+    {
+        const xs::node::NodeErrorCode uninit_result = node_.Uninit();
+        XS_CHECK_MSG(uninit_result == xs::node::NodeErrorCode::None, node_.last_error_message().data());
+        return uninit_result == xs::node::NodeErrorCode::None;
+    }
+
+    [[nodiscard]] xs::node::GameNode& node() noexcept
+    {
+        return node_;
+    }
+
+    [[nodiscard]] xs::node::NodeErrorCode run_result() const noexcept
+    {
+        return run_result_;
+    }
+
+    [[nodiscard]] std::string_view run_error() const noexcept
+    {
+        return run_error_;
+    }
+
+  private:
+    xs::node::GameNode node_;
+    std::thread run_thread_{};
+    xs::node::NodeErrorCode run_result_{xs::node::NodeErrorCode::None};
+    std::string run_error_{};
+};
+
 void TestGateNodeRejectsMissingGmInnerNetworkEndpointConfig()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gate-node-missing-gm-inner");
@@ -495,19 +572,40 @@ void TestGateNodeConnectsToGmAndStopsCleanly()
     XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gate_node]() {
         return gate_node.node().gm_inner_connection_state() == xs::ipc::ZmqConnectionState::Connected;
     }));
+    XS_CHECK(gate_node.node().game_inner_listener_state() == xs::ipc::ZmqListenerState::Listening);
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        gate_node.StopAndJoin();
+        (void)gate_node.Uninit();
+        gm_node.StopAndJoin();
+        (void)gm_node.Uninit();
+        CleanupTestDirectory(base_path);
+        return;
+    }
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
+        return game_node.node().inner_connection_state("Gate0") == xs::ipc::ZmqConnectionState::Connected;
+    }));
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     XS_CHECK(!gate_node.run_completed());
     XS_CHECK(gate_node.node().gm_inner_remote_endpoint() == "tcp://127.0.0.1:" + std::to_string(gm_inner_port));
     XS_CHECK(gate_node.node().configured_inner_endpoint() == "tcp://127.0.0.1:7000");
+    XS_CHECK(gate_node.node().game_inner_listener_state() == xs::ipc::ZmqListenerState::Listening);
     XS_CHECK(!gate_node.node().cluster_ready());
     XS_CHECK(gate_node.node().cluster_ready_epoch() == 0U);
     XS_CHECK(!gate_node.node().client_network_running());
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
 
     gate_node.StopAndJoin();
     XS_CHECK_MSG(gate_node.run_result() == xs::node::NodeErrorCode::None, gate_node.run_error().data());
     XS_CHECK(gate_node.Uninit());
     XS_CHECK(gate_node.node().gm_inner_connection_state() == xs::ipc::ZmqConnectionState::Stopped);
+    XS_CHECK(gate_node.node().game_inner_listener_state() == xs::ipc::ZmqListenerState::Stopped);
 
     gm_node.StopAndJoin();
     XS_CHECK_MSG(gm_node.run_result() == xs::node::NodeErrorCode::None, gm_node.run_error().data());
@@ -525,6 +623,7 @@ void TestGateNodeConnectsToGmAndStopsCleanly()
     XS_CHECK(log_text.find("Gate node entered runtime state.") != std::string::npos);
     XS_CHECK(log_text.find("gmInnerRemoteEndpoint=tcp://127.0.0.1:" + std::to_string(gm_inner_port)) != std::string::npos);
     XS_CHECK(log_text.find("configuredInnerEndpoint=tcp://127.0.0.1:7000") != std::string::npos);
+    XS_CHECK(log_text.find("gameInnerListenerState=Listening") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }

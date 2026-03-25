@@ -697,7 +697,6 @@ void TestInnerNetworkWildcardBindAndReceivesPayload()
     xs::core::MainEventLoop event_loop({.thread_name = "inner-network-listener"});
 
     xs::node::InnerNetworkOptions options;
-    options.mode = xs::node::InnerNetworkMode::PassiveListener;
     options.local_endpoint = "tcp://127.0.0.1:*";
 
     auto inner_network = std::make_shared<xs::node::InnerNetwork>(event_loop, logger, std::move(options));

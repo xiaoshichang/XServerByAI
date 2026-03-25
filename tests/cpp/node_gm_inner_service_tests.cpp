@@ -282,7 +282,6 @@ void TestHeartbeatResponsesOverInnerNetwork()
     xs::core::MainEventLoop event_loop({.thread_name = "gm-inner-network"});
 
     xs::node::InnerNetworkOptions network_options;
-    network_options.mode = xs::node::InnerNetworkMode::PassiveListener;
     network_options.local_endpoint = "tcp://127.0.0.1:*";
 
     xs::node::InnerNetwork inner_network(event_loop, logger, std::move(network_options));

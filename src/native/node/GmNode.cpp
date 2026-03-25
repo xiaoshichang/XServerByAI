@@ -298,7 +298,6 @@ NodeErrorCode GmNode::OnInit()
     }
 
     InnerNetworkOptions options;
-    options.mode = InnerNetworkMode::PassiveListener;
     options.local_endpoint = BuildTcpEndpoint(endpoint);
 
     invalidated_routing_ids_.clear();
@@ -311,7 +310,8 @@ NodeErrorCode GmNode::OnInit()
         return init_result;
     }
 
-    inner_network()->SetMessageHandler([this](std::span<const std::byte> routing_id, std::span<const std::byte> payload) {
+    inner_network()->SetListenerMessageHandler(
+        [this](std::span<const std::byte> routing_id, std::span<const std::byte> payload) {
         HandleInnerMessage(routing_id, payload);
     });
 

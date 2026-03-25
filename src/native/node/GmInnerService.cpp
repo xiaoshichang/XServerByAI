@@ -135,7 +135,7 @@ NodeErrorCode GmInnerService::Init()
             "GM invalidated_routing_retention must not be negative.");
     }
 
-    inner_network_.SetMessageHandler([this](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
+    inner_network_.SetListenerMessageHandler([this](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
         HandleInnerMessage(routing_id, payload);
     });
 
@@ -180,7 +180,7 @@ NodeErrorCode GmInnerService::Uninit()
         timeout_scan_timer_id_ = 0;
     }
 
-    inner_network_.SetMessageHandler({});
+    inner_network_.SetListenerMessageHandler({});
     running_ = false;
     initialized_ = false;
     ClearError();

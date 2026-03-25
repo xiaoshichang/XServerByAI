@@ -2,6 +2,10 @@
 #include "Logging.h"
 #include "MainEventLoop.h"
 
+#include <asio/io_context.hpp>
+#include <asio/ip/address_v4.hpp>
+#include <asio/ip/tcp.hpp>
+
 #include <zmq.h>
 
 #include <array>
@@ -17,6 +21,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace
@@ -98,6 +103,11 @@ class RawZmqSocket final
         }
 
         return endpoint;
+    }
+
+    [[nodiscard]] bool Connect(std::string_view endpoint)
+    {
+        return socket_ != nullptr && zmq_connect(socket_, std::string(endpoint).c_str()) == 0;
     }
 
     void Close() noexcept
@@ -250,6 +260,17 @@ bool ByteSpanEqualsSpan(std::span<const std::byte> left, std::span<const std::by
     return true;
 }
 
+std::uint16_t AcquireLoopbackPort()
+{
+    asio::io_context io_context;
+    asio::ip::tcp::acceptor acceptor(
+        io_context,
+        asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), 0u));
+    const std::uint16_t port = acceptor.local_endpoint().port();
+    acceptor.close();
+    return port;
+}
+
 bool TryReceiveMultipartMessage(void* socket, std::vector<std::vector<std::byte>>* frames)
 {
     if (socket == nullptr || frames == nullptr)
@@ -290,6 +311,43 @@ bool TryReceiveMultipartMessage(void* socket, std::vector<std::vector<std::byte>
     }
 }
 
+bool TryReceiveSingleFrame(void* socket, std::vector<std::byte>* frame)
+{
+    if (socket == nullptr || frame == nullptr)
+    {
+        return false;
+    }
+
+    zmq_msg_t message;
+    zmq_msg_init(&message);
+    const int receive_result = zmq_msg_recv(&message, socket, ZMQ_DONTWAIT);
+    if (receive_result < 0)
+    {
+        const int error_code = zmq_errno();
+        zmq_msg_close(&message);
+        if (error_code == EAGAIN)
+        {
+            return false;
+        }
+
+        XS_CHECK_MSG(false, zmq_strerror(error_code));
+        return false;
+    }
+
+    if (zmq_msg_more(&message) != 0)
+    {
+        XS_CHECK_MSG(false, "Expected a single-frame ZeroMQ message.");
+        zmq_msg_close(&message);
+        return false;
+    }
+
+    const auto* data = static_cast<const std::byte*>(zmq_msg_data(&message));
+    const std::size_t size = zmq_msg_size(&message);
+    frame->assign(data, data + size);
+    zmq_msg_close(&message);
+    return true;
+}
+
 bool SendRouterReply(
     void* router_socket,
     std::span<const std::byte> routing_id,
@@ -313,41 +371,107 @@ bool SendRouterReply(
     return true;
 }
 
-void TestActiveInnerNetworkConnectsReceivesAndReportsDisconnect()
+bool SendSingleFrame(void* socket, std::span<const std::byte> payload)
 {
-    const std::filesystem::path base_path = PrepareTestDirectory("node-inner-network-active");
+    const void* payload_data = payload.empty() ? static_cast<const void*>("") : static_cast<const void*>(payload.data());
+    if (zmq_send(socket, payload_data, payload.size(), ZMQ_DONTWAIT) < 0)
+    {
+        const int error_code = zmq_errno();
+        if (error_code == EAGAIN)
+        {
+            return false;
+        }
+
+        XS_CHECK_MSG(false, zmq_strerror(error_code));
+        return false;
+    }
+
+    return true;
+}
+
+void TestInnerNetworkSupportsListenerAndMultipleConnectors()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-inner-network-multi-role");
     const std::filesystem::path log_dir = base_path / "logs";
 
-    RawZmqSocket router(ZMQ_ROUTER);
-    XS_CHECK(router.IsValid());
+    RawZmqSocket gm_router(ZMQ_ROUTER);
+    RawZmqSocket gate_router(ZMQ_ROUTER);
+    RawZmqSocket dealer(ZMQ_DEALER);
+    XS_CHECK(gm_router.IsValid());
+    XS_CHECK(gate_router.IsValid());
+    XS_CHECK(dealer.IsValid());
 
-    const std::string remote_endpoint = router.BindLoopbackTcp();
-    XS_CHECK(!remote_endpoint.empty());
+    const std::string gm_remote_endpoint = gm_router.BindLoopbackTcp();
+    const std::string gate_remote_endpoint = gate_router.BindLoopbackTcp();
+    XS_CHECK(!gm_remote_endpoint.empty());
+    XS_CHECK(!gate_remote_endpoint.empty());
 
-    xs::core::Logger logger(MakeLoggerOptions(log_dir, xs::core::ProcessType::Gate, "Gate0"));
-    xs::core::MainEventLoop event_loop({.thread_name = "node-inner-network-active"});
+    const std::string local_endpoint = "tcp://127.0.0.1:" + std::to_string(AcquireLoopbackPort());
+
+    xs::core::Logger logger(MakeLoggerOptions(log_dir, xs::core::ProcessType::Game, "Game0"));
+    xs::core::MainEventLoop event_loop({.thread_name = "node-inner-network-multi-role"});
 
     xs::node::InnerNetworkOptions options;
-    options.mode = xs::node::InnerNetworkMode::ActiveConnector;
-    options.local_endpoint = "tcp://127.0.0.1:7000";
-    options.remote_endpoint = remote_endpoint;
+    options.local_endpoint = local_endpoint;
+    options.connectors.push_back(
+        {
+            .id = "GM",
+            .remote_endpoint = gm_remote_endpoint,
+            .routing_id = "Game0",
+        });
+    options.connectors.push_back(
+        {
+            .id = "Gate0",
+            .remote_endpoint = gate_remote_endpoint,
+            .routing_id = "Game0",
+        });
 
     auto inner_network = std::make_shared<xs::node::InnerNetwork>(event_loop, logger, std::move(options));
-    const std::vector<std::byte> outbound_payload = BytesFromText("gate-bootstrap");
-    const std::vector<std::byte> reply_payload = BytesFromText("gm-ready");
+    const std::vector<std::byte> gm_outbound_payload = BytesFromText("game-to-gm");
+    const std::vector<std::byte> gate_outbound_payload = BytesFromText("game-to-gate");
+    const std::vector<std::byte> gm_reply_payload = BytesFromText("gm-reply");
+    const std::vector<std::byte> gate_reply_payload = BytesFromText("gate-reply");
+    const std::vector<std::byte> listener_payload = BytesFromText("game-joined");
+    const std::vector<std::byte> listener_reply_payload = BytesFromText("gate-accepted");
 
-    std::vector<std::vector<std::byte>> received_messages;
-    std::vector<std::vector<std::byte>> router_frames;
-    bool seen_connected = false;
-    bool sent_outbound_payload = false;
-    bool router_replied = false;
-    bool router_closed = false;
-    bool seen_disconnected = false;
+    std::unordered_map<std::string, std::vector<std::vector<std::byte>>> connector_messages;
+    std::vector<std::vector<std::byte>> gm_router_frames;
+    std::vector<std::vector<std::byte>> gate_router_frames;
+    std::vector<std::byte> listener_reply;
+    std::vector<std::byte> listener_received_payload;
+    std::vector<std::byte> listener_routing_id;
+    bool gm_connected = false;
+    bool gate_connected = false;
+    bool gm_sent = false;
+    bool gate_sent = false;
+    bool gm_replied = false;
+    bool gate_replied = false;
+    bool dealer_connected = false;
+    bool dealer_sent = false;
+    bool listener_replied = false;
+    bool had_listener = false;
+    std::size_t configured_connector_count = 0U;
+    std::string configured_gm_remote_endpoint;
+    std::string configured_gate_remote_endpoint;
 
-    inner_network->SetMessageHandler([&received_messages](std::vector<std::byte> routing_id, std::vector<std::byte> payload) {
-        XS_CHECK(routing_id.empty());
-        received_messages.push_back(std::move(payload));
-    });
+    inner_network->SetConnectorMessageHandler(
+        [&connector_messages](std::string_view connector_id, std::vector<std::byte> payload) {
+            connector_messages[std::string(connector_id)].push_back(std::move(payload));
+        });
+    inner_network->SetListenerMessageHandler(
+        [&listener_routing_id, &listener_received_payload, &listener_replied, &listener_reply_payload, inner_network](
+            std::vector<std::byte> routing_id,
+            std::vector<std::byte> payload) {
+            listener_routing_id = routing_id;
+            listener_received_payload = payload;
+
+            if (!listener_replied)
+            {
+                const xs::node::NodeErrorCode send_result = inner_network->Send(routing_id, listener_reply_payload);
+                XS_CHECK_MSG(send_result == xs::node::NodeErrorCode::None, inner_network->last_error_message().data());
+                listener_replied = send_result == xs::node::NodeErrorCode::None;
+            }
+        });
 
     xs::core::MainEventLoopHooks hooks;
     hooks.on_start = [&](xs::core::MainEventLoop& running_loop, std::string* error_message) {
@@ -371,51 +495,107 @@ void TestActiveInnerNetworkConnectsReceivesAndReportsDisconnect()
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
 
+        had_listener = inner_network->HasListener();
+        configured_connector_count = inner_network->connector_count();
+        configured_gm_remote_endpoint = std::string(inner_network->remote_endpoint("GM"));
+        configured_gate_remote_endpoint = std::string(inner_network->remote_endpoint("Gate0"));
+
         const xs::core::TimerCreateResult poll_timer =
             running_loop.timers().CreateRepeating(
                 std::chrono::milliseconds(5),
-                [&running_loop, &router, &router_frames, &seen_connected, &sent_outbound_payload, &router_replied, &router_closed, &seen_disconnected, &received_messages, &outbound_payload, &reply_payload, inner_network]() {
-                    if (!seen_connected &&
-                        inner_network->connection_state() == xs::ipc::ZmqConnectionState::Connected)
+                [&running_loop,
+                 &gm_router,
+                 &gate_router,
+                 &dealer,
+                 &gm_router_frames,
+                 &gate_router_frames,
+                 &listener_reply,
+                 &gm_connected,
+                 &gate_connected,
+                 &gm_sent,
+                 &gate_sent,
+                 &gm_replied,
+                 &gate_replied,
+                 &dealer_connected,
+                 &dealer_sent,
+                 &listener_replied,
+                 &connector_messages,
+                 &gm_outbound_payload,
+                 &gate_outbound_payload,
+                 &gm_reply_payload,
+                 &gate_reply_payload,
+                 &listener_payload,
+                 inner_network]() {
+                    if (!gm_connected &&
+                        inner_network->connection_state("GM") == xs::ipc::ZmqConnectionState::Connected)
                     {
-                        seen_connected = true;
+                        gm_connected = true;
                     }
 
-                    if (seen_connected && !sent_outbound_payload)
+                    if (!gate_connected &&
+                        inner_network->connection_state("Gate0") == xs::ipc::ZmqConnectionState::Connected)
                     {
-                        const xs::node::NodeErrorCode send_result = inner_network->Send({}, outbound_payload);
-                        XS_CHECK_MSG(
-                            send_result == xs::node::NodeErrorCode::None,
-                            inner_network->last_error_message().data());
-                        sent_outbound_payload = send_result == xs::node::NodeErrorCode::None;
+                        gate_connected = true;
                     }
 
-                    if (sent_outbound_payload && !router_replied && TryReceiveMultipartMessage(router.socket(), &router_frames))
+                    if (gm_connected && !gm_sent)
                     {
-                        XS_CHECK(router_frames.size() == 2u);
-                        if (router_frames.size() == 2u)
+                        const xs::node::NodeErrorCode send_result =
+                            inner_network->SendToConnector("GM", gm_outbound_payload);
+                        XS_CHECK_MSG(send_result == xs::node::NodeErrorCode::None, inner_network->last_error_message().data());
+                        gm_sent = send_result == xs::node::NodeErrorCode::None;
+                    }
+
+                    if (gate_connected && !gate_sent)
+                    {
+                        const xs::node::NodeErrorCode send_result =
+                            inner_network->SendToConnector("Gate0", gate_outbound_payload);
+                        XS_CHECK_MSG(send_result == xs::node::NodeErrorCode::None, inner_network->last_error_message().data());
+                        gate_sent = send_result == xs::node::NodeErrorCode::None;
+                    }
+
+                    if (!dealer_connected && inner_network->listener_state() == xs::ipc::ZmqListenerState::Listening)
+                    {
+                        dealer_connected = dealer.Connect(inner_network->bound_endpoint());
+                        XS_CHECK(dealer_connected);
+                    }
+
+                    if (dealer_connected && !dealer_sent)
+                    {
+                        dealer_sent = SendSingleFrame(dealer.socket(), listener_payload);
+                    }
+
+                    if (gm_sent && !gm_replied && TryReceiveMultipartMessage(gm_router.socket(), &gm_router_frames))
+                    {
+                        XS_CHECK(gm_router_frames.size() == 2u);
+                        if (gm_router_frames.size() == 2u)
                         {
-                            XS_CHECK(SendRouterReply(router.socket(), router_frames[0], reply_payload));
+                            XS_CHECK(SendRouterReply(gm_router.socket(), gm_router_frames[0], gm_reply_payload));
                         }
 
-                        router_replied = true;
+                        gm_replied = true;
                     }
 
-                    if (router_replied && !router_closed && !received_messages.empty())
+                    if (gate_sent && !gate_replied && TryReceiveMultipartMessage(gate_router.socket(), &gate_router_frames))
                     {
-                        router.Close();
-                        router_closed = true;
+                        XS_CHECK(gate_router_frames.size() == 2u);
+                        if (gate_router_frames.size() == 2u)
+                        {
+                            XS_CHECK(SendRouterReply(gate_router.socket(), gate_router_frames[0], gate_reply_payload));
+                        }
+
+                        gate_replied = true;
                     }
 
-                    if (router_closed &&
-                        !seen_disconnected &&
-                        inner_network->connection_state() != xs::ipc::ZmqConnectionState::Connected &&
-                        inner_network->connection_state() != xs::ipc::ZmqConnectionState::Stopped)
+                    if (listener_replied && listener_reply.empty())
                     {
-                        seen_disconnected = true;
+                        (void)TryReceiveSingleFrame(dealer.socket(), &listener_reply);
                     }
 
-                    if (router_closed && !received_messages.empty() && seen_disconnected)
+                    if (gm_replied && gate_replied &&
+                        connector_messages["GM"].size() == 1u &&
+                        connector_messages["Gate0"].size() == 1u &&
+                        !listener_reply.empty())
                     {
                         running_loop.RequestStop();
                     }
@@ -424,20 +604,20 @@ void TestActiveInnerNetworkConnectsReceivesAndReportsDisconnect()
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to create active inner network poll timer.";
+                *error_message = "Failed to create inner network poll timer.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
 
         const xs::core::TimerCreateResult timeout_timer =
-            running_loop.timers().CreateOnce(std::chrono::seconds(2), [&running_loop]() {
+            running_loop.timers().CreateOnce(std::chrono::seconds(3), [&running_loop]() {
                 running_loop.RequestStop();
             });
         if (!xs::core::IsTimerID(timeout_timer))
         {
             if (error_message != nullptr)
             {
-                *error_message = "Failed to create active inner network timeout timer.";
+                *error_message = "Failed to create inner network timeout timer.";
             }
             return xs::core::MainEventLoopErrorCode::StartupCallbackFailed;
         }
@@ -454,31 +634,53 @@ void TestActiveInnerNetworkConnectsReceivesAndReportsDisconnect()
 
     logger.Flush();
 
-    XS_CHECK(seen_connected);
-    XS_CHECK(sent_outbound_payload);
-    XS_CHECK(router_replied);
-    XS_CHECK(seen_disconnected);
-    XS_CHECK(router_frames.size() == 2u);
-    if (router_frames.size() == 2u)
+    XS_CHECK(had_listener);
+    XS_CHECK(configured_connector_count == 2u);
+    XS_CHECK(gm_connected);
+    XS_CHECK(gate_connected);
+    XS_CHECK(gm_sent);
+    XS_CHECK(gate_sent);
+    XS_CHECK(gm_replied);
+    XS_CHECK(gate_replied);
+    XS_CHECK(listener_replied);
+    XS_CHECK(gm_router_frames.size() == 2u);
+    XS_CHECK(gate_router_frames.size() == 2u);
+    if (gm_router_frames.size() == 2u)
     {
-        XS_CHECK(ByteSpanEqualsSpan(router_frames[1], outbound_payload));
+        XS_CHECK(ByteSpanEqualsSpan(gm_router_frames[1], gm_outbound_payload));
+    }
+    if (gate_router_frames.size() == 2u)
+    {
+        XS_CHECK(ByteSpanEqualsSpan(gate_router_frames[1], gate_outbound_payload));
     }
 
-    XS_CHECK(received_messages.size() == 1u);
-    if (received_messages.size() == 1u)
+    XS_CHECK(connector_messages["GM"].size() == 1u);
+    XS_CHECK(connector_messages["Gate0"].size() == 1u);
+    if (connector_messages["GM"].size() == 1u)
     {
-        XS_CHECK(ByteSpanEqualsSpan(received_messages.front(), reply_payload));
+        XS_CHECK(ByteSpanEqualsSpan(connector_messages["GM"].front(), gm_reply_payload));
     }
+    if (connector_messages["Gate0"].size() == 1u)
+    {
+        XS_CHECK(ByteSpanEqualsSpan(connector_messages["Gate0"].front(), gate_reply_payload));
+    }
+
+    XS_CHECK(ByteSpanEqualsSpan(listener_received_payload, listener_payload));
+    XS_CHECK(ByteSpanEqualsSpan(listener_reply, listener_reply_payload));
 
     XS_CHECK(!inner_network->IsRunning());
-    XS_CHECK(inner_network->connection_state() == xs::ipc::ZmqConnectionState::Stopped);
-    XS_CHECK(inner_network->local_endpoint() == "tcp://127.0.0.1:7000");
-    XS_CHECK(inner_network->remote_endpoint() == remote_endpoint);
+    XS_CHECK(inner_network->listener_state() == xs::ipc::ZmqListenerState::Stopped);
+    XS_CHECK(inner_network->connection_state("GM") == xs::ipc::ZmqConnectionState::Stopped);
+    XS_CHECK(inner_network->connection_state("Gate0") == xs::ipc::ZmqConnectionState::Stopped);
+    XS_CHECK(inner_network->local_endpoint() == local_endpoint);
+    XS_CHECK(configured_gm_remote_endpoint == gm_remote_endpoint);
+    XS_CHECK(configured_gate_remote_endpoint == gate_remote_endpoint);
     XS_CHECK(DirectoryContainsRegularFile(log_dir));
 
     const std::string log_text = ReadDirectoryText(log_dir);
-    XS_CHECK(log_text.find("Inner network active connector started.") != std::string::npos);
-    XS_CHECK(log_text.find("Inner network active connector state changed.") != std::string::npos);
+    XS_CHECK(log_text.find("Inner network listener started.") != std::string::npos);
+    XS_CHECK(log_text.find("connectorId=GM") != std::string::npos);
+    XS_CHECK(log_text.find("connectorId=Gate0") != std::string::npos);
     XS_CHECK(log_text.find("Inner network active connector received payload.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
@@ -488,7 +690,7 @@ void TestActiveInnerNetworkConnectsReceivesAndReportsDisconnect()
 
 int main()
 {
-    TestActiveInnerNetworkConnectsReceivesAndReportsDisconnect();
+    TestInnerNetworkSupportsListenerAndMultipleConnectors();
 
     if (g_failures != 0)
     {

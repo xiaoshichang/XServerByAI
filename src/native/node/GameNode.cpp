@@ -73,10 +73,15 @@ std::string_view GameNode::managed_assembly_name() const noexcept
     return runtime_state_.managed_assembly_name;
 }
 
+ipc::ZmqConnectionState GameNode::inner_connection_state(std::string_view remote_node_id) const noexcept
+{
+    const InnerNetworkSession* session = remote_session(remote_node_id);
+    return session != nullptr ? session->connection_state : ipc::ZmqConnectionState::Stopped;
+}
+
 ipc::ZmqConnectionState GameNode::gm_inner_connection_state() const noexcept
 {
-    const InnerNetworkSession* session = gm_session();
-    return session != nullptr ? session->connection_state : ipc::ZmqConnectionState::Stopped;
+    return inner_connection_state(kGmRemoteNodeId);
 }
 
 xs::core::ProcessType GameNode::role_process_type() const noexcept
@@ -125,24 +130,71 @@ NodeErrorCode GameNode::OnInit()
     runtime_state_.managed_assembly_name = config->managed.assembly_name;
     runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
     inner_network_remote_sessions().Clear();
-    const InnerNetworkSessionManagerErrorCode session_result =
-        inner_network_remote_sessions().Register(
-            {
-                .process_type = xs::core::ProcessType::Gm,
-                .node_id = std::string(kGmRemoteNodeId),
-                .inner_network_endpoint = ToNetEndpoint(gm_endpoint),
-            });
-    if (session_result != InnerNetworkSessionManagerErrorCode::None)
-    {
-        return SetError(
-            NodeErrorCode::NodeInitFailed,
-            std::string(InnerNetworkSessionManagerErrorMessage(session_result)));
-    }
 
     InnerNetworkOptions inner_options;
-    inner_options.mode = InnerNetworkMode::ActiveConnector;
-    inner_options.local_endpoint = configured_inner_endpoint_;
-    inner_options.remote_endpoint = gm_inner_remote_endpoint_;
+    inner_options.connectors.push_back(
+        {
+            .id = std::string(kGmRemoteNodeId),
+            .remote_endpoint = gm_inner_remote_endpoint_,
+            .routing_id = std::string(node_id()),
+        });
+
+    const auto register_remote_session =
+        [this](xs::core::ProcessType process_type, std::string_view remote_node_id, const xs::core::EndpointConfig& endpoint) {
+            const InnerNetworkSessionManagerErrorCode session_result =
+                inner_network_remote_sessions().Register(
+                    {
+                        .process_type = process_type,
+                        .node_id = std::string(remote_node_id),
+                        .inner_network_endpoint = ToNetEndpoint(endpoint),
+                    });
+            if (session_result != InnerNetworkSessionManagerErrorCode::None)
+            {
+                return SetError(
+                    NodeErrorCode::NodeInitFailed,
+                    std::string(InnerNetworkSessionManagerErrorMessage(session_result)));
+            }
+
+            return NodeErrorCode::None;
+        };
+
+    if (register_remote_session(xs::core::ProcessType::Gm, kGmRemoteNodeId, gm_endpoint) != NodeErrorCode::None)
+    {
+        return NodeErrorCode::NodeInitFailed;
+    }
+
+    for (const auto& [gate_node_id, gate_config] : cluster_config().gates)
+    {
+        if (gate_config.inner_network_listen_endpoint.host.empty())
+        {
+            return SetError(
+                NodeErrorCode::ConfigLoadFailed,
+                "Gate innerNetwork.listenEndpoint.host must not be empty for " + gate_node_id + '.');
+        }
+
+        if (gate_config.inner_network_listen_endpoint.port == 0U)
+        {
+            return SetError(
+                NodeErrorCode::ConfigLoadFailed,
+                "Gate innerNetwork.listenEndpoint.port must be greater than zero for " + gate_node_id + '.');
+        }
+
+        const NodeErrorCode session_result = register_remote_session(
+            xs::core::ProcessType::Gate,
+            gate_node_id,
+            gate_config.inner_network_listen_endpoint);
+        if (session_result != NodeErrorCode::None)
+        {
+            return session_result;
+        }
+
+        inner_options.connectors.push_back(
+            {
+                .id = gate_node_id,
+                .remote_endpoint = BuildTcpEndpoint(gate_config.inner_network_listen_endpoint),
+                .routing_id = std::string(node_id()),
+            });
+    }
 
     const NodeErrorCode init_result = InitInnerNetwork(std::move(inner_options));
     if (init_result != NodeErrorCode::None)
@@ -154,23 +206,25 @@ NodeErrorCode GameNode::OnInit()
         inner_network_remote_sessions().Clear();
         ResetRuntimeState();
         ResetGmSessionState();
+        ResetGateSessionStates();
         return init_result;
     }
 
-    inner_network()->SetConnectionStateHandler([this](ipc::ZmqConnectionState state) {
-        HandleInnerConnectionStateChanged(state);
+    inner_network()->SetConnectorStateHandler([this](std::string_view remote_node_id, ipc::ZmqConnectionState state) {
+        HandleConnectorStateChanged(remote_node_id, state);
     });
-    inner_network()->SetMessageHandler([this](std::vector<std::byte>, std::vector<std::byte> payload) {
-        HandleInnerMessage(payload);
+    inner_network()->SetConnectorMessageHandler([this](std::string_view remote_node_id, std::vector<std::byte> payload) {
+        HandleConnectorMessage(remote_node_id, payload);
     });
 
-    const std::array<xs::core::LogContextField, 6> context{
+    const std::array<xs::core::LogContextField, 7> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
         xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
         xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
         xs::core::LogContextField{"buildVersion", runtime_state_.build_version},
+        xs::core::LogContextField{"connectorCount", ToString(inner_network()->connector_count())},
     };
     logger().Log(xs::core::LogLevel::Info, "runtime", "Game node configured runtime skeleton.", context);
 
@@ -209,6 +263,12 @@ NodeErrorCode GameNode::OnRun()
 
 NodeErrorCode GameNode::OnUninit()
 {
+    if (InnerNetworkSession* session = gm_session(); session != nullptr)
+    {
+        session->connection_state = ipc::ZmqConnectionState::Stopped;
+    }
+
+    ResetGateSessionStates();
     ResetGmSessionState();
     gm_inner_connection_state_cache_ = ipc::ZmqConnectionState::Stopped;
 
@@ -236,7 +296,18 @@ NodeErrorCode GameNode::OnUninit()
     return NodeErrorCode::None;
 }
 
-void GameNode::HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state)
+void GameNode::HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state)
+{
+    if (remote_node_id == kGmRemoteNodeId)
+    {
+        HandleGmConnectionStateChanged(state);
+        return;
+    }
+
+    HandleGateConnectionStateChanged(remote_node_id, state);
+}
+
+void GameNode::HandleGmConnectionStateChanged(ipc::ZmqConnectionState state)
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr)
@@ -269,7 +340,37 @@ void GameNode::HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state)
     }
 }
 
-void GameNode::HandleInnerMessage(std::span<const std::byte> payload)
+void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, ipc::ZmqConnectionState state)
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    session->connection_state = state;
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+        xs::core::LogContextField{"gateInnerState", std::string(ipc::ZmqConnectionStateName(state))},
+        xs::core::LogContextField{"remoteEndpoint", std::string(inner_network()->remote_endpoint(gate_node_id))},
+        xs::core::LogContextField{"configuredInnerEndpoint", configured_inner_endpoint_},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed Gate inner connection state change.", context);
+}
+
+void GameNode::HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload)
+{
+    if (remote_node_id == kGmRemoteNodeId)
+    {
+        HandleGmMessage(payload);
+        return;
+    }
+
+    HandleGateMessage(remote_node_id, payload);
+}
+
+void GameNode::HandleGmMessage(std::span<const std::byte> payload)
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr)
@@ -334,6 +435,23 @@ void GameNode::HandleInnerMessage(std::span<const std::byte> payload)
         xs::core::LogContextField{"gmInnerRemoteEndpoint", gm_inner_remote_endpoint_},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported GM response packet.", context);
+}
+
+void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const std::byte> payload)
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    const std::array<xs::core::LogContextField, 4> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+        xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
+        xs::core::LogContextField{"remoteEndpoint", std::string(inner_network()->remote_endpoint(gate_node_id))},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.", context);
 }
 
 void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
@@ -636,7 +754,7 @@ bool GameNode::SendRegisterRequest()
         return false;
     }
 
-    const NodeErrorCode send_result = inner_network()->Send({}, packet);
+    const NodeErrorCode send_result = inner_network()->SendToConnector(kGmRemoteNodeId, packet);
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
@@ -719,7 +837,7 @@ bool GameNode::SendHeartbeatRequest()
         return false;
     }
 
-    const NodeErrorCode send_result = inner_network()->Send({}, packet);
+    const NodeErrorCode send_result = inner_network()->SendToConnector(kGmRemoteNodeId, packet);
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
@@ -771,6 +889,34 @@ void GameNode::ResetGmSessionState()
     session->heartbeat_timeout_ms = 0U;
     session->last_server_now_unix_ms = 0U;
     session->last_heartbeat_at_unix_ms = 0U;
+}
+
+void GameNode::ResetGateSessionStates()
+{
+    const std::vector<InnerNetworkSession> snapshot = inner_network_remote_sessions().Snapshot();
+    for (const InnerNetworkSession& entry : snapshot)
+    {
+        if (entry.process_type != xs::core::ProcessType::Gate)
+        {
+            continue;
+        }
+
+        InnerNetworkSession* session = remote_session(entry.node_id);
+        if (session == nullptr)
+        {
+            continue;
+        }
+
+        session->connection_state = ipc::ZmqConnectionState::Stopped;
+        session->registered = false;
+        session->register_in_flight = false;
+        session->register_seq = 0U;
+        session->heartbeat_seq = 0U;
+        session->heartbeat_interval_ms = 0U;
+        session->heartbeat_timeout_ms = 0U;
+        session->last_server_now_unix_ms = 0U;
+        session->last_heartbeat_at_unix_ms = 0U;
+    }
 }
 
 void GameNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
@@ -853,14 +999,24 @@ std::uint64_t GameNode::CurrentUnixTimeMilliseconds() const noexcept
     return CurrentUnixTimeMillisecondsValue();
 }
 
+InnerNetworkSession* GameNode::remote_session(std::string_view remote_node_id) noexcept
+{
+    return inner_network_remote_sessions().FindMutableByNodeId(remote_node_id);
+}
+
+const InnerNetworkSession* GameNode::remote_session(std::string_view remote_node_id) const noexcept
+{
+    return inner_network_remote_sessions().FindByNodeId(remote_node_id);
+}
+
 InnerNetworkSession* GameNode::gm_session() noexcept
 {
-    return inner_network_remote_sessions().FindMutableByNodeId(kGmRemoteNodeId);
+    return remote_session(kGmRemoteNodeId);
 }
 
 const InnerNetworkSession* GameNode::gm_session() const noexcept
 {
-    return inner_network_remote_sessions().FindByNodeId(kGmRemoteNodeId);
+    return remote_session(kGmRemoteNodeId);
 }
 
 } // namespace xs::node

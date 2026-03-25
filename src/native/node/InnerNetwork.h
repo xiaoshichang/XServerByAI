@@ -18,23 +18,22 @@
 namespace xs::node
 {
 
-enum class InnerNetworkMode : std::uint8_t
+struct InnerNetworkConnectorOptions
 {
-    Disabled = 0,
-    PassiveListener,
-    ActiveConnector,
-};
-
-struct InnerNetworkOptions
-{
-    InnerNetworkMode mode{InnerNetworkMode::Disabled};
-    std::string local_endpoint{};
+    std::string id{};
     std::string remote_endpoint{};
     std::string routing_id{};
 };
 
-using InnerNetworkMessageHandler = std::function<void(std::vector<std::byte>, std::vector<std::byte>)>;
-using InnerNetworkConnectionStateHandler = std::function<void(ipc::ZmqConnectionState)>;
+struct InnerNetworkOptions
+{
+    std::string local_endpoint{};
+    std::vector<InnerNetworkConnectorOptions> connectors{};
+};
+
+using InnerNetworkListenerMessageHandler = std::function<void(std::vector<std::byte>, std::vector<std::byte>)>;
+using InnerNetworkConnectorMessageHandler = std::function<void(std::string_view, std::vector<std::byte>)>;
+using InnerNetworkConnectionStateHandler = std::function<void(std::string_view, ipc::ZmqConnectionState)>;
 
 class InnerNetwork final
 {
@@ -56,16 +55,20 @@ class InnerNetwork final
     [[nodiscard]] NodeErrorCode Send(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
-    void SetMessageHandler(InnerNetworkMessageHandler handler);
-    void SetConnectionStateHandler(InnerNetworkConnectionStateHandler handler);
+    [[nodiscard]] NodeErrorCode SendToConnector(
+        std::string_view connector_id,
+        std::span<const std::byte> payload);
+    void SetListenerMessageHandler(InnerNetworkListenerMessageHandler handler);
+    void SetConnectorMessageHandler(InnerNetworkConnectorMessageHandler handler);
+    void SetConnectorStateHandler(InnerNetworkConnectionStateHandler handler);
 
     [[nodiscard]] bool IsRunning() const noexcept;
-    [[nodiscard]] InnerNetworkMode mode() const noexcept;
+    [[nodiscard]] bool HasListener() const noexcept;
+    [[nodiscard]] std::size_t connector_count() const noexcept;
     [[nodiscard]] ipc::ZmqListenerState listener_state() const noexcept;
-    [[nodiscard]] ipc::ZmqConnectionState connection_state() const noexcept;
-    [[nodiscard]] std::string_view configured_endpoint() const noexcept;
+    [[nodiscard]] ipc::ZmqConnectionState connection_state(std::string_view connector_id) const noexcept;
     [[nodiscard]] std::string_view local_endpoint() const noexcept;
-    [[nodiscard]] std::string_view remote_endpoint() const noexcept;
+    [[nodiscard]] std::string_view remote_endpoint(std::string_view connector_id) const noexcept;
     [[nodiscard]] std::string_view bound_endpoint() const noexcept;
     [[nodiscard]] std::string_view last_error_message() const noexcept;
     [[nodiscard]] ipc::ZmqListenerMetricsSnapshot metrics() const noexcept;

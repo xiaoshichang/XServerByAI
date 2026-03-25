@@ -27,6 +27,8 @@ class GateNode final : public ServerNode
 
     [[nodiscard]] std::string_view gm_inner_remote_endpoint() const noexcept;
     [[nodiscard]] std::string_view configured_inner_endpoint() const noexcept;
+    [[nodiscard]] ipc::ZmqListenerState game_inner_listener_state() const noexcept;
+    [[nodiscard]] ipc::ZmqConnectionState inner_connection_state(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState gm_inner_connection_state() const noexcept;
     [[nodiscard]] bool cluster_ready() const noexcept;
     [[nodiscard]] std::uint64_t cluster_ready_epoch() const noexcept;
@@ -46,8 +48,13 @@ class GateNode final : public ServerNode
         std::vector<std::string> capability_tags{};
     };
 
-    void HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state);
-    void HandleInnerMessage(std::span<const std::byte> payload);
+    void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
+    void HandleGmConnectionStateChanged(ipc::ZmqConnectionState state);
+    void HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload);
+    void HandleGmMessage(std::span<const std::byte> payload);
+    void HandleGameMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
     void HandleClusterReadyNotify(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
     void HandleHeartbeatResponse(const xs::net::PacketView& packet);
@@ -59,6 +66,8 @@ class GateNode final : public ServerNode
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
     [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
+    [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;
+    [[nodiscard]] const InnerNetworkSession* remote_session(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] InnerNetworkSession* gm_session() noexcept;
     [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 

@@ -29,6 +29,7 @@ class GameNode final : public ServerNode
     [[nodiscard]] std::string_view gm_inner_remote_endpoint() const noexcept;
     [[nodiscard]] std::string_view configured_inner_endpoint() const noexcept;
     [[nodiscard]] std::string_view managed_assembly_name() const noexcept;
+    [[nodiscard]] ipc::ZmqConnectionState inner_connection_state(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState gm_inner_connection_state() const noexcept;
 
   protected:
@@ -46,18 +47,25 @@ class GameNode final : public ServerNode
         std::vector<std::string> capability_tags{};
     };
 
-    void HandleInnerConnectionStateChanged(ipc::ZmqConnectionState state);
-    void HandleInnerMessage(std::span<const std::byte> payload);
+    void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
+    void HandleGmConnectionStateChanged(ipc::ZmqConnectionState state);
+    void HandleGateConnectionStateChanged(std::string_view gate_node_id, ipc::ZmqConnectionState state);
+    void HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload);
+    void HandleGmMessage(std::span<const std::byte> payload);
+    void HandleGateMessage(std::string_view gate_node_id, std::span<const std::byte> payload);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
     void HandleHeartbeatResponse(const xs::net::PacketView& packet);
     [[nodiscard]] bool SendRegisterRequest();
     [[nodiscard]] bool SendHeartbeatRequest();
     void ResetRuntimeState() noexcept;
     void ResetGmSessionState();
+    void ResetGateSessionStates();
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
     [[nodiscard]] std::uint64_t CurrentUnixTimeMilliseconds() const noexcept;
+    [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;
+    [[nodiscard]] const InnerNetworkSession* remote_session(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] InnerNetworkSession* gm_session() noexcept;
     [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
