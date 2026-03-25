@@ -210,17 +210,6 @@ add_test(NAME xs_node_inner_network_tests COMMAND xs_node_inner_network_tests)
 
 
 ###############################
-# xs_node_gm_inner_service_tests
-###############################
-add_executable(xs_node_gm_inner_service_tests
-    node_gm_inner_service_tests.cpp
-)
-
-target_link_libraries(xs_node_gm_inner_service_tests PRIVATE node ipc net)
-
-add_test(NAME xs_node_gm_inner_service_tests COMMAND xs_node_gm_inner_service_tests)
-
-###############################
 # xs_node_inner_network_session_manager_tests
 ###############################
 add_executable(xs_node_inner_network_session_manager_tests
