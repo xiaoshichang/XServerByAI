@@ -2,6 +2,7 @@
 #include "Json.h"
 #include "ZmqActiveConnector.h"
 #include "ZmqContext.h"
+#include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
 
@@ -10,6 +11,7 @@
 #include <asio/ip/tcp.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -300,6 +302,27 @@ xs::net::PacketView DecodeResponsePacket(
     return packet;
 }
 
+const std::vector<std::byte>* FindFirstPacketByMsgId(
+    const std::vector<std::vector<std::byte>>& packets,
+    std::uint32_t msg_id)
+{
+    for (const std::vector<std::byte>& packet_bytes : packets)
+    {
+        xs::net::PacketView packet{};
+        if (xs::net::DecodePacket(packet_bytes, &packet) != xs::net::PacketCodecErrorCode::None)
+        {
+            continue;
+        }
+
+        if (packet.header.msg_id == msg_id)
+        {
+            return &packet_bytes;
+        }
+    }
+
+    return nullptr;
+}
+
 class RunningGmNode final
 {
   public:
@@ -434,12 +457,22 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
     XS_CHECK(error_message.empty());
 
     const bool response_received = SpinUntil(io_context, std::chrono::seconds(2), [&responses]() {
-        return responses.size() == 1u;
+        return FindFirstPacketByMsgId(responses, xs::net::kInnerRegisterMsgId) != nullptr;
     });
     XS_CHECK(response_received);
-    XS_CHECK(responses.size() == 1u);
 
-    const xs::net::PacketView response_packet = DecodeResponsePacket(responses.front());
+    const std::vector<std::byte>* register_response = FindFirstPacketByMsgId(responses, xs::net::kInnerRegisterMsgId);
+    XS_CHECK(register_response != nullptr);
+    if (register_response == nullptr)
+    {
+        connector.Stop();
+        gm_node.StopAndJoin();
+        XS_CHECK(gm_node.Uninit());
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    const xs::net::PacketView response_packet = DecodeResponsePacket(*register_response);
     XS_CHECK(response_packet.header.msg_id == xs::net::kInnerRegisterMsgId);
     XS_CHECK(response_packet.header.seq == 42u);
     XS_CHECK(
@@ -474,6 +507,170 @@ void TestGmNodeAcceptsRegisterRequestAndStoresEntry()
     XS_CHECK(ByteSpanEqualsText(snapshot.front().routing_id, "gm-route-success"));
 
     XS_CHECK(gm_node.Uninit());
+    CleanupTestDirectory(base_path);
+}
+
+void TestGmNodeBroadcastsClusterNodesOnlineNotifyAfterExpectedNodesRegister()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gm-register-cluster-nodes-online");
+    const std::uint16_t inner_port = AcquireLoopbackPort();
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, inner_port, AcquireLoopbackPort(), &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGmNode gm_node(config_path);
+    if (!gm_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    asio::io_context io_context;
+    xs::ipc::ZmqContext context;
+    XS_CHECK(context.IsValid());
+
+    std::vector<std::vector<std::byte>> game_messages;
+    std::vector<std::vector<std::byte>> gate_messages;
+
+    xs::ipc::ZmqActiveConnector game_connector(
+        io_context,
+        context,
+        {
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
+            .routing_id = "gm-route-all-online-game",
+            .poll_interval = std::chrono::milliseconds(2),
+            .send_high_water_mark = 16,
+            .receive_high_water_mark = 16,
+            .reconnect_interval_ms = 25,
+            .reconnect_interval_max_ms = 50,
+            .handshake_interval_ms = 1000,
+        });
+    game_connector.SetMessageHandler([&game_messages](std::vector<std::byte> payload) {
+        game_messages.push_back(std::move(payload));
+    });
+
+    xs::ipc::ZmqActiveConnector gate_connector(
+        io_context,
+        context,
+        {
+            .remote_endpoint = "tcp://127.0.0.1:" + std::to_string(inner_port),
+            .routing_id = "gm-route-all-online-gate",
+            .poll_interval = std::chrono::milliseconds(2),
+            .send_high_water_mark = 16,
+            .receive_high_water_mark = 16,
+            .reconnect_interval_ms = 25,
+            .reconnect_interval_max_ms = 50,
+            .handshake_interval_ms = 1000,
+        });
+    gate_connector.SetMessageHandler([&gate_messages](std::vector<std::byte> payload) {
+        gate_messages.push_back(std::move(payload));
+    });
+
+    std::string error_message;
+    XS_CHECK(game_connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(gate_connector.Start(&error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+
+    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
+        return game_connector.state() == xs::ipc::ZmqConnectionState::Connected &&
+               gate_connector.state() == xs::ipc::ZmqConnectionState::Connected;
+    }));
+
+    const auto count_packets = [](const std::vector<std::vector<std::byte>>& packets, std::uint32_t msg_id) {
+        std::size_t count = 0u;
+        for (const auto& packet_bytes : packets)
+        {
+            xs::net::PacketView packet{};
+            if (xs::net::DecodePacket(packet_bytes, &packet) != xs::net::PacketCodecErrorCode::None)
+            {
+                continue;
+            }
+
+            if (packet.header.msg_id == msg_id)
+            {
+                ++count;
+            }
+        }
+
+        return count;
+    };
+
+    XS_CHECK(game_connector.Send(
+                 BuildInnerRegisterPacket(
+                     EncodeRegisterPayload(
+                         MakeRegisterRequest(
+                             static_cast<std::uint16_t>(xs::net::InnerProcessType::Game),
+                             "Game0",
+                             5101u,
+                             6101u,
+                             7100u)),
+                     51u),
+                 &error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
+        return count_packets(game_messages, xs::net::kInnerRegisterMsgId) == 1u &&
+               count_packets(game_messages, xs::net::kInnerClusterNodesOnlineNotifyMsgId) == 0u;
+    }));
+
+    XS_CHECK(gate_connector.Send(
+                 BuildInnerRegisterPacket(
+                     EncodeRegisterPayload(
+                         MakeRegisterRequest(
+                             static_cast<std::uint16_t>(xs::net::InnerProcessType::Gate),
+                             "Gate0",
+                             5201u,
+                             6201u,
+                             7000u)),
+                     52u),
+                 &error_message) == xs::ipc::ZmqSocketErrorCode::None);
+    XS_CHECK(error_message.empty());
+    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
+        return count_packets(gate_messages, xs::net::kInnerRegisterMsgId) == 1u &&
+               count_packets(game_messages, xs::net::kInnerClusterNodesOnlineNotifyMsgId) == 1u;
+    }));
+
+    std::vector<bool> all_nodes_online_states;
+    for (const std::vector<std::byte>& packet_bytes : game_messages)
+    {
+        xs::net::PacketView packet{};
+        XS_CHECK(xs::net::DecodePacket(packet_bytes, &packet) == xs::net::PacketCodecErrorCode::None);
+        if (packet.header.msg_id != xs::net::kInnerClusterNodesOnlineNotifyMsgId)
+        {
+            continue;
+        }
+
+        xs::net::ClusterNodesOnlineNotify notify{};
+        XS_CHECK(
+            xs::net::DecodeClusterNodesOnlineNotify(packet.payload, &notify) ==
+            xs::net::InnerClusterCodecErrorCode::None);
+        all_nodes_online_states.push_back(notify.all_nodes_online);
+    }
+
+    XS_CHECK(all_nodes_online_states.size() == 1u);
+    if (all_nodes_online_states.size() == 1u)
+    {
+        XS_CHECK(all_nodes_online_states[0] == true);
+    }
+
+    const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
+    XS_CHECK(snapshot.size() == 2u);
+    for (const xs::node::InnerNetworkSession& entry : snapshot)
+    {
+        XS_CHECK(entry.registered);
+        XS_CHECK(!entry.inner_network_ready);
+        XS_CHECK(!entry.heartbeat_timed_out);
+    }
+
+    game_connector.Stop();
+    gate_connector.Stop();
+    gm_node.StopAndJoin();
+    XS_CHECK_MSG(gm_node.run_result() == xs::node::NodeErrorCode::None, gm_node.run_error().data());
+    XS_CHECK(gm_node.Uninit());
+
     CleanupTestDirectory(base_path);
 }
 
@@ -681,15 +878,32 @@ void TestGmNodeAcceptsGateAndGameRegistrationsSequentially()
     XS_CHECK(error_message.empty());
 
     XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
-        return gate_responses.size() == 1u && game_responses.size() == 1u;
+        return FindFirstPacketByMsgId(gate_responses, xs::net::kInnerRegisterMsgId) != nullptr &&
+               FindFirstPacketByMsgId(game_responses, xs::net::kInnerRegisterMsgId) != nullptr;
     }));
 
-    const xs::net::PacketView gate_packet = DecodeResponsePacket(gate_responses.front());
+    const std::vector<std::byte>* gate_register_response =
+        FindFirstPacketByMsgId(gate_responses, xs::net::kInnerRegisterMsgId);
+    const std::vector<std::byte>* game_register_response =
+        FindFirstPacketByMsgId(game_responses, xs::net::kInnerRegisterMsgId);
+    XS_CHECK(gate_register_response != nullptr);
+    XS_CHECK(game_register_response != nullptr);
+    if (gate_register_response == nullptr || game_register_response == nullptr)
+    {
+        gate_connector.Stop();
+        game_connector.Stop();
+        gm_node.StopAndJoin();
+        XS_CHECK(gm_node.Uninit());
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    const xs::net::PacketView gate_packet = DecodeResponsePacket(*gate_register_response);
     XS_CHECK(gate_packet.header.msg_id == xs::net::kInnerRegisterMsgId);
     XS_CHECK(gate_packet.header.seq == 31u);
     XS_CHECK(gate_packet.header.flags == static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
 
-    const xs::net::PacketView game_packet = DecodeResponsePacket(game_responses.front());
+    const xs::net::PacketView game_packet = DecodeResponsePacket(*game_register_response);
     XS_CHECK(game_packet.header.msg_id == xs::net::kInnerRegisterMsgId);
     XS_CHECK(game_packet.header.seq == 32u);
     XS_CHECK(game_packet.header.flags == static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
@@ -1050,6 +1264,7 @@ void TestGmNodeDropsMalformedPacketWithoutResponse()
 int main()
 {
     TestGmNodeAcceptsRegisterRequestAndStoresEntry();
+    TestGmNodeBroadcastsClusterNodesOnlineNotifyAfterExpectedNodesRegister();
     TestGmNodeRejectsDuplicateNodeId();
     TestGmNodeAcceptsGateAndGameRegistrationsSequentially();
     TestGmNodeRejectsInvalidProcessType();

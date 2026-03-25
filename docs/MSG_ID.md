@@ -1,4 +1,4 @@
-﻿# MSG_ID
+# MSG_ID
 
 本文档定义 XServerByAI 当前阶段 `msgId` 的分段方式、规范命名方式与登记规则。所有内部协议、Gate↔Client 协议与后续 C# 实体消息在分配编号前都应先更新本文件。
 
@@ -50,7 +50,7 @@
 | `1202` | `Inner.ServerStubOwnershipSync` | `GM -> Game` | `GM` | `Active` | `GM` 在 mesh ready 聚合完成后，下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照 |
 | `1203` | `Inner.GameServiceReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `assignmentEpoch` 下的本地 `ServerStubEntity` ready 聚合结果 |
 | `1204` | `Inner.ClusterNodesOnlineNotify` | `GM -> Game` | `GM` | `Active` | `GM` 下发“期望节点已全部上线”的最新结论；单向通知，无响应 `msgId` |
-| `1205` | `Inner.GameGateMeshReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前 `onlineEpoch` 下到全部 `Gate` 的全连接完成状态 |
+| `1205` | `Inner.GameGateMeshReadyReport` | `Game -> GM` | `game` | `Active` | `Game` 上报当前到全部 `Gate` 的全连接完成状态 |
 
 **已登记 Relay 消息**
 

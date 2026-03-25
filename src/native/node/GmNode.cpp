@@ -2,10 +2,12 @@
 
 #include "BinarySerialization.h"
 #include "InnerNetwork.h"
+#include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <optional>
@@ -276,6 +278,7 @@ NodeErrorCode GmNode::OnInit()
 
     timeout_scan_timer_id_ = 0;
     inner_network_remote_sessions().Clear();
+    InitializeClusterNodesOnlineState();
 
     const NodeErrorCode init_result = InitInnerNetwork(std::move(options));
     if (init_result != NodeErrorCode::None)
@@ -392,8 +395,165 @@ NodeErrorCode GmNode::OnUninit()
             return result;
         }
     }
+
+    cluster_nodes_online_state_ = ClusterNodesOnlineState{};
     ClearError();
     return NodeErrorCode::None;
+}
+
+void GmNode::InitializeClusterNodesOnlineState()
+{
+    cluster_nodes_online_state_ = ClusterNodesOnlineState{};
+    cluster_nodes_online_state_.expected_gate_node_ids.reserve(cluster_config().gates.size());
+    for (const auto& [node_id, config] : cluster_config().gates)
+    {
+        (void)config;
+        cluster_nodes_online_state_.expected_gate_node_ids.push_back(node_id);
+    }
+
+    cluster_nodes_online_state_.expected_game_node_ids.reserve(cluster_config().games.size());
+    for (const auto& [node_id, config] : cluster_config().games)
+    {
+        (void)config;
+        cluster_nodes_online_state_.expected_game_node_ids.push_back(node_id);
+    }
+}
+
+bool GmNode::AreAllExpectedNodesOnline() const noexcept
+{
+    const auto is_online = [this](std::string_view node_id) {
+        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(node_id);
+        return session != nullptr &&
+               session->registered &&
+               !session->heartbeat_timed_out;
+    };
+
+    const std::size_t expected_node_count =
+        cluster_nodes_online_state_.expected_gate_node_ids.size() +
+        cluster_nodes_online_state_.expected_game_node_ids.size();
+    if (expected_node_count == 0U)
+    {
+        return false;
+    }
+
+    return std::all_of(
+               cluster_nodes_online_state_.expected_gate_node_ids.begin(),
+               cluster_nodes_online_state_.expected_gate_node_ids.end(),
+               is_online) &&
+           std::all_of(
+               cluster_nodes_online_state_.expected_game_node_ids.begin(),
+               cluster_nodes_online_state_.expected_game_node_ids.end(),
+               is_online);
+}
+
+void GmNode::RefreshClusterNodesOnlineState(std::string_view trigger_node_id)
+{
+    const bool all_nodes_online = AreAllExpectedNodesOnline();
+    const bool state_changed = cluster_nodes_online_state_.all_nodes_online != all_nodes_online;
+    if (!state_changed)
+    {
+        return;
+    }
+
+    const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
+    cluster_nodes_online_state_.all_nodes_online = all_nodes_online;
+    cluster_nodes_online_state_.last_server_now_unix_ms = server_now_unix_ms;
+
+    std::uint64_t notify_target_count = 0U;
+    for (const std::string& node_id : cluster_nodes_online_state_.expected_game_node_ids)
+    {
+        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(node_id);
+        if (session == nullptr || !session->registered || session->heartbeat_timed_out)
+        {
+            continue;
+        }
+
+        ++notify_target_count;
+        SendClusterNodesOnlineNotifyToGame(*session, all_nodes_online, server_now_unix_ms);
+    }
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"allNodesOnline", all_nodes_online ? "true" : "false"},
+        xs::core::LogContextField{"notifyTargetCount", ToString(notify_target_count)},
+        xs::core::LogContextField{"expectedGameCount", ToString(cluster_nodes_online_state_.expected_game_node_ids.size())},
+        xs::core::LogContextField{"expectedGateCount", ToString(cluster_nodes_online_state_.expected_gate_node_ids.size())},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed cluster nodes online state.", context);
+}
+
+void GmNode::SendClusterNodesOnlineNotifyToGame(
+    const InnerNetworkSession& session,
+    bool all_nodes_online,
+    std::uint64_t server_now_unix_ms)
+{
+    if (inner_network() == nullptr)
+    {
+        return;
+    }
+
+    const xs::net::ClusterNodesOnlineNotify notify{
+        .all_nodes_online = all_nodes_online,
+        .status_flags = 0U,
+        .server_now_unix_ms = server_now_unix_ms,
+    };
+
+    std::array<std::byte, xs::net::kClusterNodesOnlineNotifySize> body{};
+    const xs::net::InnerClusterCodecErrorCode body_result =
+        xs::net::EncodeClusterNodesOnlineNotify(notify, body);
+    if (body_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"targetGameNodeId", session.node_id},
+            xs::core::LogContextField{"allNodesOnline", all_nodes_online ? "true" : "false"},
+            xs::core::LogContextField{"codecError", std::string(xs::net::InnerClusterCodecErrorMessage(body_result))},
+            xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM failed to encode cluster nodes online notify.", context);
+        return;
+    }
+
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerClusterNodesOnlineNotifyMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(body.size()));
+    std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kClusterNodesOnlineNotifySize> packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, body, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"targetGameNodeId", session.node_id},
+            xs::core::LogContextField{"allNodesOnline", all_nodes_online ? "true" : "false"},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+            xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM failed to wrap cluster nodes online notify packet.", context);
+        return;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(session.routing_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"targetGameNodeId", session.node_id},
+            xs::core::LogContextField{"allNodesOnline", all_nodes_online ? "true" : "false"},
+            xs::core::LogContextField{"routingIdBytes", ToString(session.routing_id.size())},
+            xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
+            xs::core::LogContextField{"innerNetworkError", std::string(inner_network()->last_error_message())},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM failed to send cluster nodes online notify.", context);
+        return;
+    }
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"targetGameNodeId", session.node_id},
+        xs::core::LogContextField{"allNodesOnline", all_nodes_online ? "true" : "false"},
+        xs::core::LogContextField{"routingIdBytes", ToString(session.routing_id.size())},
+        xs::core::LogContextField{"payloadBytes", ToString(packet.size())},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM sent cluster nodes online notify.", context);
 }
 
 void GmNode::HandleInnerMessage(
@@ -695,6 +855,8 @@ void GmNode::HandleRegisterMessage(
 
     std::vector<xs::core::LogContextField> context = BuildRegisterContext(routing_id, packet.header.seq, &request);
     logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted register request.", context);
+
+    RefreshClusterNodesOnlineState(request.node_id);
 }
 
 void GmNode::HandleHeartbeatMessage(
@@ -779,8 +941,12 @@ void GmNode::HandleHeartbeatMessage(
         return;
     }
 
+    const bool cluster_nodes_online_state_may_change =
+        session->heartbeat_timed_out ||
+        !session->registered;
     session->load = request.load;
     session->last_heartbeat_at_unix_ms = now_unix_ms;
+    session->inner_network_ready = true;
     session->heartbeat_timed_out = false;
     session->registered = true;
     session->connection_state = ipc::ZmqConnectionState::Connected;
@@ -830,6 +996,10 @@ void GmNode::HandleHeartbeatMessage(
     }
 
     logger().Log(xs::core::LogLevel::Info, "inner", "GM inner service refreshed heartbeat state.", context);
+    if (cluster_nodes_online_state_may_change)
+    {
+        RefreshClusterNodesOnlineState();
+    }
 }
 
 void GmNode::HandleTimeoutScan()
@@ -837,6 +1007,7 @@ void GmNode::HandleTimeoutScan()
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
 
     const std::vector<InnerNetworkSession> snapshot = inner_network_remote_sessions().Snapshot();
+    bool cluster_nodes_online_needs_refresh = false;
     for (const InnerNetworkSession& entry : snapshot)
     {
         if (entry.last_heartbeat_at_unix_ms == 0U || entry.last_heartbeat_at_unix_ms > now_unix_ms)
@@ -857,9 +1028,11 @@ void GmNode::HandleTimeoutScan()
         }
 
         session->heartbeat_timed_out = true;
+        session->inner_network_ready = false;
         session->registered = false;
         session->connection_state = ipc::ZmqConnectionState::Stopped;
         session->last_protocol_error = "Heartbeat timed out.";
+        cluster_nodes_online_needs_refresh = true;
 
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", entry.node_id},
@@ -872,6 +1045,11 @@ void GmNode::HandleTimeoutScan()
             "inner",
             "GM marked an inner network session as timed out.",
             context);
+    }
+
+    if (cluster_nodes_online_needs_refresh)
+    {
+        RefreshClusterNodesOnlineState();
     }
 }
 

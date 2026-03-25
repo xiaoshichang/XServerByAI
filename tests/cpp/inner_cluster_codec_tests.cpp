@@ -84,6 +84,74 @@ void TestEncodeClusterReadyNotifyRoundTrip()
     XS_CHECK(decoded.server_now_unix_ms == notify.server_now_unix_ms);
 }
 
+void TestEncodeClusterNodesOnlineNotifyRoundTrip()
+{
+    const xs::net::ClusterNodesOnlineNotify notify{
+        .all_nodes_online = true,
+        .status_flags = 0u,
+        .server_now_unix_ms = 0x4142434445464748ull,
+    };
+
+    std::array<std::byte, xs::net::kClusterNodesOnlineNotifySize> buffer{};
+    XS_CHECK(
+        xs::net::EncodeClusterNodesOnlineNotify(notify, buffer) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+
+    const std::array<std::byte, xs::net::kClusterNodesOnlineNotifySize> expected{
+        std::byte{0x01},
+        std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
+        std::byte{0x41}, std::byte{0x42}, std::byte{0x43}, std::byte{0x44},
+        std::byte{0x45}, std::byte{0x46}, std::byte{0x47}, std::byte{0x48},
+    };
+    XS_CHECK(ByteSpanEqualsSpan(buffer, expected));
+
+    xs::net::ClusterNodesOnlineNotify decoded{};
+    XS_CHECK(
+        xs::net::DecodeClusterNodesOnlineNotify(buffer, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+    XS_CHECK(decoded.all_nodes_online == notify.all_nodes_online);
+    XS_CHECK(decoded.status_flags == notify.status_flags);
+    XS_CHECK(decoded.server_now_unix_ms == notify.server_now_unix_ms);
+}
+
+void TestRejectsClusterNodesOnlineSemanticViolationsAndMalformedBuffers()
+{
+    const xs::net::ClusterNodesOnlineNotify valid_notify{
+        .all_nodes_online = false,
+        .status_flags = 0u,
+        .server_now_unix_ms = 9u,
+    };
+
+    std::array<std::byte, xs::net::kClusterNodesOnlineNotifySize> buffer{};
+    XS_CHECK(
+        xs::net::EncodeClusterNodesOnlineNotify(valid_notify, buffer) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+
+    auto invalid_status_flags = buffer;
+    invalid_status_flags[4] = std::byte{0x01};
+    xs::net::ClusterNodesOnlineNotify decoded{};
+    XS_CHECK(
+        xs::net::DecodeClusterNodesOnlineNotify(invalid_status_flags, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidNodesOnlineStatusFlags);
+
+    auto invalid_bool = buffer;
+    invalid_bool[0] = std::byte{0x02};
+    XS_CHECK(
+        xs::net::DecodeClusterNodesOnlineNotify(invalid_bool, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidBoolValue);
+
+    const std::span<const std::byte> truncated(buffer.data(), buffer.size() - 1u);
+    XS_CHECK(
+        xs::net::DecodeClusterNodesOnlineNotify(truncated, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::BufferTooSmall);
+
+    std::vector<std::byte> trailing(buffer.begin(), buffer.end());
+    trailing.push_back(std::byte{0xBB});
+    XS_CHECK(
+        xs::net::DecodeClusterNodesOnlineNotify(trailing, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::TrailingBytes);
+}
+
 void TestRejectsClusterReadySemanticViolationsAndMalformedBuffers()
 {
     const xs::net::ClusterReadyNotify valid_notify{
@@ -125,6 +193,29 @@ void TestRejectsClusterReadySemanticViolationsAndMalformedBuffers()
 
 void TestRejectsInvalidArgumentsAndSizeViolations()
 {
+    const xs::net::ClusterNodesOnlineNotify invalid_nodes_online{
+        .all_nodes_online = true,
+        .status_flags = 1u,
+        .server_now_unix_ms = 2u,
+    };
+    std::array<std::byte, xs::net::kClusterNodesOnlineNotifySize> nodes_online_buffer{};
+    XS_CHECK(
+        xs::net::EncodeClusterNodesOnlineNotify(invalid_nodes_online, nodes_online_buffer) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidNodesOnlineStatusFlags);
+
+    std::array<std::byte, xs::net::kClusterNodesOnlineNotifySize - 1u> short_nodes_online_buffer{};
+    const xs::net::ClusterNodesOnlineNotify valid_nodes_online{
+        .all_nodes_online = false,
+        .status_flags = 0u,
+        .server_now_unix_ms = 3u,
+    };
+    XS_CHECK(
+        xs::net::EncodeClusterNodesOnlineNotify(valid_nodes_online, short_nodes_online_buffer) ==
+        xs::net::InnerClusterCodecErrorCode::BufferTooSmall);
+    XS_CHECK(
+        xs::net::DecodeClusterNodesOnlineNotify(nodes_online_buffer, nullptr) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidArgument);
+
     const xs::net::ClusterReadyNotify invalid_ready{
         .ready_epoch = 1u,
         .cluster_ready = true,
@@ -153,12 +244,17 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
     XS_CHECK(
         xs::net::InnerClusterCodecErrorMessage(xs::net::InnerClusterCodecErrorCode::TrailingBytes) ==
         std::string_view("Inner-cluster buffer must not contain trailing bytes."));
+    XS_CHECK(
+        xs::net::InnerClusterCodecErrorMessage(xs::net::InnerClusterCodecErrorCode::InvalidNodesOnlineStatusFlags) ==
+        std::string_view("ClusterNodesOnlineNotify statusFlags must be zero."));
 }
 
 } // namespace
 
 int main()
 {
+    TestEncodeClusterNodesOnlineNotifyRoundTrip();
+    TestRejectsClusterNodesOnlineSemanticViolationsAndMalformedBuffers();
     TestEncodeClusterReadyNotifyRoundTrip();
     TestRejectsClusterReadySemanticViolationsAndMalformedBuffers();
     TestRejectsInvalidArgumentsAndSizeViolations();

@@ -1,4 +1,4 @@
-﻿# PROCESS_INNER
+# PROCESS_INNER
 
 本文档定义 XServerByAI 当前阶段启动编排相关 `Inner` 消息的结构、字段语义与时序约束。当前启动控制面分成四段：
 1. `Gate/Game -> GM`：完成节点注册与心跳闭环。
@@ -126,35 +126,33 @@
 | `serverNowUnixMs` | `uint64` | 接收方当前时间 |
 
 **Inner.ClusterNodesOnlineNotify（`msgId = 1204`）**
-1. 发送时机：`GM` 在“期望 `Game` / `Gate` 节点是否都已完成到 `GM` 的注册与心跳闭环”这一聚合结论发生变化时，向全部 `Game` 下发最新结果。
-2. 关键语义：`allNodesOnline = true` 表示 `GM` 已确认本轮期望节点全部在线；`Game` 只有收到这一结论后，才允许开始 `Game -> Gate` 全连接闭环。
-3. 幂等语义：接收方只保留最新 `onlineEpoch` 的结果；旧轮次通知必须忽略。
+1. 发送时机：`GM` 在“期望 `Game` / `Gate` 节点是否都已完成到 `GM` 的注册”这一聚合结论发生变化时，向全部 `Game` 下发最新结果。
+2. 关键语义：`allNodesOnline = true` 表示 `GM` 已确认当前期望节点全部在线；`Game` 只有收到这一结论后，才允许开始 `Game -> Gate` 全连接闭环。
+3. 幂等语义：通知只表达最新 `allNodesOnline` 结论；接收方收到重复通知时按最新结果覆盖本地状态即可。
 
 通知体：
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `onlineEpoch` | `uint64` | “所有节点在线”结论版本号 |
 | `allNodesOnline` | `bool` | 当前是否已确认期望节点全部在线 |
 | `statusFlags` | `uint32` | 保留，当前必须为 `0` |
 | `serverNowUnixMs` | `uint64` | `GM` 当前时间 |
 
 **Inner.GameGateMeshReadyReport（`msgId = 1205`）**
-1. 发送时机：`Game` 在当前 `onlineEpoch` 下完成到全部目标 `Gate` 的注册与心跳闭环后，向 `GM` 上报自身 mesh ready 结果；若同轮次闭环随后失效，也允许重新上报 `meshReady = false`。
+1. 发送时机：`Game` 在收到 `allNodesOnline = true` 后完成到全部目标 `Gate` 的注册与心跳闭环时，向 `GM` 上报自身 mesh ready 结果；若该闭环随后失效，也允许重新上报 `meshReady = false`。
 2. 关键语义：`meshReady = true` 表示该 `Game` 已经具备与全部目标 `Gate` 的可用通信链路，可以进入 ownership 驱动的本地 Stub 初始化阶段。
-3. 聚合语义：`GM` 必须按 `nodeId + onlineEpoch` 聚合；旧轮次 mesh ready 上报不得混入新一轮“所有节点在线”结论。
+3. 聚合语义：`GM` 必须按 `nodeId` 聚合当前 mesh ready 结果；当“所有节点在线”条件失效或节点重新注册时，应重新确认对应 `Game` 的最新状态。
 
 上报体：
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `onlineEpoch` | `uint64` | 当前 mesh ready 所基于的“所有节点在线”版本 |
 | `meshReady` | `bool` | 当前 `Game` 是否已经完成到全部目标 `Gate` 的注册与心跳闭环 |
 | `statusFlags` | `uint32` | 保留，当前必须为 `0` |
 | `reportedAtUnixMs` | `uint64` | 发送方形成该 mesh ready 结论的时间 |
 
 **Inner.ServerStubOwnershipSync（`msgId = 1202`）**
-1. 发送时机：`GM` 在当前 `onlineEpoch` 下聚合全部必需 `Game` 的 `meshReady = true` 结果后，向全部 `Game` 下发当前 `ServerStubEntity` ownership 快照。
+1. 发送时机：`GM` 在当前 `allNodesOnline = true` 且聚合全部必需 `Game` 的 `meshReady = true` 结果后，向全部 `Game` 下发当前 `ServerStubEntity` ownership 快照。
 2. 关键语义：接收方只接受最新 `assignmentEpoch` 的全量快照；旧轮次结果必须丢弃。
 3. 使用方式：`Game` 收到后只初始化分配给自己的 Stub；它在进入该步骤前，应已经具备与全部目标 `Gate` 的可用通信链路。
 
@@ -198,10 +196,10 @@
 
 **时序与一致性约束**
 1. `GM` 必须先进入 `InnerNetwork` 监听状态，再允许其他节点接入。
-2. `Game` 与 `Gate` 都必须先完成 `Gate/Game -> GM` 的注册与心跳闭环，`GM` 才能进入“所有节点在线”聚合阶段。
+2. `Game` 与 `Gate` 都必须先完成到 `GM` 的注册，`GM` 才能进入“所有节点在线”聚合阶段；后续在线维持仍依赖心跳保活。
 3. `GM` 只有在期望的 `Game` 与 `Gate` 节点都注册完成后，才能下发 `Inner.ClusterNodesOnlineNotify` 的 `allNodesOnline = true` 结论。
-4. `Game` 不得在收到当前轮次 `allNodesOnline = true` 前，就开始 `Game -> Gate` 全连接闭环。
-5. `Game` 只有在当前 `onlineEpoch` 下完成到全部目标 `Gate` 的注册与心跳闭环后，才能向 `GM` 报告 `meshReady = true`。
+4. `Game` 不得在收到 `allNodesOnline = true` 前，就开始 `Game -> Gate` 全连接闭环。
+5. `Game` 只有在完成到全部目标 `Gate` 的注册与心跳闭环后，才能向 `GM` 报告 `meshReady = true`。
 6. `GM` 只有在聚合全部必需 `Game` 的 `meshReady = true` 结果后，才能下发 `Inner.ServerStubOwnershipSync`。
 7. `Game` 不得在收到 ownership 分配前自行决定本地承载哪些 `ServerStubEntity`。
 8. `Game` 在向 `GM` 报告 `localReady = true` 前，必须先完成当前 `assignmentEpoch` 下的本地 Stub 初始化，并聚合自身所有必需 `ServerStubEntity` 的 ready 结果。

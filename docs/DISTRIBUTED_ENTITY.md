@@ -1,4 +1,4 @@
-﻿# DISTRIBUTED_ENTITY
+# DISTRIBUTED_ENTITY
 
 本文档定义 XServerByAI 当前阶段采用的分布式实体架构、核心概念以及与集群启动编排相关的 ownership / ready 语义边界。后续 `M5-03` 至 `M5-16` 在实现实体基类、注册表、消息分发、路由、Tick 与持久化时，应以本文作为统一语义基线。
 
@@ -19,7 +19,6 @@
 | `Mailbox` | 静态目标地址，适用于 `Pinned` 实体或启动期由 `GM` 分配好的 `ServerStubEntity`。它携带目标 `GameNodeId`，供 `Gate` 直接转发。 |
 | `Proxy` | 动态实体引用，适用于 `Migratable` 实体。它不直接绑定最终 owner，而是依赖 `Gate` 根据最新路由解析目标。 |
 | `ExecutionLane` | 实体串行执行上下文。实体消息、Tick 与异步回调都必须先回到所属 lane，再修改实体状态。 |
-| `onlineEpoch` | `GM` 下发“期望节点已全部上线”通知的轮次号。`Game` 只应基于当前轮次建立到全部 `Gate` 的启动期全连接，并在回报 mesh ready 时携带它。 |
 | `assignmentEpoch` | `GM` 下发 ownership 分配的轮次号。`Game` 只应基于当前轮次初始化本地承载。 |
 | `readyEpoch` | `GM` 聚合所有必需 `Game` 的 ready 后形成的轮次号，随 `clusterReady` 一起下发给 `Gate`。 |
 | `clusterReady` | `GM` 聚合所有必需 `Game` 的 ready 结果后，对 `Gate` 下发的集群对外服务开关。 |
@@ -36,7 +35,7 @@
 **启动编排与 ownership**
 1. `GM` 必须先进入 `InnerNetwork` 监听状态，然后等待期望的 `Game` 与 `Gate` 节点完成到 `GM` 的注册与心跳闭环。
 2. `GM` 在确认必需节点到齐后，先通过 `Inner.ClusterNodesOnlineNotify (1204)` 向所有 `Game` 下发“所有节点已上线”的当前结论。
-3. `Game` 只有在收到最新 `onlineEpoch` 的 `allNodesOnline = true` 后，才允许向全部目标 `Gate` 完成注册与心跳闭环，并通过 `Inner.GameGateMeshReadyReport (1205)` 向 `GM` 报告 mesh ready。
+3. `Game` 只有在收到 `allNodesOnline = true` 后，才允许向全部目标 `Gate` 完成注册与心跳闭环，并通过 `Inner.GameGateMeshReadyReport (1205)` 向 `GM` 报告 mesh ready。
 4. `GM` 在聚合全部必需 `Game` 的 mesh ready 结果后，统一决定 `ServerStubEntity -> OwnerGameNodeId` 映射，并通过 `Inner.ServerStubOwnershipSync (1202)` 下发给所有 `Game`。
 5. `Game` 只能在收到最新 `assignmentEpoch` 的 ownership 后，初始化自己负责的 `ServerStubEntity` 托管逻辑；不得自行猜测或抢先承载。
 6. `Game` 在本地 owned `ServerStubEntity` ready 后，才能通过 `Inner.GameServiceReadyReport (1203)` 向 `GM` 报告 ready。
@@ -67,7 +66,7 @@
 1. 逻辑实体身份存在，不等于其运行时实例已经被装载；但一旦装载为活动实例，就必须拥有唯一 `OwnerGameNodeId`。
 2. 同一实体的消息处理、Tick 推进、异步结果落地与状态修改，都必须串行化到同一 `ExecutionLane`。
 3. 实体内部可以发起异步操作，但异步结果在写回状态前必须回到所属 lane。
-4. `Game` 在丢失当前 `onlineEpoch`、`assignmentEpoch`、`readyEpoch` 或相关 `Gate` 注册闭环时，必须撤销旧轮次结论并重新参与编排。
+4. `Game` 在丢失 `allNodesOnline` 条件、`assignmentEpoch`、`readyEpoch` 或相关 `Gate` 注册闭环时，必须撤销旧状态并重新参与编排。
 
 **对后续里程碑的约束**
 1. `M3-12` 必须把 `GM -> Game` 的“所有节点已上线”通知视为 `Game -> Gate` 全连接的唯一启动信号，而不是 `Game` 自主推断。

@@ -1,6 +1,7 @@
 #include "GameNode.h"
 
 #include "InnerNetwork.h"
+#include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
@@ -67,6 +68,16 @@ ipc::ZmqConnectionState GameNode::gm_inner_connection_state() const noexcept
     return inner_connection_state(kGmRemoteNodeId);
 }
 
+bool GameNode::all_nodes_online() const noexcept
+{
+    return all_nodes_online_;
+}
+
+std::uint64_t GameNode::cluster_nodes_online_server_now_unix_ms() const noexcept
+{
+    return last_cluster_nodes_online_server_now_unix_ms_;
+}
+
 xs::core::ProcessType GameNode::role_process_type() const noexcept
 {
     return xs::core::ProcessType::Game;
@@ -107,6 +118,8 @@ NodeErrorCode GameNode::OnInit()
     runtime_state_ = RuntimeState{};
     runtime_state_.managed_assembly_name = config->managed.assembly_name;
     runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
+    last_cluster_nodes_online_server_now_unix_ms_ = 0U;
+    all_nodes_online_ = false;
     inner_network_remote_sessions().Clear();
 
     InnerNetworkOptions inner_options;
@@ -370,6 +383,12 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
         logger().Log(xs::core::LogLevel::Warn, "inner", log_message, context);
     };
 
+    if (packet.header.msg_id == xs::net::kInnerClusterNodesOnlineNotifyMsgId)
+    {
+        HandleClusterNodesOnlineNotify(packet);
+        return;
+    }
+
     if (packet.header.seq == xs::net::kPacketSeqNone)
     {
         log_invalid_response_envelope(
@@ -437,6 +456,79 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.", context);
+}
+
+void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
+{
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+        };
+        session->last_protocol_error = "GM clusterNodesOnline notify envelope is invalid.";
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "inner",
+            "Game node ignored GM cluster nodes online notify with an invalid envelope.",
+            context);
+        return;
+    }
+
+    if (!session->registered)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
+        };
+        session->last_protocol_error = "GM clusterNodesOnline notify arrived before Game registration completed.";
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "inner",
+            "Game node ignored GM cluster nodes online notify before registration completed.",
+            context);
+        return;
+    }
+
+    xs::net::ClusterNodesOnlineNotify notify{};
+    const xs::net::InnerClusterCodecErrorCode decode_result =
+        xs::net::DecodeClusterNodesOnlineNotify(packet.payload, &notify);
+    if (decode_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{
+                "codecError",
+                std::string(xs::net::InnerClusterCodecErrorMessage(decode_result)),
+            },
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+        };
+        session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM cluster nodes online notify.", context);
+        return;
+    }
+
+    all_nodes_online_ = notify.all_nodes_online;
+    last_cluster_nodes_online_server_now_unix_ms_ = notify.server_now_unix_ms;
+    session->last_protocol_error.clear();
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"allNodesOnline", notify.all_nodes_online ? "true" : "false"},
+        xs::core::LogContextField{"statusFlags", std::to_string(notify.status_flags)},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(notify.server_now_unix_ms)},
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM cluster nodes online notify.", context);
 }
 
 void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
@@ -812,6 +904,8 @@ void GameNode::ResetGmSessionState()
     }
 
     CancelHeartbeatTimer();
+    all_nodes_online_ = false;
+    last_cluster_nodes_online_server_now_unix_ms_ = 0U;
     session->registered = false;
     session->register_in_flight = false;
     session->register_seq = 0U;

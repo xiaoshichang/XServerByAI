@@ -28,6 +28,8 @@ class GameNode final : public ServerNode
     [[nodiscard]] std::string_view managed_assembly_name() const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState inner_connection_state(std::string_view remote_node_id) const noexcept;
     [[nodiscard]] ipc::ZmqConnectionState gm_inner_connection_state() const noexcept;
+    [[nodiscard]] bool all_nodes_online() const noexcept;
+    [[nodiscard]] std::uint64_t cluster_nodes_online_server_now_unix_ms() const noexcept;
 
   protected:
     [[nodiscard]] xs::core::ProcessType role_process_type() const noexcept override;
@@ -48,6 +50,7 @@ class GameNode final : public ServerNode
     void HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload);
     void HandleGmMessage(std::span<const std::byte> payload);
     void HandleGateMessage(std::string_view gate_node_id, std::span<const std::byte> payload);
+    void HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
     void HandleHeartbeatResponse(const xs::net::PacketView& packet);
     [[nodiscard]] bool SendRegisterRequest();
@@ -65,6 +68,8 @@ class GameNode final : public ServerNode
     [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
     RuntimeState runtime_state_{};
+    std::uint64_t last_cluster_nodes_online_server_now_unix_ms_{0U};
+    bool all_nodes_online_{false};
 };
 
 } // namespace xs::node

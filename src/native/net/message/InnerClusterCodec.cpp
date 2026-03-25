@@ -36,6 +36,16 @@ namespace
     return InnerClusterCodecErrorCode::None;
 }
 
+[[nodiscard]] InnerClusterCodecErrorCode ValidateClusterNodesOnlineNotify(const ClusterNodesOnlineNotify& message) noexcept
+{
+    if (message.status_flags != 0u)
+    {
+        return InnerClusterCodecErrorCode::InvalidNodesOnlineStatusFlags;
+    }
+
+    return InnerClusterCodecErrorCode::None;
+}
+
 [[nodiscard]] InnerClusterCodecErrorCode CheckTrailingBytes(const BinaryReader& reader) noexcept
 {
     if (reader.remaining() != 0u)
@@ -64,9 +74,68 @@ std::string_view InnerClusterCodecErrorMessage(InnerClusterCodecErrorCode error_
         return "ClusterReadyNotify statusFlags must be zero.";
     case InnerClusterCodecErrorCode::TrailingBytes:
         return "Inner-cluster buffer must not contain trailing bytes.";
+    case InnerClusterCodecErrorCode::InvalidNodesOnlineStatusFlags:
+        return "ClusterNodesOnlineNotify statusFlags must be zero.";
     }
 
     return "Unknown inner-cluster codec error.";
+}
+
+InnerClusterCodecErrorCode EncodeClusterNodesOnlineNotify(
+    const ClusterNodesOnlineNotify& message,
+    std::span<std::byte> buffer) noexcept
+{
+    const InnerClusterCodecErrorCode validation_result = ValidateClusterNodesOnlineNotify(message);
+    if (validation_result != InnerClusterCodecErrorCode::None)
+    {
+        return validation_result;
+    }
+
+    BinaryWriter writer(buffer);
+    if (!writer.WriteBool(message.all_nodes_online) ||
+        !writer.WriteUInt32(message.status_flags) ||
+        !writer.WriteUInt64(message.server_now_unix_ms))
+    {
+        return MapSerializationError(writer.error());
+    }
+
+    return InnerClusterCodecErrorCode::None;
+}
+
+InnerClusterCodecErrorCode DecodeClusterNodesOnlineNotify(
+    std::span<const std::byte> buffer,
+    ClusterNodesOnlineNotify* message) noexcept
+{
+    if (message == nullptr)
+    {
+        return InnerClusterCodecErrorCode::InvalidArgument;
+    }
+
+    *message = {};
+
+    BinaryReader reader(buffer);
+    ClusterNodesOnlineNotify parsed_message{};
+    if (!reader.ReadBool(&parsed_message.all_nodes_online) ||
+        !reader.ReadUInt32(&parsed_message.status_flags) ||
+        !reader.ReadUInt64(&parsed_message.server_now_unix_ms))
+    {
+        return MapSerializationError(reader.error());
+    }
+
+    const InnerClusterCodecErrorCode validation_result = ValidateClusterNodesOnlineNotify(parsed_message);
+    if (validation_result != InnerClusterCodecErrorCode::None)
+    {
+        return validation_result;
+    }
+
+    const InnerClusterCodecErrorCode trailing_result = CheckTrailingBytes(reader);
+    if (trailing_result != InnerClusterCodecErrorCode::None)
+    {
+        return trailing_result;
+    }
+
+    *message = parsed_message;
+    return InnerClusterCodecErrorCode::None;
 }
 
 InnerClusterCodecErrorCode EncodeClusterReadyNotify(

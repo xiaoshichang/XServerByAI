@@ -2,6 +2,7 @@
 #include "GmNode.h"
 #include "Json.h"
 #include "TimeUtils.h"
+#include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
@@ -12,6 +13,7 @@
 
 #include <zmq.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -641,6 +643,32 @@ std::vector<std::byte> EncodeHeartbeatSuccessPacket(
         heartbeat_timeout_ms);
 }
 
+std::vector<std::byte> EncodeClusterNodesOnlineNotifyPacket(
+    bool all_nodes_online,
+    std::uint16_t flags = 0U,
+    std::uint32_t seq = xs::net::kPacketSeqNone)
+{
+    const xs::net::ClusterNodesOnlineNotify notify{
+        .all_nodes_online = all_nodes_online,
+        .status_flags = 0U,
+        .server_now_unix_ms = CurrentUnixTimeMilliseconds(),
+    };
+
+    std::array<std::byte, xs::net::kClusterNodesOnlineNotifySize> body{};
+    XS_CHECK(
+        xs::net::EncodeClusterNodesOnlineNotify(notify, body) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + body.size());
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerClusterNodesOnlineNotifyMsgId,
+        seq,
+        flags,
+        static_cast<std::uint32_t>(body.size()));
+    XS_CHECK(xs::net::EncodePacket(header, body, packet) == xs::net::PacketCodecErrorCode::None);
+    return packet;
+}
+
 void TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-real-gm");
@@ -675,25 +703,34 @@ void TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
 
     XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gm_node]() {
         const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
-        return snapshot.size() == 1u && snapshot.front().node_id == "Game0";
+        return std::any_of(snapshot.begin(), snapshot.end(), [](const xs::node::InnerNetworkSession& entry) {
+            return entry.node_id == "Game0";
+        });
     }));
 
     std::uint64_t initial_heartbeat_at_unix_ms = 0U;
     {
         const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
-        XS_CHECK(snapshot.size() == 1u);
-        if (snapshot.size() == 1u)
+        const auto game_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::InnerNetworkSession& entry) {
+            return entry.node_id == "Game0";
+        });
+        XS_CHECK(game_entry != snapshot.end());
+        if (game_entry != snapshot.end())
         {
-            XS_CHECK(snapshot.front().process_type == xs::core::ProcessType::Game);
-            XS_CHECK(snapshot.front().inner_network_endpoint.port == 7100u);
-            XS_CHECK(snapshot.front().last_heartbeat_at_unix_ms != 0U);
-            initial_heartbeat_at_unix_ms = snapshot.front().last_heartbeat_at_unix_ms;
+            XS_CHECK(game_entry->process_type == xs::core::ProcessType::Game);
+            XS_CHECK(game_entry->inner_network_endpoint.port == 7100u);
+            XS_CHECK(game_entry->last_heartbeat_at_unix_ms != 0U);
+            initial_heartbeat_at_unix_ms = game_entry->last_heartbeat_at_unix_ms;
         }
     }
 
     XS_CHECK(WaitUntil(std::chrono::seconds(7), [&gm_node, initial_heartbeat_at_unix_ms]() {
         const std::vector<xs::node::InnerNetworkSession> snapshot = gm_node.node().registry_snapshot();
-        return snapshot.size() == 1u && snapshot.front().last_heartbeat_at_unix_ms > initial_heartbeat_at_unix_ms;
+        const auto game_entry = std::find_if(snapshot.begin(), snapshot.end(), [](const xs::node::InnerNetworkSession& entry) {
+            return entry.node_id == "Game0";
+        });
+        return game_entry != snapshot.end() &&
+            game_entry->last_heartbeat_at_unix_ms > initial_heartbeat_at_unix_ms;
     }));
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
@@ -715,6 +752,263 @@ void TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
     XS_CHECK(log_text.find("Game node accepted GM heartbeat success response.") != std::string::npos);
     XS_CHECK(log_text.find("GM accepted register request.") != std::string::npos);
     XS_CHECK(log_text.find("GM inner service refreshed heartbeat state.") != std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
+
+void TestGameNodeAcceptsClusterNodesOnlineNotify()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-cluster-nodes-online");
+
+    RawZmqSocket router(ZMQ_ROUTER);
+    XS_CHECK(router.IsValid());
+
+    const std::string gm_endpoint = router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, ParsePortFromTcpEndpoint(gm_endpoint), AcquireLoopbackPort(), &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
+        return game_node.node().gm_inner_connection_state() == xs::ipc::ZmqConnectionState::Connected;
+    }));
+    XS_CHECK(!game_node.node().all_nodes_online());
+    XS_CHECK(game_node.node().cluster_nodes_online_server_now_unix_ms() == 0U);
+
+    std::vector<std::vector<std::byte>> router_frames;
+    bool register_accepted = false;
+    bool cluster_nodes_online_sent = false;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (TryReceiveMultipartMessage(router.socket(), &router_frames))
+        {
+            XS_CHECK(router_frames.size() == 2u);
+            if (router_frames.size() != 2u)
+            {
+                break;
+            }
+
+            xs::net::PacketView packet{};
+            XS_CHECK(xs::net::DecodePacket(router_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+            if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+            {
+                xs::net::RegisterRequest request{};
+                XS_CHECK(xs::net::DecodeRegisterRequest(packet.payload, &request) == xs::net::RegisterCodecErrorCode::None);
+                XS_CHECK(request.node_id == "Game0");
+                register_accepted = true;
+
+                const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
+
+                const std::vector<std::byte> notify = EncodeClusterNodesOnlineNotifyPacket(true);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], notify));
+                cluster_nodes_online_sent = true;
+            }
+        }
+
+        if (cluster_nodes_online_sent && game_node.node().all_nodes_online())
+        {
+            break;
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(register_accepted);
+    XS_CHECK(cluster_nodes_online_sent);
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
+        return game_node.node().all_nodes_online() &&
+            game_node.node().cluster_nodes_online_server_now_unix_ms() != 0U;
+    }));
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
+
+    const std::filesystem::path log_dir = base_path / "logs";
+    XS_CHECK(DirectoryContainsRegularFile(log_dir));
+
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("Game node accepted GM cluster nodes online notify.") != std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
+
+void TestGameNodeRejectsClusterNodesOnlineNotifyBeforeRegisterCompletes()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-cluster-nodes-online-before-register");
+
+    RawZmqSocket router(ZMQ_ROUTER);
+    XS_CHECK(router.IsValid());
+
+    const std::string gm_endpoint = router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, ParsePortFromTcpEndpoint(gm_endpoint), AcquireLoopbackPort(), &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::vector<std::vector<std::byte>> router_frames;
+    bool register_response_sent = false;
+    bool pre_register_notify_sent = false;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (TryReceiveMultipartMessage(router.socket(), &router_frames))
+        {
+            XS_CHECK(router_frames.size() == 2u);
+            if (router_frames.size() != 2u)
+            {
+                break;
+            }
+
+            xs::net::PacketView packet{};
+            XS_CHECK(xs::net::DecodePacket(router_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+            if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+            {
+                const std::vector<std::byte> notify = EncodeClusterNodesOnlineNotifyPacket(true);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], notify));
+                pre_register_notify_sent = true;
+
+                const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
+                register_response_sent = true;
+                break;
+            }
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(pre_register_notify_sent);
+    XS_CHECK(register_response_sent);
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    XS_CHECK(!game_node.node().all_nodes_online());
+    XS_CHECK(game_node.node().cluster_nodes_online_server_now_unix_ms() == 0U);
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
+
+    const std::filesystem::path log_dir = base_path / "logs";
+    XS_CHECK(DirectoryContainsRegularFile(log_dir));
+
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("Game node ignored GM cluster nodes online notify before registration completed.") != std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
+
+void TestGameNodeRejectsClusterNodesOnlineNotifyWithInvalidEnvelope()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-cluster-nodes-online-invalid-envelope");
+
+    RawZmqSocket router(ZMQ_ROUTER);
+    XS_CHECK(router.IsValid());
+
+    const std::string gm_endpoint = router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, ParsePortFromTcpEndpoint(gm_endpoint), AcquireLoopbackPort(), &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::vector<std::vector<std::byte>> router_frames;
+    bool invalid_notify_sent = false;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (TryReceiveMultipartMessage(router.socket(), &router_frames))
+        {
+            XS_CHECK(router_frames.size() == 2u);
+            if (router_frames.size() != 2u)
+            {
+                break;
+            }
+
+            xs::net::PacketView packet{};
+            XS_CHECK(xs::net::DecodePacket(router_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+            if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+            {
+                const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U);
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], response));
+
+                const std::vector<std::byte> notify = EncodeClusterNodesOnlineNotifyPacket(
+                    true,
+                    static_cast<std::uint16_t>(xs::net::PacketFlag::Response));
+                XS_CHECK(SendRouterReply(router.socket(), router_frames[0], notify));
+                invalid_notify_sent = true;
+                break;
+            }
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(invalid_notify_sent);
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    XS_CHECK(!game_node.node().all_nodes_online());
+    XS_CHECK(game_node.node().cluster_nodes_online_server_now_unix_ms() == 0U);
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
+
+    const std::filesystem::path log_dir = base_path / "logs";
+    XS_CHECK(DirectoryContainsRegularFile(log_dir));
+
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("Game node ignored GM cluster nodes online notify with an invalid envelope.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }
@@ -824,6 +1118,9 @@ void TestGameNodeRejectsHeartbeatResponseWithErrorFlag()
 int main()
 {
     TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm();
+    TestGameNodeAcceptsClusterNodesOnlineNotify();
+    TestGameNodeRejectsClusterNodesOnlineNotifyBeforeRegisterCompletes();
+    TestGameNodeRejectsClusterNodesOnlineNotifyWithInvalidEnvelope();
     TestGameNodeRejectsHeartbeatResponseWithErrorFlag();
 
     if (g_failures != 0)

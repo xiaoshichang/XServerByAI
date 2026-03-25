@@ -9,6 +9,9 @@ namespace xs::net
 {
 
 inline constexpr std::uint32_t kInnerClusterReadyNotifyMsgId = 1201u;
+inline constexpr std::uint32_t kInnerClusterNodesOnlineNotifyMsgId = 1204u;
+inline constexpr std::size_t kClusterNodesOnlineNotifySize =
+    sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kClusterReadyNotifySize =
     sizeof(std::uint64_t) + sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 
@@ -20,9 +23,24 @@ enum class InnerClusterCodecErrorCode : std::uint8_t
     InvalidArgument = 3,
     InvalidReadyStatusFlags = 4,
     TrailingBytes = 5,
+    InvalidNodesOnlineStatusFlags = 6,
 };
 
 [[nodiscard]] std::string_view InnerClusterCodecErrorMessage(InnerClusterCodecErrorCode error_code) noexcept;
+
+struct ClusterNodesOnlineNotify
+{
+    bool all_nodes_online{false};
+    std::uint32_t status_flags{0};
+    std::uint64_t server_now_unix_ms{0};
+};
+
+[[nodiscard]] InnerClusterCodecErrorCode EncodeClusterNodesOnlineNotify(
+    const ClusterNodesOnlineNotify& message,
+    std::span<std::byte> buffer) noexcept;
+[[nodiscard]] InnerClusterCodecErrorCode DecodeClusterNodesOnlineNotify(
+    std::span<const std::byte> buffer,
+    ClusterNodesOnlineNotify* message) noexcept;
 
 struct ClusterReadyNotify
 {
