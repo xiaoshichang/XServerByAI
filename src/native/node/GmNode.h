@@ -31,6 +31,9 @@ class GmNode final : public ServerNode
     void HandleInnerMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
+    void HandleRegisterMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
     void HandleHeartbeatMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);

@@ -433,7 +433,17 @@ void GmNode::HandleInnerMessage(
     xs::net::PacketHeader raw_header{};
     if (!TryReadRawPacketHeader(payload, &raw_header))
     {
-        HandleHeartbeatMessage(routing_id, payload);
+        const std::array<xs::core::LogContextField, 2> context{
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM ignored a payload without a complete packet header.", context);
+        return;
+    }
+
+    if (raw_header.msg_id == xs::net::kInnerRegisterMsgId)
+    {
+        HandleRegisterMessage(routing_id, payload);
         return;
     }
 
@@ -443,6 +453,17 @@ void GmNode::HandleInnerMessage(
         return;
     }
 
+    std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+    context.push_back(xs::core::LogContextField{"msgId", std::to_string(raw_header.msg_id)});
+    context.push_back(xs::core::LogContextField{"seq", std::to_string(raw_header.seq)});
+    context.push_back(xs::core::LogContextField{"flags", BuildPacketFlagsText(raw_header.flags)});
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM ignored an unsupported inner packet.", context);
+}
+
+void GmNode::HandleRegisterMessage(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
     xs::net::PacketView packet{};
     const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
@@ -450,12 +471,7 @@ void GmNode::HandleInnerMessage(
         std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
         context.push_back(
             xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))});
-        logger().Log(xs::core::LogLevel::Warn, "inner", "GM dropped malformed inner packet.", context);
-        return;
-    }
-
-    if (packet.header.msg_id != xs::net::kInnerRegisterMsgId)
-    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM dropped malformed register packet.", context);
         return;
     }
 
