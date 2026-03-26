@@ -198,6 +198,60 @@ void TestEncodeServerStubOwnershipSyncRoundTrip()
     XS_CHECK(decoded.assignments[1].entry_flags == 0u);
 }
 
+void TestEncodeGameServiceReadyReportRoundTrip()
+{
+    const xs::net::GameServiceReadyReport report{
+        .assignment_epoch = 13u,
+        .local_ready = true,
+        .status_flags = 0u,
+        .entries =
+            {
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = "MatchService",
+                    .entity_key = "default",
+                    .ready = true,
+                    .entry_flags = 0u,
+                },
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = "LeaderboardService",
+                    .entity_key = "default",
+                    .ready = true,
+                    .entry_flags = 0u,
+                },
+            },
+        .reported_at_unix_ms = 17u,
+    };
+
+    std::size_t wire_size = 0u;
+    XS_CHECK(
+        xs::net::GetGameServiceReadyReportWireSize(report, &wire_size) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+    XS_CHECK(wire_size > sizeof(std::uint64_t) + sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t));
+
+    std::vector<std::byte> buffer(wire_size);
+    XS_CHECK(
+        xs::net::EncodeGameServiceReadyReport(report, buffer) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+
+    xs::net::GameServiceReadyReport decoded{};
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(buffer, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+    XS_CHECK(decoded.assignment_epoch == report.assignment_epoch);
+    XS_CHECK(decoded.local_ready == report.local_ready);
+    XS_CHECK(decoded.status_flags == report.status_flags);
+    XS_CHECK(decoded.reported_at_unix_ms == report.reported_at_unix_ms);
+    XS_CHECK(decoded.entries.size() == report.entries.size());
+    XS_CHECK(decoded.entries[0].entity_type == "MatchService");
+    XS_CHECK(decoded.entries[0].entity_key == "default");
+    XS_CHECK(decoded.entries[0].ready);
+    XS_CHECK(decoded.entries[0].entry_flags == 0u);
+    XS_CHECK(decoded.entries[1].entity_type == "LeaderboardService");
+    XS_CHECK(decoded.entries[1].entity_key == "default");
+    XS_CHECK(decoded.entries[1].ready);
+    XS_CHECK(decoded.entries[1].entry_flags == 0u);
+}
+
 void TestRejectsClusterNodesOnlineSemanticViolationsAndMalformedBuffers()
 {
     const xs::net::ClusterNodesOnlineNotify valid_notify{
@@ -365,6 +419,80 @@ void TestRejectsServerStubOwnershipSyncSemanticViolationsAndMalformedBuffers()
         xs::net::InnerClusterCodecErrorCode::TrailingBytes);
 }
 
+void TestRejectsGameServiceReadyReportSemanticViolationsAndMalformedBuffers()
+{
+    const xs::net::GameServiceReadyReport valid_report{
+        .assignment_epoch = 21u,
+        .local_ready = true,
+        .status_flags = 0u,
+        .entries =
+            {
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = "MatchService",
+                    .entity_key = "default",
+                    .ready = true,
+                    .entry_flags = 0u,
+                },
+            },
+        .reported_at_unix_ms = 22u,
+    };
+
+    std::size_t wire_size = 0u;
+    XS_CHECK(
+        xs::net::GetGameServiceReadyReportWireSize(valid_report, &wire_size) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+
+    std::vector<std::byte> buffer(wire_size);
+    XS_CHECK(
+        xs::net::EncodeGameServiceReadyReport(valid_report, buffer) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+
+    const std::size_t status_flags_offset = sizeof(std::uint64_t) + sizeof(std::uint8_t);
+    std::vector<std::byte> invalid_status_flags = buffer;
+    invalid_status_flags[status_flags_offset + sizeof(std::uint32_t) - 1u] = std::byte{0x01};
+    xs::net::GameServiceReadyReport decoded{};
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(invalid_status_flags, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidServiceReadyStatusFlags);
+
+    const std::size_t entry_ready_offset =
+        sizeof(std::uint64_t) +
+        sizeof(std::uint8_t) +
+        sizeof(std::uint32_t) +
+        sizeof(std::uint32_t) +
+        sizeof(std::uint16_t) + valid_report.entries[0].entity_type.size() +
+        sizeof(std::uint16_t) + valid_report.entries[0].entity_key.size();
+
+    std::vector<std::byte> invalid_entry_ready = buffer;
+    invalid_entry_ready[entry_ready_offset] = std::byte{0x02};
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(invalid_entry_ready, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidBoolValue);
+
+    std::vector<std::byte> invalid_entry_flags = buffer;
+    invalid_entry_flags[invalid_entry_flags.size() - sizeof(std::uint64_t) - 1u] = std::byte{0x01};
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(invalid_entry_flags, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidServiceReadyEntryFlags);
+
+    std::vector<std::byte> invalid_local_ready = buffer;
+    invalid_local_ready[sizeof(std::uint64_t)] = std::byte{0x02};
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(invalid_local_ready, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidBoolValue);
+
+    const std::span<const std::byte> truncated(buffer.data(), buffer.size() - 1u);
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(truncated, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::BufferTooSmall);
+
+    std::vector<std::byte> trailing = buffer;
+    trailing.push_back(std::byte{0xEE});
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(trailing, &decoded) ==
+        xs::net::InnerClusterCodecErrorCode::TrailingBytes);
+}
+
 void TestRejectsInvalidArgumentsAndSizeViolations()
 {
     const xs::net::ClusterNodesOnlineNotify invalid_nodes_online{
@@ -438,6 +566,95 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
         xs::net::DecodeGameGateMeshReadyReport(mesh_ready_buffer, nullptr) ==
         xs::net::InnerClusterCodecErrorCode::InvalidArgument);
 
+    const xs::net::GameServiceReadyReport invalid_service_ready{
+        .assignment_epoch = 1u,
+        .local_ready = true,
+        .status_flags = 1u,
+        .entries =
+            {
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = "MatchService",
+                    .entity_key = "default",
+                    .ready = true,
+                    .entry_flags = 0u,
+                },
+            },
+        .reported_at_unix_ms = 2u,
+    };
+    std::size_t wire_size = 0u;
+    XS_CHECK(
+        xs::net::GetGameServiceReadyReportWireSize(invalid_service_ready, &wire_size) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidServiceReadyStatusFlags);
+
+    const xs::net::GameServiceReadyReport invalid_service_ready_entry{
+        .assignment_epoch = 1u,
+        .local_ready = true,
+        .status_flags = 0u,
+        .entries =
+            {
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = "MatchService",
+                    .entity_key = "default",
+                    .ready = true,
+                    .entry_flags = 1u,
+                },
+            },
+        .reported_at_unix_ms = 2u,
+    };
+    XS_CHECK(
+        xs::net::GetGameServiceReadyReportWireSize(invalid_service_ready_entry, &wire_size) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidServiceReadyEntryFlags);
+
+    const xs::net::GameServiceReadyReport valid_service_ready{
+        .assignment_epoch = 1u,
+        .local_ready = true,
+        .status_flags = 0u,
+        .entries =
+            {
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = "MatchService",
+                    .entity_key = "default",
+                    .ready = true,
+                    .entry_flags = 0u,
+                },
+            },
+        .reported_at_unix_ms = 2u,
+    };
+    XS_CHECK(
+        xs::net::GetGameServiceReadyReportWireSize(valid_service_ready, nullptr) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidArgument);
+    XS_CHECK(
+        xs::net::DecodeGameServiceReadyReport(std::span<const std::byte>{}, nullptr) ==
+        xs::net::InnerClusterCodecErrorCode::InvalidArgument);
+
+    std::size_t valid_service_ready_wire_size = 0u;
+    XS_CHECK(
+        xs::net::GetGameServiceReadyReportWireSize(valid_service_ready, &valid_service_ready_wire_size) ==
+        xs::net::InnerClusterCodecErrorCode::None);
+    std::vector<std::byte> short_service_ready_buffer(valid_service_ready_wire_size - 1u);
+    XS_CHECK(
+        xs::net::EncodeGameServiceReadyReport(valid_service_ready, short_service_ready_buffer) ==
+        xs::net::InnerClusterCodecErrorCode::BufferTooSmall);
+
+    const xs::net::GameServiceReadyReport overflow_service_ready{
+        .assignment_epoch = 1u,
+        .local_ready = true,
+        .status_flags = 0u,
+        .entries =
+            {
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = std::string(static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()) + 1u, 'A'),
+                    .entity_key = "default",
+                    .ready = true,
+                    .entry_flags = 0u,
+                },
+            },
+        .reported_at_unix_ms = 2u,
+    };
+    XS_CHECK(
+        xs::net::GetGameServiceReadyReportWireSize(overflow_service_ready, &wire_size) ==
+        xs::net::InnerClusterCodecErrorCode::LengthOverflow);
+
     const xs::net::ServerStubOwnershipSync invalid_sync{
         .assignment_epoch = 1u,
         .status_flags = 1u,
@@ -452,7 +669,6 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             },
         .server_now_unix_ms = 2u,
     };
-    std::size_t wire_size = 0u;
     XS_CHECK(
         xs::net::GetServerStubOwnershipSyncWireSize(invalid_sync, &wire_size) ==
         xs::net::InnerClusterCodecErrorCode::InvalidOwnershipStatusFlags);
@@ -536,6 +752,12 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
     XS_CHECK(
         xs::net::InnerClusterCodecErrorMessage(xs::net::InnerClusterCodecErrorCode::InvalidOwnershipEntryFlags) ==
         std::string_view("ServerStubOwnershipEntry entryFlags must be zero."));
+    XS_CHECK(
+        xs::net::InnerClusterCodecErrorMessage(xs::net::InnerClusterCodecErrorCode::InvalidServiceReadyStatusFlags) ==
+        std::string_view("GameServiceReadyReport statusFlags must be zero."));
+    XS_CHECK(
+        xs::net::InnerClusterCodecErrorMessage(xs::net::InnerClusterCodecErrorCode::InvalidServiceReadyEntryFlags) ==
+        std::string_view("ServerStubReadyEntry entryFlags must be zero."));
 }
 
 } // namespace
@@ -547,7 +769,9 @@ int main()
     TestEncodeGameGateMeshReadyReportRoundTrip();
     TestRejectsGameGateMeshReadySemanticViolationsAndMalformedBuffers();
     TestEncodeServerStubOwnershipSyncRoundTrip();
+    TestEncodeGameServiceReadyReportRoundTrip();
     TestRejectsServerStubOwnershipSyncSemanticViolationsAndMalformedBuffers();
+    TestRejectsGameServiceReadyReportSemanticViolationsAndMalformedBuffers();
     TestEncodeClusterReadyNotifyRoundTrip();
     TestRejectsClusterReadySemanticViolationsAndMalformedBuffers();
     TestRejectsInvalidArgumentsAndSizeViolations();

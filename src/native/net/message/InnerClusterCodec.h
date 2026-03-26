@@ -12,6 +12,7 @@ namespace xs::net
 
 inline constexpr std::uint32_t kInnerClusterReadyNotifyMsgId = 1201u;
 inline constexpr std::uint32_t kInnerServerStubOwnershipSyncMsgId = 1202u;
+inline constexpr std::uint32_t kInnerGameServiceReadyReportMsgId = 1203u;
 inline constexpr std::uint32_t kInnerClusterNodesOnlineNotifyMsgId = 1204u;
 inline constexpr std::uint32_t kInnerGameGateMeshReadyReportMsgId = 1205u;
 inline constexpr std::size_t kClusterNodesOnlineNotifySize =
@@ -34,6 +35,8 @@ enum class InnerClusterCodecErrorCode : std::uint8_t
     InvalidMeshReadyStatusFlags = 8,
     InvalidOwnershipStatusFlags = 9,
     InvalidOwnershipEntryFlags = 10,
+    InvalidServiceReadyStatusFlags = 11,
+    InvalidServiceReadyEntryFlags = 12,
 };
 
 [[nodiscard]] std::string_view InnerClusterCodecErrorMessage(InnerClusterCodecErrorCode error_code) noexcept;
@@ -91,6 +94,33 @@ struct ServerStubOwnershipSync
 [[nodiscard]] InnerClusterCodecErrorCode DecodeServerStubOwnershipSync(
     std::span<const std::byte> buffer,
     ServerStubOwnershipSync* message) noexcept;
+
+struct ServerStubReadyEntry
+{
+    std::string entity_type{};
+    std::string entity_key{};
+    bool ready{false};
+    std::uint32_t entry_flags{0};
+};
+
+struct GameServiceReadyReport
+{
+    std::uint64_t assignment_epoch{0};
+    bool local_ready{false};
+    std::uint32_t status_flags{0};
+    std::vector<ServerStubReadyEntry> entries{};
+    std::uint64_t reported_at_unix_ms{0};
+};
+
+[[nodiscard]] InnerClusterCodecErrorCode GetGameServiceReadyReportWireSize(
+    const GameServiceReadyReport& message,
+    std::size_t* wire_size) noexcept;
+[[nodiscard]] InnerClusterCodecErrorCode EncodeGameServiceReadyReport(
+    const GameServiceReadyReport& message,
+    std::span<std::byte> buffer) noexcept;
+[[nodiscard]] InnerClusterCodecErrorCode DecodeGameServiceReadyReport(
+    std::span<const std::byte> buffer,
+    GameServiceReadyReport* message) noexcept;
 
 struct ClusterReadyNotify
 {

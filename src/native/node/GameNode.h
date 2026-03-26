@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ServerNode.h"
 #include "message/InnerClusterCodec.h"
@@ -62,6 +62,13 @@ class GameNode final : public ServerNode
         std::vector<xs::net::ServerStubOwnershipEntry> owned_assignments{};
     };
 
+    struct ServiceReadyState final
+    {
+        std::uint64_t last_reported_assignment_epoch{0U};
+        std::uint64_t last_reported_at_unix_ms{0U};
+        std::vector<xs::net::ServerStubReadyEntry> ready_entries{};
+    };
+
     void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
     void HandleGmConnectionStateChanged(ipc::ZmqConnectionState state);
     void HandleGateConnectionStateChanged(std::string_view gate_node_id, ipc::ZmqConnectionState state);
@@ -77,15 +84,18 @@ class GameNode final : public ServerNode
     [[nodiscard]] bool SendRegisterRequest();
     [[nodiscard]] bool SendHeartbeatRequest();
     [[nodiscard]] bool SendMeshReadyReport(bool mesh_ready);
+    [[nodiscard]] bool SendServiceReadyReport();
     [[nodiscard]] bool SendGateRegisterRequest(std::string_view gate_node_id);
     [[nodiscard]] bool SendGateHeartbeatRequest(std::string_view gate_node_id);
     void StartGateConnectors();
     void ResetRuntimeState() noexcept;
     void ResetMeshReadyState() noexcept;
     void ResetOwnershipState();
+    void ResetServiceReadyState() noexcept;
     void ResetGmSessionState();
     void ResetGateSessionStates();
     void RefreshMeshReadyState();
+    void RefreshLocalServiceReadyState();
     void ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync);
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std::uint32_t interval_ms);
@@ -102,9 +112,9 @@ class GameNode final : public ServerNode
     RuntimeState runtime_state_{};
     MeshReadyState mesh_ready_state_{};
     OwnershipState ownership_state_{};
+    ServiceReadyState service_ready_state_{};
     std::uint64_t last_cluster_nodes_online_server_now_unix_ms_{0U};
     bool all_nodes_online_{false};
 };
 
 } // namespace xs::node
-

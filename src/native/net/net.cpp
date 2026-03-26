@@ -1,4 +1,4 @@
-﻿#include "BinarySerialization.h"
+#include "BinarySerialization.h"
 #include "ByteOrder.h"
 #include "MessageDispatcher.h"
 #include "PacketHeader.h"
@@ -36,6 +36,12 @@ static_assert(
 static_assert(
     std::is_default_constructible_v<xs::net::ServerStubOwnershipSync>,
     "ServerStubOwnershipSync must remain default constructible.");
+static_assert(
+    std::is_default_constructible_v<xs::net::ServerStubReadyEntry>,
+    "ServerStubReadyEntry must remain default constructible.");
+static_assert(
+    std::is_default_constructible_v<xs::net::GameServiceReadyReport>,
+    "GameServiceReadyReport must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::HeartbeatRequest>, "HeartbeatRequest must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::HeartbeatSuccessResponse>, "HeartbeatSuccessResponse must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::RegisterRequest>, "RegisterRequest must remain default constructible.");
@@ -53,6 +59,9 @@ static_assert(
     xs::net::kInnerServerStubOwnershipSyncMsgId == 1202u,
     "Server-stub ownership msgId must match the inner-network spec");
 static_assert(
+    xs::net::kInnerGameServiceReadyReportMsgId == 1203u,
+    "Game-service-ready msgId must match the inner-network spec");
+static_assert(
     xs::net::kInnerClusterNodesOnlineNotifyMsgId == 1204u,
     "Cluster-nodes-online msgId must match the inner-network spec");
 static_assert(
@@ -65,4 +74,3 @@ void placeholder()
 {
 }
 } // namespace xs::net
-

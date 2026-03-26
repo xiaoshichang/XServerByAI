@@ -150,6 +150,7 @@ NodeErrorCode GameNode::OnInit()
     runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
     mesh_ready_state_ = MeshReadyState{};
     ownership_state_ = OwnershipState{};
+    service_ready_state_ = ServiceReadyState{};
     last_cluster_nodes_online_server_now_unix_ms_ = 0U;
     all_nodes_online_ = false;
     inner_network_remote_sessions().Clear();
@@ -762,6 +763,7 @@ void GameNode::HandleServerStubOwnershipSync(const xs::net::PacketView& packet)
     }
 
     ApplyStubOwnership(sync);
+    RefreshLocalServiceReadyState();
     session->last_protocol_error.clear();
 
     const std::array<xs::core::LogContextField, 5> context{
@@ -1217,6 +1219,107 @@ bool GameNode::SendMeshReadyReport(bool mesh_ready)
     return true;
 }
 
+bool GameNode::SendServiceReadyReport()
+{
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr || inner_network() == nullptr || !session->registered ||
+        session->connection_state != ipc::ZmqConnectionState::Connected ||
+        ownership_state_.assignment_epoch == 0U ||
+        ownership_state_.owned_assignments.empty() ||
+        service_ready_state_.ready_entries.empty())
+    {
+        return false;
+    }
+
+    const xs::net::GameServiceReadyReport report{
+        .assignment_epoch = ownership_state_.assignment_epoch,
+        .local_ready = service_ready_state_.ready_entries.size() == ownership_state_.owned_assignments.size(),
+        .status_flags = 0U,
+        .entries = service_ready_state_.ready_entries,
+        .reported_at_unix_ms = CurrentUnixTimeMilliseconds(),
+    };
+
+    std::size_t wire_size = 0U;
+    const xs::net::InnerClusterCodecErrorCode wire_size_result =
+        xs::net::GetGameServiceReadyReportWireSize(report, &wire_size);
+    if (wire_size_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(wire_size_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
+            xs::core::LogContextField{"codecError", session->last_protocol_error},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size service ready report.", context);
+        return false;
+    }
+
+    std::vector<std::byte> payload(wire_size);
+    const xs::net::InnerClusterCodecErrorCode encode_result =
+        xs::net::EncodeGameServiceReadyReport(report, payload);
+    if (encode_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(encode_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
+            xs::core::LogContextField{"codecError", session->last_protocol_error},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode service ready report.", context);
+        return false;
+    }
+
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerGameServiceReadyReportMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(payload.size()));
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
+            xs::core::LogContextField{"packetError", session->last_protocol_error},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap service ready report into a packet.", context);
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(kGmRemoteNodeId, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        session->last_protocol_error = std::string(inner_network()->last_error_message());
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send service ready report.", context);
+        return false;
+    }
+
+    service_ready_state_.last_reported_assignment_epoch = report.assignment_epoch;
+    service_ready_state_.last_reported_at_unix_ms = report.reported_at_unix_ms;
+    session->last_protocol_error.clear();
+
+    const std::array<xs::core::LogContextField, 6> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
+        xs::core::LogContextField{"localReady", report.local_ready ? "true" : "false"},
+        xs::core::LogContextField{"readyEntryCount", ToString(report.entries.size())},
+        xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)},
+        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent service ready report.", context);
+    return true;
+}
 void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const xs::net::PacketView& packet)
 {
     InnerNetworkSession* session = remote_session(gate_node_id);
@@ -1646,6 +1749,12 @@ void GameNode::ResetMeshReadyState() noexcept
 void GameNode::ResetOwnershipState()
 {
     ownership_state_ = OwnershipState{};
+    ResetServiceReadyState();
+}
+
+void GameNode::ResetServiceReadyState() noexcept
+{
+    service_ready_state_ = ServiceReadyState{};
 }
 
 void GameNode::ResetGmSessionState()
@@ -1756,6 +1865,31 @@ void GameNode::RefreshMeshReadyState()
     {
         (void)SendMeshReadyReport(next_mesh_ready);
     }
+
+    if (next_mesh_ready)
+    {
+        RefreshLocalServiceReadyState();
+    }
+}
+
+void GameNode::RefreshLocalServiceReadyState()
+{
+    if (!mesh_ready_state_.current || ownership_state_.assignment_epoch == 0U)
+    {
+        return;
+    }
+
+    if (ownership_state_.owned_assignments.empty() || service_ready_state_.ready_entries.empty())
+    {
+        return;
+    }
+
+    if (service_ready_state_.last_reported_assignment_epoch == ownership_state_.assignment_epoch)
+    {
+        return;
+    }
+
+    (void)SendServiceReadyReport();
 }
 
 void GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
@@ -1764,12 +1898,20 @@ void GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
     ownership_state_.server_now_unix_ms = sync.server_now_unix_ms;
     ownership_state_.assignments = sync.assignments;
     ownership_state_.owned_assignments.clear();
+    service_ready_state_.ready_entries.clear();
 
     for (const xs::net::ServerStubOwnershipEntry& entry : sync.assignments)
     {
         if (entry.owner_game_node_id == node_id())
         {
             ownership_state_.owned_assignments.push_back(entry);
+            service_ready_state_.ready_entries.push_back(
+                xs::net::ServerStubReadyEntry{
+                    .entity_type = entry.entity_type,
+                    .entity_key = entry.entity_key,
+                    .ready = true,
+                    .entry_flags = 0U,
+                });
         }
     }
 }

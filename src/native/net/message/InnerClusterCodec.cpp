@@ -124,6 +124,37 @@ namespace
     return InnerClusterCodecErrorCode::None;
 }
 
+[[nodiscard]] InnerClusterCodecErrorCode ValidateServerStubReadyEntry(
+    const ServerStubReadyEntry& entry) noexcept
+{
+    if (entry.entry_flags != 0u)
+    {
+        return InnerClusterCodecErrorCode::InvalidServiceReadyEntryFlags;
+    }
+
+    return InnerClusterCodecErrorCode::None;
+}
+
+[[nodiscard]] InnerClusterCodecErrorCode ValidateGameServiceReadyReport(
+    const GameServiceReadyReport& message) noexcept
+{
+    if (message.status_flags != 0u)
+    {
+        return InnerClusterCodecErrorCode::InvalidServiceReadyStatusFlags;
+    }
+
+    for (const ServerStubReadyEntry& entry : message.entries)
+    {
+        const InnerClusterCodecErrorCode entry_result = ValidateServerStubReadyEntry(entry);
+        if (entry_result != InnerClusterCodecErrorCode::None)
+        {
+            return entry_result;
+        }
+    }
+
+    return InnerClusterCodecErrorCode::None;
+}
+
 [[nodiscard]] InnerClusterCodecErrorCode CheckTrailingBytes(const BinaryReader& reader) noexcept
 {
     if (reader.remaining() != 0u)
@@ -162,6 +193,10 @@ std::string_view InnerClusterCodecErrorMessage(InnerClusterCodecErrorCode error_
         return "ServerStubOwnershipSync statusFlags must be zero.";
     case InnerClusterCodecErrorCode::InvalidOwnershipEntryFlags:
         return "ServerStubOwnershipEntry entryFlags must be zero.";
+    case InnerClusterCodecErrorCode::InvalidServiceReadyStatusFlags:
+        return "GameServiceReadyReport statusFlags must be zero.";
+    case InnerClusterCodecErrorCode::InvalidServiceReadyEntryFlags:
+        return "ServerStubReadyEntry entryFlags must be zero.";
     }
 
     return "Unknown inner-cluster codec error.";
@@ -462,6 +497,177 @@ InnerClusterCodecErrorCode DecodeServerStubOwnershipSync(
     return InnerClusterCodecErrorCode::None;
 }
 
+InnerClusterCodecErrorCode GetGameServiceReadyReportWireSize(
+    const GameServiceReadyReport& message,
+    std::size_t* wire_size) noexcept
+{
+    if (wire_size == nullptr)
+    {
+        return InnerClusterCodecErrorCode::InvalidArgument;
+    }
+
+    const InnerClusterCodecErrorCode validation_result = ValidateGameServiceReadyReport(message);
+    if (validation_result != InnerClusterCodecErrorCode::None)
+    {
+        return validation_result;
+    }
+
+    *wire_size = 0u;
+
+    InnerClusterCodecErrorCode add_result = AddWireSize(
+        sizeof(std::uint64_t) + sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint32_t),
+        wire_size);
+    if (add_result != InnerClusterCodecErrorCode::None)
+    {
+        return add_result;
+    }
+
+    for (const ServerStubReadyEntry& entry : message.entries)
+    {
+        std::size_t entry_field_size = 0u;
+
+        add_result = GetString16WireSize(entry.entity_type, &entry_field_size);
+        if (add_result != InnerClusterCodecErrorCode::None)
+        {
+            return add_result;
+        }
+
+        add_result = AddWireSize(entry_field_size, wire_size);
+        if (add_result != InnerClusterCodecErrorCode::None)
+        {
+            return add_result;
+        }
+
+        add_result = GetString16WireSize(entry.entity_key, &entry_field_size);
+        if (add_result != InnerClusterCodecErrorCode::None)
+        {
+            return add_result;
+        }
+
+        add_result = AddWireSize(entry_field_size, wire_size);
+        if (add_result != InnerClusterCodecErrorCode::None)
+        {
+            return add_result;
+        }
+
+        add_result = AddWireSize(sizeof(std::uint8_t) + sizeof(std::uint32_t), wire_size);
+        if (add_result != InnerClusterCodecErrorCode::None)
+        {
+            return add_result;
+        }
+    }
+
+    return AddWireSize(sizeof(std::uint64_t), wire_size);
+}
+
+InnerClusterCodecErrorCode EncodeGameServiceReadyReport(
+    const GameServiceReadyReport& message,
+    std::span<std::byte> buffer) noexcept
+{
+    std::size_t wire_size = 0u;
+    const InnerClusterCodecErrorCode wire_size_result =
+        GetGameServiceReadyReportWireSize(message, &wire_size);
+    if (wire_size_result != InnerClusterCodecErrorCode::None)
+    {
+        return wire_size_result;
+    }
+
+    if (buffer.size() < wire_size)
+    {
+        return InnerClusterCodecErrorCode::BufferTooSmall;
+    }
+
+    BinaryWriter writer(buffer);
+    if (!writer.WriteUInt64(message.assignment_epoch) ||
+        !writer.WriteBool(message.local_ready) ||
+        !writer.WriteUInt32(message.status_flags) ||
+        !writer.WriteUInt32(static_cast<std::uint32_t>(message.entries.size())))
+    {
+        return MapSerializationError(writer.error());
+    }
+
+    for (const ServerStubReadyEntry& entry : message.entries)
+    {
+        if (!writer.WriteString16(entry.entity_type) ||
+            !writer.WriteString16(entry.entity_key) ||
+            !writer.WriteBool(entry.ready) ||
+            !writer.WriteUInt32(entry.entry_flags))
+        {
+            return MapSerializationError(writer.error());
+        }
+    }
+
+    if (!writer.WriteUInt64(message.reported_at_unix_ms))
+    {
+        return MapSerializationError(writer.error());
+    }
+
+    return InnerClusterCodecErrorCode::None;
+}
+
+InnerClusterCodecErrorCode DecodeGameServiceReadyReport(
+    std::span<const std::byte> buffer,
+    GameServiceReadyReport* message) noexcept
+{
+    if (message == nullptr)
+    {
+        return InnerClusterCodecErrorCode::InvalidArgument;
+    }
+
+    *message = {};
+
+    BinaryReader reader(buffer);
+    std::uint32_t entry_count = 0u;
+    GameServiceReadyReport parsed_message{};
+    if (!reader.ReadUInt64(&parsed_message.assignment_epoch) ||
+        !reader.ReadBool(&parsed_message.local_ready) ||
+        !reader.ReadUInt32(&parsed_message.status_flags) ||
+        !reader.ReadUInt32(&entry_count))
+    {
+        return MapSerializationError(reader.error());
+    }
+
+    parsed_message.entries.reserve(static_cast<std::size_t>(entry_count));
+    for (std::uint32_t index = 0u; index < entry_count; ++index)
+    {
+        ServerStubReadyEntry entry{};
+        if (!reader.ReadString16(&entry.entity_type) ||
+            !reader.ReadString16(&entry.entity_key) ||
+            !reader.ReadBool(&entry.ready) ||
+            !reader.ReadUInt32(&entry.entry_flags))
+        {
+            return MapSerializationError(reader.error());
+        }
+
+        const InnerClusterCodecErrorCode entry_result = ValidateServerStubReadyEntry(entry);
+        if (entry_result != InnerClusterCodecErrorCode::None)
+        {
+            return entry_result;
+        }
+
+        parsed_message.entries.push_back(std::move(entry));
+    }
+
+    if (!reader.ReadUInt64(&parsed_message.reported_at_unix_ms))
+    {
+        return MapSerializationError(reader.error());
+    }
+
+    const InnerClusterCodecErrorCode validation_result = ValidateGameServiceReadyReport(parsed_message);
+    if (validation_result != InnerClusterCodecErrorCode::None)
+    {
+        return validation_result;
+    }
+
+    const InnerClusterCodecErrorCode trailing_result = CheckTrailingBytes(reader);
+    if (trailing_result != InnerClusterCodecErrorCode::None)
+    {
+        return trailing_result;
+    }
+
+    *message = std::move(parsed_message);
+    return InnerClusterCodecErrorCode::None;
+}
 InnerClusterCodecErrorCode EncodeClusterReadyNotify(
     const ClusterReadyNotify& message,
     std::span<std::byte> buffer) noexcept

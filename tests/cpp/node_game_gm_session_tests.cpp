@@ -1,4 +1,4 @@
-﻿#include "GameNode.h"
+#include "GameNode.h"
 #include "GmNode.h"
 #include "Json.h"
 #include "TimeUtils.h"
@@ -1386,6 +1386,9 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
     bool mesh_ready_true_reported = false;
     bool mesh_ready_true_reported_before_gate_mesh = false;
     bool ownership_sync_sent = false;
+    bool service_ready_reported = false;
+    bool service_ready_reported_before_ownership = false;
+    xs::net::GameServiceReadyReport service_ready_report{};
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
     while (std::chrono::steady_clock::now() < deadline)
@@ -1459,6 +1462,24 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
 
                     mesh_ready_true_reported = mesh_ready_true_reported || report.mesh_ready;
                 }
+                else if (packet.header.msg_id == xs::net::kInnerGameServiceReadyReportMsgId)
+                {
+                    XS_CHECK(packet.header.flags == 0U);
+                    XS_CHECK(packet.header.seq == xs::net::kPacketSeqNone);
+
+                    XS_CHECK(
+                        xs::net::DecodeGameServiceReadyReport(packet.payload, &service_ready_report) ==
+                        xs::net::InnerClusterCodecErrorCode::None);
+                    XS_CHECK(service_ready_report.status_flags == 0U);
+                    XS_CHECK(service_ready_report.reported_at_unix_ms != 0U);
+
+                    if (!ownership_sync_sent)
+                    {
+                        service_ready_reported_before_ownership = true;
+                    }
+
+                    service_ready_reported = true;
+                }
             }
         }
 
@@ -1529,6 +1550,7 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
         }
 
         if (ownership_sync_sent &&
+            service_ready_reported &&
             game_node.node().assignment_epoch() == accepted_sync.assignment_epoch)
         {
             break;
@@ -1580,6 +1602,24 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
         XS_CHECK(owned_assignments[1].entity_type == "LeaderboardService");
     }
 
+    XS_CHECK(service_ready_reported);
+    XS_CHECK(!service_ready_reported_before_ownership);
+    XS_CHECK(service_ready_report.assignment_epoch == accepted_sync.assignment_epoch);
+    XS_CHECK(service_ready_report.local_ready);
+    XS_CHECK(service_ready_report.status_flags == 0U);
+    XS_CHECK(service_ready_report.entries.size() == 2U);
+    if (service_ready_report.entries.size() == 2U)
+    {
+        XS_CHECK(service_ready_report.entries[0].entity_type == "MatchService");
+        XS_CHECK(service_ready_report.entries[0].entity_key == "default");
+        XS_CHECK(service_ready_report.entries[0].ready);
+        XS_CHECK(service_ready_report.entries[0].entry_flags == 0U);
+        XS_CHECK(service_ready_report.entries[1].entity_type == "LeaderboardService");
+        XS_CHECK(service_ready_report.entries[1].entity_key == "default");
+        XS_CHECK(service_ready_report.entries[1].ready);
+        XS_CHECK(service_ready_report.entries[1].entry_flags == 0U);
+    }
+
     XS_CHECK(!gm_routing_id.empty());
     if (!gm_routing_id.empty())
     {
@@ -1611,10 +1651,284 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
 
     const std::string log_text = ReadDirectoryText(log_dir);
     XS_CHECK(log_text.find("Game node sent mesh ready report.") != std::string::npos);
+    XS_CHECK(log_text.find("Game node sent service ready report.") != std::string::npos);
     XS_CHECK(log_text.find("Game node accepted GM ownership sync.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }
+
+void TestGameNodeSkipsServiceReadyReportWhenNoStubIsOwned()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-no-owned-service-ready");
+
+    RawZmqSocket gm_router(ZMQ_ROUTER);
+    RawZmqSocket gate0_router(ZMQ_ROUTER);
+    RawZmqSocket gate1_router(ZMQ_ROUTER);
+    XS_CHECK(gm_router.IsValid());
+    XS_CHECK(gate0_router.IsValid());
+    XS_CHECK(gate1_router.IsValid());
+
+    const std::string gm_endpoint = gm_router.BindLoopbackTcp();
+    const std::string gate0_endpoint = gate0_router.BindLoopbackTcp();
+    const std::string gate1_endpoint = gate1_router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+    XS_CHECK(!gate0_endpoint.empty());
+    XS_CHECK(!gate1_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(
+            base_path,
+            ParsePortFromTcpEndpoint(gm_endpoint),
+            AcquireLoopbackPort(),
+            &config_path,
+            {
+                ParsePortFromTcpEndpoint(gate0_endpoint),
+                ParsePortFromTcpEndpoint(gate1_endpoint),
+            }))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
+        return game_node.node().gm_inner_connection_state() == xs::ipc::ZmqConnectionState::Connected;
+    }));
+
+    const xs::net::ServerStubOwnershipSync no_owned_sync{
+        .assignment_epoch = 6U,
+        .status_flags = 0U,
+        .assignments = {
+            xs::net::ServerStubOwnershipEntry{
+                .entity_type = "MatchService",
+                .entity_key = "default",
+                .owner_game_node_id = "Game9",
+                .entry_flags = 0U,
+            },
+            xs::net::ServerStubOwnershipEntry{
+                .entity_type = "ChatService",
+                .entity_key = "default",
+                .owner_game_node_id = "Game9",
+                .entry_flags = 0U,
+            },
+            xs::net::ServerStubOwnershipEntry{
+                .entity_type = "LeaderboardService",
+                .entity_key = "default",
+                .owner_game_node_id = "Game9",
+                .entry_flags = 0U,
+            },
+        },
+        .server_now_unix_ms = CurrentUnixTimeMilliseconds(),
+    };
+
+    std::vector<std::vector<std::byte>> gm_frames;
+    std::vector<std::vector<std::byte>> gate0_frames;
+    std::vector<std::vector<std::byte>> gate1_frames;
+    bool gm_register_accepted = false;
+    bool all_nodes_online_sent = false;
+    bool gm_heartbeat_accepted = false;
+    bool gate0_register_accepted = false;
+    bool gate1_register_accepted = false;
+    bool gate0_heartbeat_accepted = false;
+    bool gate1_heartbeat_accepted = false;
+    bool ownership_sync_sent = false;
+    bool service_ready_reported = false;
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (TryReceiveMultipartMessage(gm_router.socket(), &gm_frames))
+        {
+            XS_CHECK(gm_frames.size() == 2U);
+            if (gm_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gm_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    xs::net::RegisterRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeRegisterRequest(packet.payload, &request) ==
+                        xs::net::RegisterCodecErrorCode::None);
+                    XS_CHECK(request.node_id == "Game0");
+
+                    const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 5000U, 15000U);
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], response));
+                    gm_register_accepted = true;
+
+                    if (!all_nodes_online_sent)
+                    {
+                        const std::vector<std::byte> notify = EncodeClusterNodesOnlineNotifyPacket(true);
+                        XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], notify));
+                        all_nodes_online_sent = true;
+                    }
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    xs::net::HeartbeatRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeHeartbeatRequest(packet.payload, &request) ==
+                        xs::net::HeartbeatCodecErrorCode::None);
+
+                    const std::vector<std::byte> response = EncodeHeartbeatSuccessPacket(packet.header.seq, 5000U, 15000U);
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], response));
+                    gm_heartbeat_accepted = true;
+                }
+                else if (packet.header.msg_id == xs::net::kInnerGameGateMeshReadyReportMsgId)
+                {
+                    xs::net::GameGateMeshReadyReport report{};
+                    XS_CHECK(
+                        xs::net::DecodeGameGateMeshReadyReport(packet.payload, &report) ==
+                        xs::net::InnerClusterCodecErrorCode::None);
+
+                    if (report.mesh_ready && !ownership_sync_sent)
+                    {
+                        const std::vector<std::byte> ownership_packet = EncodeServerStubOwnershipSyncPacket(no_owned_sync);
+                        XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], ownership_packet));
+                        ownership_sync_sent = true;
+                    }
+                }
+                else if (packet.header.msg_id == xs::net::kInnerGameServiceReadyReportMsgId)
+                {
+                    service_ready_reported = true;
+                }
+            }
+        }
+
+        if (TryReceiveMultipartMessage(gate0_router.socket(), &gate0_frames))
+        {
+            XS_CHECK(gate0_frames.size() == 2U);
+            if (gate0_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gate0_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    xs::net::RegisterRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeRegisterRequest(packet.payload, &request) ==
+                        xs::net::RegisterCodecErrorCode::None);
+                    XS_CHECK(request.node_id == "Game0");
+
+                    const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate0_router.socket(), gate0_frames[0], response));
+                    gate0_register_accepted = true;
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    xs::net::HeartbeatRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeHeartbeatRequest(packet.payload, &request) ==
+                        xs::net::HeartbeatCodecErrorCode::None);
+
+                    const std::vector<std::byte> response = EncodeHeartbeatSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate0_router.socket(), gate0_frames[0], response));
+                    gate0_heartbeat_accepted = true;
+                }
+            }
+        }
+
+        if (TryReceiveMultipartMessage(gate1_router.socket(), &gate1_frames))
+        {
+            XS_CHECK(gate1_frames.size() == 2U);
+            if (gate1_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gate1_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    xs::net::RegisterRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeRegisterRequest(packet.payload, &request) ==
+                        xs::net::RegisterCodecErrorCode::None);
+                    XS_CHECK(request.node_id == "Game0");
+
+                    const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate1_router.socket(), gate1_frames[0], response));
+                    gate1_register_accepted = true;
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    xs::net::HeartbeatRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeHeartbeatRequest(packet.payload, &request) ==
+                        xs::net::HeartbeatCodecErrorCode::None);
+
+                    const std::vector<std::byte> response = EncodeHeartbeatSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate1_router.socket(), gate1_frames[0], response));
+                    gate1_heartbeat_accepted = true;
+                }
+            }
+        }
+
+        if (ownership_sync_sent &&
+            game_node.node().assignment_epoch() == no_owned_sync.assignment_epoch)
+        {
+            break;
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    const auto no_report_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+    while (std::chrono::steady_clock::now() < no_report_deadline && !service_ready_reported)
+    {
+        if (TryReceiveMultipartMessage(gm_router.socket(), &gm_frames))
+        {
+            XS_CHECK(gm_frames.size() == 2U);
+            if (gm_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gm_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+                if (packet.header.msg_id == xs::net::kInnerGameServiceReadyReportMsgId)
+                {
+                    service_ready_reported = true;
+                }
+            }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(gm_register_accepted);
+    XS_CHECK(all_nodes_online_sent);
+    XS_CHECK(gate0_register_accepted);
+    XS_CHECK(gate1_register_accepted);
+    XS_CHECK(gate0_heartbeat_accepted);
+    XS_CHECK(gate1_heartbeat_accepted);
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node, &no_owned_sync]() {
+        return game_node.node().mesh_ready() &&
+            game_node.node().assignment_epoch() == no_owned_sync.assignment_epoch &&
+            game_node.node().ownership_assignments().size() == no_owned_sync.assignments.size() &&
+            game_node.node().owned_stub_assignments().empty();
+    }));
+    XS_CHECK(!service_ready_reported);
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
+
+    const std::filesystem::path log_dir = base_path / "logs";
+    XS_CHECK(DirectoryContainsRegularFile(log_dir));
+
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("Game node accepted GM ownership sync.") != std::string::npos);
+    XS_CHECK(log_text.find("Game node sent service ready report.") == std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
+
 void TestGameNodeRejectsHeartbeatResponseWithErrorFlag()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-heartbeat-invalid-envelope");
@@ -1725,6 +2039,7 @@ int main()
     TestGameNodeRejectsClusterNodesOnlineNotifyWithInvalidEnvelope();
     TestGameNodeStartsGateRegisterOnlyAfterClusterNodesOnlineNotify();
     TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes();
+    TestGameNodeSkipsServiceReadyReportWhenNoStubIsOwned();
     TestGameNodeRejectsHeartbeatResponseWithErrorFlag();
 
     if (g_failures != 0)
