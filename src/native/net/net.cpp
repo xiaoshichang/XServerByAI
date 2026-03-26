@@ -1,4 +1,4 @@
-#include "BinarySerialization.h"
+﻿#include "BinarySerialization.h"
 #include "ByteOrder.h"
 #include "MessageDispatcher.h"
 #include "PacketHeader.h"
@@ -27,6 +27,15 @@ static_assert(std::is_copy_constructible_v<xs::net::MessageHandler>, "MessageHan
 static_assert(std::is_default_constructible_v<xs::net::Endpoint>, "Endpoint must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::LoadSnapshot>, "LoadSnapshot must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::ClusterReadyNotify>, "ClusterReadyNotify must remain default constructible.");
+static_assert(
+    std::is_default_constructible_v<xs::net::GameGateMeshReadyReport>,
+    "GameGateMeshReadyReport must remain default constructible.");
+static_assert(
+    std::is_default_constructible_v<xs::net::ServerStubOwnershipEntry>,
+    "ServerStubOwnershipEntry must remain default constructible.");
+static_assert(
+    std::is_default_constructible_v<xs::net::ServerStubOwnershipSync>,
+    "ServerStubOwnershipSync must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::HeartbeatRequest>, "HeartbeatRequest must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::HeartbeatSuccessResponse>, "HeartbeatSuccessResponse must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::RegisterRequest>, "RegisterRequest must remain default constructible.");
@@ -40,6 +49,15 @@ static_assert(xs::net::kPacketMagic == 0x47535052u, "Packet magic must match the
 static_assert(xs::net::kInnerRegisterMsgId == 1000u, "Register msgId must match the inner-network spec");
 static_assert(xs::net::kInnerHeartbeatMsgId == 1100u, "Heartbeat msgId must match the inner-network spec");
 static_assert(xs::net::kInnerClusterReadyNotifyMsgId == 1201u, "Cluster-ready msgId must match the inner-network spec");
+static_assert(
+    xs::net::kInnerServerStubOwnershipSyncMsgId == 1202u,
+    "Server-stub ownership msgId must match the inner-network spec");
+static_assert(
+    xs::net::kInnerClusterNodesOnlineNotifyMsgId == 1204u,
+    "Cluster-nodes-online msgId must match the inner-network spec");
+static_assert(
+    xs::net::kInnerGameGateMeshReadyReportMsgId == 1205u,
+    "Game-gate mesh-ready msgId must match the inner-network spec");
 
 namespace xs::net
 {
@@ -47,3 +65,4 @@ void placeholder()
 {
 }
 } // namespace xs::net
+

@@ -78,6 +78,36 @@ std::uint64_t GameNode::cluster_nodes_online_server_now_unix_ms() const noexcept
     return last_cluster_nodes_online_server_now_unix_ms_;
 }
 
+bool GameNode::mesh_ready() const noexcept
+{
+    return mesh_ready_state_.current;
+}
+
+std::uint64_t GameNode::mesh_ready_reported_at_unix_ms() const noexcept
+{
+    return mesh_ready_state_.last_reported_at_unix_ms;
+}
+
+std::uint64_t GameNode::assignment_epoch() const noexcept
+{
+    return ownership_state_.assignment_epoch;
+}
+
+std::uint64_t GameNode::ownership_server_now_unix_ms() const noexcept
+{
+    return ownership_state_.server_now_unix_ms;
+}
+
+std::vector<xs::net::ServerStubOwnershipEntry> GameNode::ownership_assignments() const
+{
+    return ownership_state_.assignments;
+}
+
+std::vector<xs::net::ServerStubOwnershipEntry> GameNode::owned_stub_assignments() const
+{
+    return ownership_state_.owned_assignments;
+}
+
 xs::core::ProcessType GameNode::role_process_type() const noexcept
 {
     return xs::core::ProcessType::Game;
@@ -118,6 +148,8 @@ NodeErrorCode GameNode::OnInit()
     runtime_state_ = RuntimeState{};
     runtime_state_.managed_assembly_name = config->managed.assembly_name;
     runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
+    mesh_ready_state_ = MeshReadyState{};
+    ownership_state_ = OwnershipState{};
     last_cluster_nodes_online_server_now_unix_ms_ = 0U;
     all_nodes_online_ = false;
     inner_network_remote_sessions().Clear();
@@ -330,11 +362,29 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed Gate inner connection state change.", context);
 
+    if (state != ipc::ZmqConnectionState::Connected)
+    {
+        CancelGateHeartbeatTimer(gate_node_id);
+        session->inner_network_ready = false;
+        session->registered = false;
+        session->register_in_flight = false;
+        session->register_seq = 0U;
+        session->heartbeat_seq = 0U;
+        session->heartbeat_interval_ms = 0U;
+        session->heartbeat_timeout_ms = 0U;
+        session->last_server_now_unix_ms = 0U;
+        session->last_heartbeat_at_unix_ms = 0U;
+        RefreshMeshReadyState();
+        return;
+    }
+
     if (state == ipc::ZmqConnectionState::Connected && all_nodes_online_ &&
         !session->registered && !session->register_in_flight)
     {
         (void)SendGateRegisterRequest(gate_node_id);
     }
+
+    RefreshMeshReadyState();
 }
 
 void GameNode::HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload)
@@ -393,6 +443,12 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
     if (packet.header.msg_id == xs::net::kInnerClusterNodesOnlineNotifyMsgId)
     {
         HandleClusterNodesOnlineNotify(packet);
+        return;
+    }
+
+    if (packet.header.msg_id == xs::net::kInnerServerStubOwnershipSyncMsgId)
+    {
+        HandleServerStubOwnershipSync(packet);
         return;
     }
 
@@ -607,6 +663,8 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
         StartGateConnectors();
     }
 
+    RefreshMeshReadyState();
+
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"allNodesOnline", notify.all_nodes_online ? "true" : "false"},
         xs::core::LogContextField{"statusFlags", std::to_string(notify.status_flags)},
@@ -615,6 +673,105 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM cluster nodes online notify.", context);
+}
+
+void GameNode::HandleServerStubOwnershipSync(const xs::net::PacketView& packet)
+{
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+        };
+        session->last_protocol_error = "GM ownership sync envelope is invalid.";
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "inner",
+            "Game node ignored GM ownership sync with an invalid envelope.",
+            context);
+        return;
+    }
+
+    if (!session->registered)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
+        };
+        session->last_protocol_error = "GM ownership sync arrived before Game registration completed.";
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "inner",
+            "Game node ignored GM ownership sync before registration completed.",
+            context);
+        return;
+    }
+
+    if (!mesh_ready_state_.current)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"meshReady", mesh_ready_state_.current ? "true" : "false"},
+        };
+        session->last_protocol_error = "GM ownership sync arrived before Game mesh ready completed.";
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "inner",
+            "Game node ignored GM ownership sync before mesh ready completed.",
+            context);
+        return;
+    }
+
+    xs::net::ServerStubOwnershipSync sync{};
+    const xs::net::InnerClusterCodecErrorCode decode_result = xs::net::DecodeServerStubOwnershipSync(packet.payload, &sync);
+    if (decode_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{
+                "codecError",
+                std::string(xs::net::InnerClusterCodecErrorMessage(decode_result)),
+            },
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+        };
+        session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM ownership sync.", context);
+        return;
+    }
+
+    if (sync.assignment_epoch < ownership_state_.assignment_epoch)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+            xs::core::LogContextField{"currentAssignmentEpoch", ToString(ownership_state_.assignment_epoch)},
+            xs::core::LogContextField{"assignmentCount", ToString(sync.assignments.size())},
+        };
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM ownership sync.", context);
+        return;
+    }
+
+    ApplyStubOwnership(sync);
+    session->last_protocol_error.clear();
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+        xs::core::LogContextField{"assignmentCount", ToString(sync.assignments.size())},
+        xs::core::LogContextField{"ownedAssignmentCount", ToString(ownership_state_.owned_assignments.size())},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(sync.server_now_unix_ms)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM ownership sync.", context);
 }
 
 void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
@@ -702,6 +859,7 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
     }
 
     session->registered = true;
+    session->inner_network_ready = false;
     session->heartbeat_interval_ms = response.heartbeat_interval_ms;
     session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
     session->last_server_now_unix_ms = response.server_now_unix_ms;
@@ -771,6 +929,7 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
     session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
     session->last_server_now_unix_ms = response.server_now_unix_ms;
     session->last_heartbeat_at_unix_ms = CurrentUnixTimeMilliseconds();
+    session->inner_network_ready = true;
     session->last_protocol_error.clear();
 
     if (heartbeat_config_changed)
@@ -787,6 +946,7 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM heartbeat success response.", context);
+    RefreshMeshReadyState();
 }
 
 bool GameNode::SendRegisterRequest()
@@ -976,6 +1136,87 @@ bool GameNode::SendHeartbeatRequest()
     return true;
 }
 
+bool GameNode::SendMeshReadyReport(bool mesh_ready)
+{
+    InnerNetworkSession* session = gm_session();
+    if (session == nullptr || inner_network() == nullptr || !session->registered ||
+        session->connection_state != ipc::ZmqConnectionState::Connected)
+    {
+        return false;
+    }
+
+    const xs::net::GameGateMeshReadyReport report{
+        .mesh_ready = mesh_ready,
+        .status_flags = 0U,
+        .reported_at_unix_ms = CurrentUnixTimeMilliseconds(),
+    };
+
+    std::array<std::byte, xs::net::kGameGateMeshReadyReportSize> payload{};
+    const xs::net::InnerClusterCodecErrorCode encode_result =
+        xs::net::EncodeGameGateMeshReadyReport(report, payload);
+    if (encode_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(encode_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
+            xs::core::LogContextField{"codecError", session->last_protocol_error},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode mesh ready report.", context);
+        return false;
+    }
+
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerGameGateMeshReadyReportMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(payload.size()));
+    std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kGameGateMeshReadyReportSize> packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
+            xs::core::LogContextField{"packetError", session->last_protocol_error},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap mesh ready report into a packet.", context);
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(kGmRemoteNodeId, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        session->last_protocol_error = std::string(inner_network()->last_error_message());
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send mesh ready report.", context);
+        return false;
+    }
+
+    mesh_ready_state_.has_reported = true;
+    mesh_ready_state_.last_reported = mesh_ready;
+    mesh_ready_state_.last_reported_at_unix_ms = report.reported_at_unix_ms;
+    session->last_protocol_error.clear();
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
+        xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)},
+        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        xs::core::LogContextField{"allNodesOnline", all_nodes_online_ ? "true" : "false"},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent mesh ready report.", context);
+    return true;
+}
+
 void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const xs::net::PacketView& packet)
 {
     InnerNetworkSession* session = remote_session(gate_node_id);
@@ -1064,6 +1305,7 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
     }
 
     session->registered = true;
+    session->inner_network_ready = false;
     session->heartbeat_interval_ms = response.heartbeat_interval_ms;
     session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
     session->last_server_now_unix_ms = response.server_now_unix_ms;
@@ -1082,6 +1324,7 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
         xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate register success response.", context);
+    RefreshMeshReadyState();
 }
 
 void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const xs::net::PacketView& packet)
@@ -1135,6 +1378,7 @@ void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const 
     session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
     session->last_server_now_unix_ms = response.server_now_unix_ms;
     session->last_heartbeat_at_unix_ms = CurrentUnixTimeMilliseconds();
+    session->inner_network_ready = true;
     session->last_protocol_error.clear();
 
     if (heartbeat_config_changed)
@@ -1151,6 +1395,7 @@ void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const 
         xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate heartbeat success response.", context);
+    RefreshMeshReadyState();
 }
 
 bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
@@ -1393,6 +1638,16 @@ void GameNode::ResetRuntimeState() noexcept
     runtime_state_ = RuntimeState{};
 }
 
+void GameNode::ResetMeshReadyState() noexcept
+{
+    mesh_ready_state_ = MeshReadyState{};
+}
+
+void GameNode::ResetOwnershipState()
+{
+    ownership_state_ = OwnershipState{};
+}
+
 void GameNode::ResetGmSessionState()
 {
     InnerNetworkSession* session = gm_session();
@@ -1404,6 +1659,9 @@ void GameNode::ResetGmSessionState()
     CancelHeartbeatTimer();
     all_nodes_online_ = false;
     last_cluster_nodes_online_server_now_unix_ms_ = 0U;
+    ResetMeshReadyState();
+    ResetOwnershipState();
+    session->inner_network_ready = false;
     session->registered = false;
     session->register_in_flight = false;
     session->register_seq = 0U;
@@ -1433,6 +1691,7 @@ void GameNode::ResetGateSessionStates()
         }
 
         session->connection_state = ipc::ZmqConnectionState::Stopped;
+        session->inner_network_ready = false;
         session->registered = false;
         session->register_in_flight = false;
         session->register_seq = 0U;
@@ -1442,6 +1701,76 @@ void GameNode::ResetGateSessionStates()
         session->last_server_now_unix_ms = 0U;
         session->last_heartbeat_at_unix_ms = 0U;
         session->last_protocol_error.clear();
+    }
+
+    RefreshMeshReadyState();
+}
+
+bool GameNode::AreAllGateSessionsMeshReady() const noexcept
+{
+    if (cluster_config().gates.empty())
+    {
+        return false;
+    }
+
+    for (const auto& [gate_node_id, gate_config] : cluster_config().gates)
+    {
+        (void)gate_config;
+
+        const InnerNetworkSession* session = remote_session(gate_node_id);
+        if (session == nullptr ||
+            session->connection_state != ipc::ZmqConnectionState::Connected ||
+            !session->registered ||
+            !session->inner_network_ready)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void GameNode::RefreshMeshReadyState()
+{
+    const bool next_mesh_ready = all_nodes_online_ && AreAllGateSessionsMeshReady();
+    const bool state_changed = mesh_ready_state_.current != next_mesh_ready;
+    mesh_ready_state_.current = next_mesh_ready;
+
+    if (!next_mesh_ready)
+    {
+        ResetOwnershipState();
+    }
+
+    if (state_changed)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"meshReady", next_mesh_ready ? "true" : "false"},
+            xs::core::LogContextField{"allNodesOnline", all_nodes_online_ ? "true" : "false"},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node refreshed mesh ready state.", context);
+    }
+
+    if (next_mesh_ready != mesh_ready_state_.last_reported || !mesh_ready_state_.has_reported)
+    {
+        (void)SendMeshReadyReport(next_mesh_ready);
+    }
+}
+
+void GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
+{
+    ownership_state_.assignment_epoch = sync.assignment_epoch;
+    ownership_state_.server_now_unix_ms = sync.server_now_unix_ms;
+    ownership_state_.assignments = sync.assignments;
+    ownership_state_.owned_assignments.clear();
+
+    for (const xs::net::ServerStubOwnershipEntry& entry : sync.assignments)
+    {
+        if (entry.owner_game_node_id == node_id())
+        {
+            ownership_state_.owned_assignments.push_back(entry);
+        }
     }
 }
 

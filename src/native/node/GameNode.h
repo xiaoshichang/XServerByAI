@@ -1,6 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include "ServerNode.h"
+#include "message/InnerClusterCodec.h"
+#include "message/PacketCodec.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -8,13 +10,7 @@
 #include <span>
 #include <string>
 #include <string_view>
-
-namespace xs::net
-{
-
-struct PacketView;
-
-} // namespace xs::net
+#include <vector>
 
 namespace xs::node
 {
@@ -30,6 +26,12 @@ class GameNode final : public ServerNode
     [[nodiscard]] ipc::ZmqConnectionState gm_inner_connection_state() const noexcept;
     [[nodiscard]] bool all_nodes_online() const noexcept;
     [[nodiscard]] std::uint64_t cluster_nodes_online_server_now_unix_ms() const noexcept;
+    [[nodiscard]] bool mesh_ready() const noexcept;
+    [[nodiscard]] std::uint64_t mesh_ready_reported_at_unix_ms() const noexcept;
+    [[nodiscard]] std::uint64_t assignment_epoch() const noexcept;
+    [[nodiscard]] std::uint64_t ownership_server_now_unix_ms() const noexcept;
+    [[nodiscard]] std::vector<xs::net::ServerStubOwnershipEntry> ownership_assignments() const;
+    [[nodiscard]] std::vector<xs::net::ServerStubOwnershipEntry> owned_stub_assignments() const;
 
   protected:
     [[nodiscard]] xs::core::ProcessType role_process_type() const noexcept override;
@@ -44,6 +46,22 @@ class GameNode final : public ServerNode
         std::string managed_assembly_name{"XServer.Managed.GameLogic"};
     };
 
+    struct MeshReadyState final
+    {
+        bool current{false};
+        bool has_reported{false};
+        bool last_reported{false};
+        std::uint64_t last_reported_at_unix_ms{0U};
+    };
+
+    struct OwnershipState final
+    {
+        std::uint64_t assignment_epoch{0U};
+        std::uint64_t server_now_unix_ms{0U};
+        std::vector<xs::net::ServerStubOwnershipEntry> assignments{};
+        std::vector<xs::net::ServerStubOwnershipEntry> owned_assignments{};
+    };
+
     void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
     void HandleGmConnectionStateChanged(ipc::ZmqConnectionState state);
     void HandleGateConnectionStateChanged(std::string_view gate_node_id, ipc::ZmqConnectionState state);
@@ -51,22 +69,29 @@ class GameNode final : public ServerNode
     void HandleGmMessage(std::span<const std::byte> payload);
     void HandleGateMessage(std::string_view gate_node_id, std::span<const std::byte> payload);
     void HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet);
+    void HandleServerStubOwnershipSync(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
     void HandleHeartbeatResponse(const xs::net::PacketView& packet);
     void HandleGateRegisterResponse(std::string_view gate_node_id, const xs::net::PacketView& packet);
     void HandleGateHeartbeatResponse(std::string_view gate_node_id, const xs::net::PacketView& packet);
     [[nodiscard]] bool SendRegisterRequest();
     [[nodiscard]] bool SendHeartbeatRequest();
+    [[nodiscard]] bool SendMeshReadyReport(bool mesh_ready);
     [[nodiscard]] bool SendGateRegisterRequest(std::string_view gate_node_id);
     [[nodiscard]] bool SendGateHeartbeatRequest(std::string_view gate_node_id);
     void StartGateConnectors();
     void ResetRuntimeState() noexcept;
+    void ResetMeshReadyState() noexcept;
+    void ResetOwnershipState();
     void ResetGmSessionState();
     void ResetGateSessionStates();
+    void RefreshMeshReadyState();
+    void ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync);
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;
     void CancelGateHeartbeatTimer(std::string_view gate_node_id) noexcept;
+    [[nodiscard]] bool AreAllGateSessionsMeshReady() const noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence(InnerNetworkSession* session) noexcept;
     [[nodiscard]] const xs::core::GameNodeConfig* game_config() const noexcept;
     [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;
@@ -75,8 +100,11 @@ class GameNode final : public ServerNode
     [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
     RuntimeState runtime_state_{};
+    MeshReadyState mesh_ready_state_{};
+    OwnershipState ownership_state_{};
     std::uint64_t last_cluster_nodes_online_server_now_unix_ms_{0U};
     bool all_nodes_online_{false};
 };
 
 } // namespace xs::node
+

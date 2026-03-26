@@ -140,7 +140,7 @@
 
 **Inner.GameGateMeshReadyReport（`msgId = 1205`）**
 1. 发送时机：`Game` 在收到 `allNodesOnline = true` 后完成到全部目标 `Gate` 的注册与心跳闭环时，向 `GM` 上报自身 mesh ready 结果；若该闭环随后失效，也允许重新上报 `meshReady = false`。
-2. 关键语义：`meshReady = true` 表示该 `Game` 已经具备与全部目标 `Gate` 的可用通信链路，可以进入 ownership 驱动的本地 Stub 初始化阶段。
+2. 关键语义：`meshReady = true` 表示该 `Game` 已经具备与全部目标 `Gate` 的可用通信链路，可以进入 ownership 驱动的本地 Stub 初始化阶段；该上报只表达 mesh ready 结论本身，不携带额外业务元信息。
 3. 聚合语义：`GM` 必须按 `nodeId` 聚合当前 mesh ready 结果；当“所有节点在线”条件失效或节点重新注册时，应重新确认对应 `Game` 的最新状态。
 
 上报体：
@@ -153,14 +153,14 @@
 
 **Inner.ServerStubOwnershipSync（`msgId = 1202`）**
 1. 发送时机：`GM` 在当前 `allNodesOnline = true` 且聚合全部必需 `Game` 的 `meshReady = true` 结果后，向全部 `Game` 下发当前 `ServerStubEntity` ownership 快照。
-2. 关键语义：接收方只接受最新 `assignmentEpoch` 的全量快照；旧轮次结果必须丢弃。
-3. 使用方式：`Game` 收到后只初始化分配给自己的 Stub；它在进入该步骤前，应已经具备与全部目标 `Gate` 的可用通信链路。
+2. 关键语义：接收方只接受不旧于当前 `assignmentEpoch` 的全量快照；`assignments` 必须是一张完整的 `ServerStubEntity -> OwnerGameNodeId` 分配表。当前阶段 `GM` 只构建一次 bootstrap 分配表，因此 `assignmentEpoch` 固定为 `1`。
+3. 使用方式：`Game` 收到后只初始化分配给自己的 Stub；它在进入该步骤前，应已经具备与全部目标 `Gate` 的可用通信链路。当前阶段 `GM` 先采用最简单的随机分配策略，后续可扩展为基于负载的分配策略，但不改变 `1202` 的全量表语义。
 
 通知体：
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `assignmentEpoch` | `uint64` | 当前 ownership 版本号 |
+| `assignmentEpoch` | `uint64` | 当前 ownership 版本号；当前阶段固定为 `1`，保留字段用于后续扩展 |
 | `statusFlags` | `uint32` | 保留，当前必须为 `0` |
 | `assignments` | `ServerStubOwnershipEntry[]` | 当前全量 ownership 快照 |
 | `serverNowUnixMs` | `uint64` | `GM` 当前时间 |
@@ -208,3 +208,4 @@
 11. 当前默认心跳参数为 `heartbeatIntervalMs = 5000`、`heartbeatTimeoutMs = 15000`；响应方可以覆盖，但必须满足 `heartbeatIntervalMs < heartbeatTimeoutMs`。
 12. `statusFlags`、`ServerStubOwnershipEntry.entryFlags` 与 `ServerStubReadyEntry.entryFlags` 当前都必须为 `0`。
 13. 若未来需要额外的目录快照、mesh 详情或增量同步协议，应以新的扩展条目重新登记，而不是复用当前已登记的启动编排消息。
+

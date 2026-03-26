@@ -11,6 +11,7 @@
 #include <array>
 #include <chrono>
 #include <optional>
+#include <random>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +24,7 @@ namespace
 inline constexpr std::uint32_t kDefaultHeartbeatIntervalMs = 5000u;
 inline constexpr std::uint32_t kDefaultHeartbeatTimeoutMs = 15000u;
 inline constexpr auto kDefaultTimeoutScanInterval = std::chrono::milliseconds(1000);
+inline constexpr std::uint64_t kServerStubOwnershipAssignmentEpoch = 1U;
 
 inline constexpr std::int32_t kInnerProcessTypeInvalid = 3000;
 inline constexpr std::int32_t kInnerNodeIdConflict = 3001;
@@ -30,6 +32,18 @@ inline constexpr std::int32_t kInnerNodeNotRegistered = 3003;
 inline constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
 inline constexpr std::int32_t kInnerChannelInvalid = 3004;
 inline constexpr std::int32_t kInnerRequestInvalid = 3005;
+
+struct BootstrapStubDefinition final
+{
+    std::string_view entity_type;
+    std::string_view entity_key;
+};
+
+constexpr std::array<BootstrapStubDefinition, 3> kBootstrapStubCatalog{
+    BootstrapStubDefinition{"MatchService", "default"},
+    BootstrapStubDefinition{"ChatService", "default"},
+    BootstrapStubDefinition{"LeaderboardService", "default"},
+};
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -279,6 +293,8 @@ NodeErrorCode GmNode::OnInit()
     timeout_scan_timer_id_ = 0;
     inner_network_remote_sessions().Clear();
     InitializeClusterNodesOnlineState();
+    InitializeGameToGateFullConnectionAggregationState();
+    server_stub_distribute_table_.reset();
 
     const NodeErrorCode init_result = InitInnerNetwork(std::move(options));
     if (init_result != NodeErrorCode::None)
@@ -397,6 +413,8 @@ NodeErrorCode GmNode::OnUninit()
     }
 
     cluster_nodes_online_state_ = ClusterNodesOnlineState{};
+    game_to_gate_full_connection_aggregation_state_ = GameToGateFullConnectionAggregationState{};
+    server_stub_distribute_table_.reset();
     ClearError();
     return NodeErrorCode::None;
 }
@@ -417,6 +435,42 @@ void GmNode::InitializeClusterNodesOnlineState()
         (void)config;
         cluster_nodes_online_state_.expected_game_node_ids.push_back(node_id);
     }
+}
+
+void GmNode::InitializeGameToGateFullConnectionAggregationState()
+{
+    game_to_gate_full_connection_aggregation_state_ = GameToGateFullConnectionAggregationState{};
+    game_to_gate_full_connection_aggregation_state_.entries.reserve(cluster_config().games.size());
+    for (const auto& [node_id, config] : cluster_config().games)
+    {
+        (void)config;
+        game_to_gate_full_connection_aggregation_state_.entries.push_back(
+            GameMeshReadyEntry{
+                .node_id = node_id,
+            });
+    }
+}
+
+GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node_id) noexcept
+{
+    auto iterator = std::find_if(
+        game_to_gate_full_connection_aggregation_state_.entries.begin(),
+        game_to_gate_full_connection_aggregation_state_.entries.end(),
+        [node_id](const GameMeshReadyEntry& entry) {
+            return entry.node_id == node_id;
+        });
+    return iterator != game_to_gate_full_connection_aggregation_state_.entries.end() ? &(*iterator) : nullptr;
+}
+
+const GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node_id) const noexcept
+{
+    auto iterator = std::find_if(
+        game_to_gate_full_connection_aggregation_state_.entries.begin(),
+        game_to_gate_full_connection_aggregation_state_.entries.end(),
+        [node_id](const GameMeshReadyEntry& entry) {
+            return entry.node_id == node_id;
+        });
+    return iterator != game_to_gate_full_connection_aggregation_state_.entries.end() ? &(*iterator) : nullptr;
 }
 
 bool GmNode::AreAllExpectedNodesOnline() const noexcept
@@ -446,18 +500,63 @@ bool GmNode::AreAllExpectedNodesOnline() const noexcept
                is_online);
 }
 
+bool GmNode::AreAllExpectedGamesMeshReady() const noexcept
+{
+    if (game_to_gate_full_connection_aggregation_state_.entries.empty())
+    {
+        return false;
+    }
+
+    return std::all_of(
+        game_to_gate_full_connection_aggregation_state_.entries.begin(),
+        game_to_gate_full_connection_aggregation_state_.entries.end(),
+        [](const GameMeshReadyEntry& entry) {
+            return entry.mesh_ready;
+        });
+}
+
+void GmNode::InvalidateAllGameMeshReadyState()
+{
+    for (GameMeshReadyEntry& entry : game_to_gate_full_connection_aggregation_state_.entries)
+    {
+        entry.mesh_ready = false;
+        entry.reported_at_unix_ms = 0U;
+    }
+
+    game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready = false;
+}
+
+void GmNode::InvalidateGameMeshReadyState(std::string_view game_node_id)
+{
+    GameMeshReadyEntry* entry = mesh_ready_entry(game_node_id);
+    if (entry == nullptr)
+    {
+        return;
+    }
+
+    entry->mesh_ready = false;
+    entry->reported_at_unix_ms = 0U;
+    game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready = false;
+}
+
 void GmNode::RefreshClusterNodesOnlineState(std::string_view trigger_node_id)
 {
     const bool all_nodes_online = AreAllExpectedNodesOnline();
     const bool state_changed = cluster_nodes_online_state_.all_nodes_online != all_nodes_online;
     if (!state_changed)
     {
+        RefreshServerStubDistributeTable();
         return;
     }
 
     const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
     cluster_nodes_online_state_.all_nodes_online = all_nodes_online;
     cluster_nodes_online_state_.last_server_now_unix_ms = server_now_unix_ms;
+
+    if (!all_nodes_online)
+    {
+        InvalidateAllGameMeshReadyState();
+    }
 
     std::uint64_t notify_target_count = 0U;
     for (const std::string& node_id : cluster_nodes_online_state_.expected_game_node_ids)
@@ -480,6 +579,104 @@ void GmNode::RefreshClusterNodesOnlineState(std::string_view trigger_node_id)
         xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed cluster nodes online state.", context);
+    RefreshServerStubDistributeTable();
+}
+
+GmNode::ServerStubDistributeTable GmNode::BuildServerStubDistributeTable() const
+{
+    struct RandomServerStubDistributeStrategy final
+    {
+        explicit RandomServerStubDistributeStrategy(std::mt19937_64 random_engine)
+            : random_engine_(std::move(random_engine))
+        {
+        }
+
+        [[nodiscard]] GmNode::ServerStubDistributeTable Build(
+            const std::vector<std::string>& candidate_game_node_ids)
+        {
+            GmNode::ServerStubDistributeTable table{};
+            table.assignments.reserve(kBootstrapStubCatalog.size());
+
+            if (candidate_game_node_ids.empty())
+            {
+                return table;
+            }
+
+            std::uniform_int_distribution<std::size_t> distribution(0u, candidate_game_node_ids.size() - 1u);
+
+            for (const BootstrapStubDefinition& stub : kBootstrapStubCatalog)
+            {
+                table.assignments.push_back(
+                    xs::net::ServerStubOwnershipEntry{
+                        .entity_type = std::string(stub.entity_type),
+                        .entity_key = std::string(stub.entity_key),
+                        .owner_game_node_id = candidate_game_node_ids[distribution(random_engine_)],
+                        .entry_flags = 0U,
+                    });
+            }
+
+            return table;
+        }
+
+      private:
+        std::mt19937_64 random_engine_;
+    };
+
+    RandomServerStubDistributeStrategy strategy{std::mt19937_64{std::random_device{}()}};
+    return strategy.Build(cluster_nodes_online_state_.expected_game_node_ids);
+}
+
+void GmNode::RefreshServerStubDistributeTable()
+{
+    const bool all_expected_games_mesh_ready = cluster_nodes_online_state_.all_nodes_online && AreAllExpectedGamesMeshReady();
+    if (game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready == all_expected_games_mesh_ready)
+    {
+        return;
+    }
+
+    game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready = all_expected_games_mesh_ready;
+    if (!all_expected_games_mesh_ready)
+    {
+        return;
+    }
+
+    if (server_stub_distribute_table_ == nullptr)
+    {
+        server_stub_distribute_table_ = std::make_unique<ServerStubDistributeTable>(BuildServerStubDistributeTable());
+    }
+
+    const ServerStubDistributeTable& server_stub_distribute_table = *server_stub_distribute_table_;
+    const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
+
+    const xs::net::ServerStubOwnershipSync sync
+    {
+        .assignment_epoch = kServerStubOwnershipAssignmentEpoch,
+        .status_flags = 0U,
+        .assignments = server_stub_distribute_table.assignments,
+        .server_now_unix_ms = server_now_unix_ms,
+    };
+
+    std::uint64_t notify_target_count = 0U;
+    for (const std::string& node_id : cluster_nodes_online_state_.expected_game_node_ids)
+    {
+        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(node_id);
+        if (session == nullptr || !session->registered || session->heartbeat_timed_out)
+        {
+            continue;
+        }
+
+        ++notify_target_count;
+        SendOwnershipSyncToGame(*session, sync);
+    }
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"assignmentEpoch", ToString(kServerStubOwnershipAssignmentEpoch)},
+        xs::core::LogContextField{"assignmentCount", ToString(server_stub_distribute_table.assignments.size())},
+        xs::core::LogContextField{"notifyTargetCount", ToString(notify_target_count)},
+        xs::core::LogContextField{"expectedGameCount", ToString(cluster_nodes_online_state_.expected_game_node_ids.size())},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed server stub distribute table.", context);
 }
 
 void GmNode::SendClusterNodesOnlineNotifyToGame(
@@ -556,6 +753,84 @@ void GmNode::SendClusterNodesOnlineNotifyToGame(
     logger().Log(xs::core::LogLevel::Info, "inner", "GM sent cluster nodes online notify.", context);
 }
 
+void GmNode::SendOwnershipSyncToGame(
+    const InnerNetworkSession& session,
+    const xs::net::ServerStubOwnershipSync& sync)
+{
+    if (inner_network() == nullptr)
+    {
+        return;
+    }
+
+    std::size_t wire_size = 0U;
+    const xs::net::InnerClusterCodecErrorCode size_result =
+        xs::net::GetServerStubOwnershipSyncWireSize(sync, &wire_size);
+    if (size_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"targetGameNodeId", session.node_id},
+            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+            xs::core::LogContextField{"codecError", std::string(xs::net::InnerClusterCodecErrorMessage(size_result))},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM failed to size ownership sync.", context);
+        return;
+    }
+
+    std::vector<std::byte> body(wire_size);
+    const xs::net::InnerClusterCodecErrorCode body_result =
+        xs::net::EncodeServerStubOwnershipSync(sync, body);
+    if (body_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"targetGameNodeId", session.node_id},
+            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+            xs::core::LogContextField{"codecError", std::string(xs::net::InnerClusterCodecErrorMessage(body_result))},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM failed to encode ownership sync.", context);
+        return;
+    }
+
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerServerStubOwnershipSyncMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(body.size()));
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + body.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, body, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"targetGameNodeId", session.node_id},
+            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM failed to wrap ownership sync into a packet.", context);
+        return;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(session.routing_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"targetGameNodeId", session.node_id},
+            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+            xs::core::LogContextField{"routingIdBytes", ToString(session.routing_id.size())},
+            xs::core::LogContextField{"innerNetworkError", std::string(inner_network()->last_error_message())},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM failed to send ownership sync.", context);
+        return;
+    }
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"targetGameNodeId", session.node_id},
+        xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+        xs::core::LogContextField{"assignmentCount", ToString(sync.assignments.size())},
+        xs::core::LogContextField{"routingIdBytes", ToString(session.routing_id.size())},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(sync.server_now_unix_ms)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM sent ownership sync.", context);
+}
+
 void GmNode::HandleInnerMessage(
     std::span<const std::byte> routing_id,
     std::span<const std::byte> payload)
@@ -580,6 +855,12 @@ void GmNode::HandleInnerMessage(
     if (raw_header.msg_id == xs::net::kInnerHeartbeatMsgId)
     {
         HandleHeartbeatMessage(routing_id, payload);
+        return;
+    }
+
+    if (raw_header.msg_id == xs::net::kInnerGameGateMeshReadyReportMsgId)
+    {
+        HandleGameGateMeshReadyReport(routing_id, payload);
         return;
     }
 
@@ -831,6 +1112,11 @@ void GmNode::HandleRegisterMessage(
         apply_registration_state(*session);
     }
 
+    if (registration.process_type == xs::core::ProcessType::Game)
+    {
+        InvalidateGameMeshReadyState(registration.node_id);
+    }
+
     const xs::net::RegisterSuccessResponse response{
         .heartbeat_interval_ms = kDefaultHeartbeatIntervalMs,
         .heartbeat_timeout_ms = kDefaultHeartbeatTimeoutMs,
@@ -1000,6 +1286,86 @@ void GmNode::HandleHeartbeatMessage(
     {
         RefreshClusterNodesOnlineState();
     }
+}
+
+void GmNode::HandleGameGateMeshReadyReport(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
+    xs::net::PacketView packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+        context.push_back(
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))});
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM dropped malformed mesh ready report packet.", context);
+        return;
+    }
+
+    if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+    {
+        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+        context.push_back(xs::core::LogContextField{"seq", std::to_string(packet.header.seq)});
+        context.push_back(xs::core::LogContextField{"flags", BuildPacketFlagsText(packet.header.flags)});
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM ignored mesh ready report with an invalid envelope.", context);
+        return;
+    }
+
+    xs::net::GameGateMeshReadyReport report{};
+    const xs::net::InnerClusterCodecErrorCode decode_result =
+        xs::net::DecodeGameGateMeshReadyReport(packet.payload, &report);
+    if (decode_result != xs::net::InnerClusterCodecErrorCode::None)
+    {
+        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+        context.push_back(
+            xs::core::LogContextField{"codecError", std::string(xs::net::InnerClusterCodecErrorMessage(decode_result))});
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM failed to decode mesh ready report payload.", context);
+        return;
+    }
+
+    InnerNetworkSession* session = inner_network_remote_sessions().FindMutableByRoutingId(routing_id);
+    if (session == nullptr ||
+        session->process_type != xs::core::ProcessType::Game ||
+        !session->registered ||
+        session->heartbeat_timed_out)
+    {
+        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+        context.push_back(xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"});
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM ignored mesh ready report from an unregistered Game session.", context);
+        return;
+    }
+
+    if (!cluster_nodes_online_state_.all_nodes_online)
+    {
+        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+        context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
+        context.push_back(xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"});
+        logger().Log(xs::core::LogLevel::Info, "inner", "GM ignored mesh ready report while allNodesOnline is false.", context);
+        return;
+    }
+
+    GameMeshReadyEntry* entry = mesh_ready_entry(session->node_id);
+    if (entry == nullptr)
+    {
+        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+        context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM ignored mesh ready report from an unexpected Game node.", context);
+        return;
+    }
+
+    entry->mesh_ready = report.mesh_ready;
+    entry->reported_at_unix_ms = report.reported_at_unix_ms;
+
+    const std::array<xs::core::LogContextField, 4> context{
+        xs::core::LogContextField{"nodeId", session->node_id},
+        xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"},
+        xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)},
+        xs::core::LogContextField{"allNodesOnline", cluster_nodes_online_state_.all_nodes_online ? "true" : "false"},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted mesh ready report.", context);
+
+    RefreshServerStubDistributeTable();
 }
 
 void GmNode::HandleTimeoutScan()
