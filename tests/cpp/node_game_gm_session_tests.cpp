@@ -168,9 +168,31 @@ std::uint16_t AcquireLoopbackPort()
 xs::core::Json MakeClusterConfigJson(
     const std::filesystem::path& base_path,
     std::uint16_t gm_inner_port,
-    std::uint16_t gm_control_port)
+    std::uint16_t gm_control_port,
+    const std::vector<std::uint16_t>& gate_inner_ports = std::vector<std::uint16_t>{7000U},
+    std::uint16_t game_inner_port = 7100U)
 {
     const std::string root_log_dir = (base_path / "logs").string();
+    const std::vector<std::uint16_t> effective_gate_inner_ports =
+        gate_inner_ports.empty() ? std::vector<std::uint16_t>{7000U} : gate_inner_ports;
+
+    xs::core::Json gate_block = xs::core::Json::object();
+    for (std::size_t index = 0; index < effective_gate_inner_ports.size(); ++index)
+    {
+        const std::string gate_node_id = "Gate" + std::to_string(index);
+        gate_block[gate_node_id] = xs::core::Json{
+            {"innerNetwork",
+             xs::core::Json{
+                 {"listenEndpoint",
+                  xs::core::Json{{"host", "127.0.0.1"}, {"port", effective_gate_inner_ports[index]}}},
+             }},
+            {"clientNetwork",
+             xs::core::Json{
+                 {"listenEndpoint",
+                  xs::core::Json{{"host", "0.0.0.0"}, {"port", static_cast<std::uint16_t>(4000U + index)}}},
+             }},
+        };
+    }
 
     return xs::core::Json{
         {"env", xs::core::Json{{"id", "local-dev"}, {"environment", "dev"}}},
@@ -209,22 +231,7 @@ xs::core::Json MakeClusterConfigJson(
                    xs::core::Json{{"host", "127.0.0.1"}, {"port", gm_control_port}}},
               }},
          }},
-        {"gate",
-         xs::core::Json{
-             {"Gate0",
-              xs::core::Json{
-                  {"innerNetwork",
-                   xs::core::Json{
-                       {"listenEndpoint",
-                        xs::core::Json{{"host", "127.0.0.1"}, {"port", 7000}}},
-                   }},
-                  {"clientNetwork",
-                   xs::core::Json{
-                       {"listenEndpoint",
-                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4000}}},
-                   }},
-              }},
-         }},
+        {"gate", gate_block},
         {"game",
          xs::core::Json{
              {"Game0",
@@ -232,7 +239,7 @@ xs::core::Json MakeClusterConfigJson(
                   {"innerNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
-                        xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
+                        xs::core::Json{{"host", "127.0.0.1"}, {"port", game_inner_port}}},
                    }},
                   {"managed",
                    xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
@@ -245,7 +252,9 @@ bool WriteRuntimeConfig(
     const std::filesystem::path& base_path,
     std::uint16_t gm_inner_port,
     std::uint16_t gm_control_port,
-    std::filesystem::path* file_path)
+    std::filesystem::path* file_path,
+    const std::vector<std::uint16_t>& gate_inner_ports = std::vector<std::uint16_t>{7000U},
+    std::uint16_t game_inner_port = 7100U)
 {
     if (file_path == nullptr)
     {
@@ -254,7 +263,9 @@ bool WriteRuntimeConfig(
     }
 
     *file_path = base_path / "config.json";
-    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, gm_inner_port, gm_control_port));
+    return WriteJsonFile(
+        *file_path,
+        MakeClusterConfigJson(base_path, gm_inner_port, gm_control_port, gate_inner_ports, game_inner_port));
 }
 
 bool DirectoryContainsRegularFile(const std::filesystem::path& path)
@@ -1013,6 +1024,241 @@ void TestGameNodeRejectsClusterNodesOnlineNotifyWithInvalidEnvelope()
     CleanupTestDirectory(base_path);
 }
 
+void TestGameNodeStartsGateRegisterOnlyAfterClusterNodesOnlineNotify()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-gate-connect-after-all-nodes-online");
+
+    RawZmqSocket gm_router(ZMQ_ROUTER);
+    RawZmqSocket gate0_router(ZMQ_ROUTER);
+    RawZmqSocket gate1_router(ZMQ_ROUTER);
+    XS_CHECK(gm_router.IsValid());
+    XS_CHECK(gate0_router.IsValid());
+    XS_CHECK(gate1_router.IsValid());
+
+    const std::string gm_endpoint = gm_router.BindLoopbackTcp();
+    const std::string gate0_endpoint = gate0_router.BindLoopbackTcp();
+    const std::string gate1_endpoint = gate1_router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+    XS_CHECK(!gate0_endpoint.empty());
+    XS_CHECK(!gate1_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(
+            base_path,
+            ParsePortFromTcpEndpoint(gm_endpoint),
+            AcquireLoopbackPort(),
+            &config_path,
+            {
+                ParsePortFromTcpEndpoint(gate0_endpoint),
+                ParsePortFromTcpEndpoint(gate1_endpoint),
+            }))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
+        return game_node.node().gm_inner_connection_state() == xs::ipc::ZmqConnectionState::Connected;
+    }));
+    XS_CHECK(game_node.node().inner_connection_state("Gate0") == xs::ipc::ZmqConnectionState::Stopped);
+    XS_CHECK(game_node.node().inner_connection_state("Gate1") == xs::ipc::ZmqConnectionState::Stopped);
+
+    std::vector<std::vector<std::byte>> gm_frames;
+    std::vector<std::vector<std::byte>> gate0_frames;
+    std::vector<std::vector<std::byte>> gate1_frames;
+    bool gm_register_accepted = false;
+    bool gate_message_before_notify = false;
+
+    const auto register_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(4);
+    while (std::chrono::steady_clock::now() < register_deadline)
+    {
+        if (TryReceiveMultipartMessage(gate0_router.socket(), &gate0_frames) ||
+            TryReceiveMultipartMessage(gate1_router.socket(), &gate1_frames))
+        {
+            gate_message_before_notify = true;
+            break;
+        }
+
+        if (TryReceiveMultipartMessage(gm_router.socket(), &gm_frames))
+        {
+            XS_CHECK(gm_frames.size() == 2U);
+            if (gm_frames.size() != 2U)
+            {
+                break;
+            }
+
+            xs::net::PacketView packet{};
+            XS_CHECK(xs::net::DecodePacket(gm_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+            if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+            {
+                xs::net::RegisterRequest request{};
+                XS_CHECK(xs::net::DecodeRegisterRequest(packet.payload, &request) == xs::net::RegisterCodecErrorCode::None);
+                XS_CHECK(request.node_id == "Game0");
+
+                const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 5000U, 15000U);
+                XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], response));
+                gm_register_accepted = true;
+                break;
+            }
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(gm_register_accepted);
+    XS_CHECK(!gate_message_before_notify);
+
+    const auto quiet_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+    while (std::chrono::steady_clock::now() < quiet_deadline)
+    {
+        if (TryReceiveMultipartMessage(gate0_router.socket(), &gate0_frames) ||
+            TryReceiveMultipartMessage(gate1_router.socket(), &gate1_frames))
+        {
+            gate_message_before_notify = true;
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(!gate_message_before_notify);
+    XS_CHECK(game_node.node().inner_connection_state("Gate0") == xs::ipc::ZmqConnectionState::Stopped);
+    XS_CHECK(game_node.node().inner_connection_state("Gate1") == xs::ipc::ZmqConnectionState::Stopped);
+
+    const std::vector<std::byte> notify = EncodeClusterNodesOnlineNotifyPacket(true);
+    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], notify));
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
+        return game_node.node().all_nodes_online();
+    }));
+
+    bool gate0_register_accepted = false;
+    bool gate1_register_accepted = false;
+    bool gate0_heartbeat_accepted = false;
+    bool gate1_heartbeat_accepted = false;
+
+    const auto gate_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    while (std::chrono::steady_clock::now() < gate_deadline)
+    {
+        if (TryReceiveMultipartMessage(gate0_router.socket(), &gate0_frames))
+        {
+            XS_CHECK(gate0_frames.size() == 2U);
+            if (gate0_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gate0_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    xs::net::RegisterRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeRegisterRequest(packet.payload, &request) ==
+                        xs::net::RegisterCodecErrorCode::None);
+                    XS_CHECK(request.node_id == "Game0");
+
+                    const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate0_router.socket(), gate0_frames[0], response));
+                    gate0_register_accepted = true;
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    xs::net::HeartbeatRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeHeartbeatRequest(packet.payload, &request) ==
+                        xs::net::HeartbeatCodecErrorCode::None);
+
+                    const std::vector<std::byte> response = EncodeHeartbeatSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate0_router.socket(), gate0_frames[0], response));
+                    gate0_heartbeat_accepted = true;
+                }
+            }
+        }
+
+        if (TryReceiveMultipartMessage(gate1_router.socket(), &gate1_frames))
+        {
+            XS_CHECK(gate1_frames.size() == 2U);
+            if (gate1_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gate1_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    xs::net::RegisterRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeRegisterRequest(packet.payload, &request) ==
+                        xs::net::RegisterCodecErrorCode::None);
+                    XS_CHECK(request.node_id == "Game0");
+
+                    const std::vector<std::byte> response = EncodeRegisterSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate1_router.socket(), gate1_frames[0], response));
+                    gate1_register_accepted = true;
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    xs::net::HeartbeatRequest request{};
+                    XS_CHECK(
+                        xs::net::DecodeHeartbeatRequest(packet.payload, &request) ==
+                        xs::net::HeartbeatCodecErrorCode::None);
+
+                    const std::vector<std::byte> response = EncodeHeartbeatSuccessPacket(packet.header.seq, 200U, 600U);
+                    XS_CHECK(SendRouterReply(gate1_router.socket(), gate1_frames[0], response));
+                    gate1_heartbeat_accepted = true;
+                }
+            }
+        }
+
+        if (gate0_register_accepted &&
+            gate1_register_accepted &&
+            gate0_heartbeat_accepted &&
+            gate1_heartbeat_accepted)
+        {
+            break;
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(gate0_register_accepted);
+    XS_CHECK(gate1_register_accepted);
+    XS_CHECK(gate0_heartbeat_accepted);
+    XS_CHECK(gate1_heartbeat_accepted);
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
+        return game_node.node().inner_connection_state("Gate0") == xs::ipc::ZmqConnectionState::Connected &&
+            game_node.node().inner_connection_state("Gate1") == xs::ipc::ZmqConnectionState::Connected;
+    }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
+
+    const std::filesystem::path log_dir = base_path / "logs";
+    XS_CHECK(DirectoryContainsRegularFile(log_dir));
+
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("Game node sent Gate register request.") != std::string::npos);
+    XS_CHECK(log_text.find("Game node accepted Gate register success response.") != std::string::npos);
+    XS_CHECK(log_text.find("Game node sent Gate heartbeat request.") != std::string::npos);
+    XS_CHECK(log_text.find("Game node accepted Gate heartbeat success response.") != std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
+
 void TestGameNodeRejectsHeartbeatResponseWithErrorFlag()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-heartbeat-invalid-envelope");
@@ -1121,6 +1367,7 @@ int main()
     TestGameNodeAcceptsClusterNodesOnlineNotify();
     TestGameNodeRejectsClusterNodesOnlineNotifyBeforeRegisterCompletes();
     TestGameNodeRejectsClusterNodesOnlineNotifyWithInvalidEnvelope();
+    TestGameNodeStartsGateRegisterOnlyAfterClusterNodesOnlineNotify();
     TestGameNodeRejectsHeartbeatResponseWithErrorFlag();
 
     if (g_failures != 0)

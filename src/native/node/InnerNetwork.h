@@ -51,6 +51,7 @@ class InnerNetwork final
 
     [[nodiscard]] NodeErrorCode Init();
     [[nodiscard]] NodeErrorCode Run();
+    [[nodiscard]] NodeErrorCode Run(std::span<const std::string_view> connector_ids);
     [[nodiscard]] NodeErrorCode Uninit();
     [[nodiscard]] NodeErrorCode Send(
         std::span<const std::byte> routing_id,
@@ -58,6 +59,7 @@ class InnerNetwork final
     [[nodiscard]] NodeErrorCode SendToConnector(
         std::string_view connector_id,
         std::span<const std::byte> payload);
+    [[nodiscard]] NodeErrorCode StartConnector(std::string_view connector_id);
     void SetListenerMessageHandler(InnerNetworkListenerMessageHandler handler);
     void SetConnectorMessageHandler(InnerNetworkConnectorMessageHandler handler);
     void SetConnectorStateHandler(InnerNetworkConnectionStateHandler handler);

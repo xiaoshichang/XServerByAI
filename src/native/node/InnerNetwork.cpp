@@ -155,6 +155,11 @@ class InnerNetwork::Impl final
 
     [[nodiscard]] NodeErrorCode Run()
     {
+        return Run(std::span<const std::string_view>{});
+    }
+
+    [[nodiscard]] NodeErrorCode Run(std::span<const std::string_view> connector_ids)
+    {
         if (!initialized_)
         {
             return SetError(
@@ -169,30 +174,11 @@ class InnerNetwork::Impl final
             return NodeErrorCode::None;
         }
 
-        if (listener_ != nullptr && listener_->IsRunning())
-        {
-            return SetError(
-                last_error_message_,
-                NodeErrorCode::InvalidArgument,
-                "InnerNetwork listener is already running.");
-        }
-
-        for (const auto& [connector_id, slot] : connectors_)
-        {
-            (void)connector_id;
-            if (slot.connector != nullptr && slot.connector->IsRunning())
-            {
-                return SetError(
-                    last_error_message_,
-                    NodeErrorCode::InvalidArgument,
-                    "InnerNetwork connector is already running.");
-            }
-        }
-
         bool listener_started = false;
         std::vector<std::string> started_connectors;
+        std::vector<std::string> target_connectors;
 
-        if (listener_ != nullptr)
+        if (listener_ != nullptr && !listener_->IsRunning())
         {
             std::string listener_error;
             const ipc::ZmqSocketErrorCode start_result = listener_->Start(&listener_error);
@@ -213,8 +199,65 @@ class InnerNetwork::Impl final
             LogInfo("Inner network listener started.", context);
         }
 
-        for (auto& [connector_id, slot] : connectors_)
+        if (connector_ids.empty())
         {
+            target_connectors.reserve(connectors_.size());
+            for (const auto& [connector_id, slot] : connectors_)
+            {
+                (void)slot;
+                target_connectors.push_back(connector_id);
+            }
+        }
+        else
+        {
+            std::map<std::string, bool, std::less<>> requested_connector_ids;
+            target_connectors.reserve(connector_ids.size());
+            for (std::string_view connector_id : connector_ids)
+            {
+                if (connector_id.empty())
+                {
+                    StopStartedComponents(listener_started, started_connectors);
+                    return SetError(
+                        last_error_message_,
+                        NodeErrorCode::InvalidArgument,
+                        "InnerNetwork connector ID must not be empty.");
+                }
+
+                auto iterator = connectors_.find(connector_id);
+                if (iterator == connectors_.end() || iterator->second.connector == nullptr)
+                {
+                    StopStartedComponents(listener_started, started_connectors);
+                    return SetError(
+                        last_error_message_,
+                        NodeErrorCode::InvalidArgument,
+                        "InnerNetwork connector '" + std::string(connector_id) + "' is not configured.");
+                }
+
+                const std::string connector_id_text(connector_id);
+                if (requested_connector_ids.contains(connector_id_text))
+                {
+                    continue;
+                }
+
+                requested_connector_ids.emplace(connector_id_text, true);
+                target_connectors.push_back(std::move(connector_id_text));
+            }
+        }
+
+        for (const std::string& connector_id : target_connectors)
+        {
+            auto iterator = connectors_.find(connector_id);
+            if (iterator == connectors_.end() || iterator->second.connector == nullptr)
+            {
+                continue;
+            }
+
+            ConnectorSlot& slot = iterator->second;
+            if (slot.connector->IsRunning())
+            {
+                continue;
+            }
+
             std::string connector_error;
             const ipc::ZmqSocketErrorCode start_result = slot.connector->Start(&connector_error);
             if (start_result != ipc::ZmqSocketErrorCode::None)
@@ -237,6 +280,12 @@ class InnerNetwork::Impl final
 
         ClearError(last_error_message_);
         return NodeErrorCode::None;
+    }
+
+    [[nodiscard]] NodeErrorCode StartConnector(std::string_view connector_id)
+    {
+        const std::array<std::string_view, 1> connector_ids{connector_id};
+        return Run(connector_ids);
     }
 
     [[nodiscard]] NodeErrorCode Uninit() noexcept
@@ -716,6 +765,16 @@ NodeErrorCode InnerNetwork::Run()
     return impl_->Run();
 }
 
+NodeErrorCode InnerNetwork::Run(std::span<const std::string_view> connector_ids)
+{
+    if (impl_ != nullptr)
+    {
+        return impl_->Run(connector_ids);
+    }
+
+    return NodeErrorCode::InvalidArgument;
+}
+
 NodeErrorCode InnerNetwork::Uninit()
 {
     if (impl_ != nullptr)
@@ -745,6 +804,16 @@ NodeErrorCode InnerNetwork::SendToConnector(
     if (impl_ != nullptr)
     {
         return impl_->SendToConnector(connector_id, payload);
+    }
+
+    return NodeErrorCode::InvalidArgument;
+}
+
+NodeErrorCode InnerNetwork::StartConnector(std::string_view connector_id)
+{
+    if (impl_ != nullptr)
+    {
+        return impl_->StartConnector(connector_id);
     }
 
     return NodeErrorCode::InvalidArgument;

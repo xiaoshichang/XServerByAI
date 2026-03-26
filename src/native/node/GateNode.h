@@ -50,12 +50,19 @@ class GateNode final : public ServerNode
     void HandleGameMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
+    void HandleGameRegisterMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
+    void HandleGameHeartbeatMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
     void HandleClusterReadyNotify(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
     void HandleHeartbeatResponse(const xs::net::PacketView& packet);
     [[nodiscard]] bool SendRegisterRequest();
     [[nodiscard]] bool SendHeartbeatRequest();
     void ResetGmSessionState();
+    void ResetGameSessionStates();
     void ResetClusterReadyState();
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;

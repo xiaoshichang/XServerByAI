@@ -224,10 +224,11 @@ NodeErrorCode GameNode::OnRun()
         return SetError(NodeErrorCode::InvalidArgument, "Game node must be initialized before Run().");
     }
 
-    const NodeErrorCode inner_result = RunInnerNetwork();
+    const std::array<std::string_view, 1> initial_connectors{kGmRemoteNodeId};
+    const NodeErrorCode inner_result = inner_network()->Run(initial_connectors);
     if (inner_result != NodeErrorCode::None)
     {
-        return inner_result;
+        return SetError(inner_result, std::string(inner_network()->last_error_message()));
     }
 
     const std::array<xs::core::LogContextField, 3> context{
@@ -328,6 +329,12 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
         xs::core::LogContextField{"gateInnerState", std::string(ipc::ZmqConnectionStateName(state))},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed Gate inner connection state change.", context);
+
+    if (state == ipc::ZmqConnectionState::Connected && all_nodes_online_ &&
+        !session->registered && !session->register_in_flight)
+    {
+        (void)SendGateRegisterRequest(gate_node_id);
+    }
 }
 
 void GameNode::HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload)
@@ -450,10 +457,84 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         return;
     }
 
-    const std::array<xs::core::LogContextField, 3> context{
+    xs::net::PacketView packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
+            xs::core::LogContextField{"packetError", session->last_protocol_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node ignored malformed Gate inner packet.", context);
+        return;
+    }
+
+    const auto log_invalid_response_envelope = [&](std::string_view protocol_error, std::string_view log_message) {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+        };
+        session->last_protocol_error = std::string(protocol_error);
+        logger().Log(xs::core::LogLevel::Warn, "inner", log_message, context);
+    };
+
+    if (packet.header.seq == xs::net::kPacketSeqNone)
+    {
+        log_invalid_response_envelope(
+            "Gate response envelope is invalid.",
+            "Game node ignored Gate response with an invalid envelope.");
+        return;
+    }
+
+    if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+    {
+        if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
+        {
+            log_invalid_response_envelope(
+                "Gate response envelope is invalid.",
+                "Game node ignored Gate response with an invalid envelope.");
+            return;
+        }
+
+        HandleGateRegisterResponse(gate_node_id, packet);
+        return;
+    }
+
+    if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+    {
+        if (packet.header.flags != kResponseFlags)
+        {
+            log_invalid_response_envelope(
+                "Gate heartbeat response envelope is invalid.",
+                "Game node ignored Gate heartbeat response with an invalid envelope.");
+            return;
+        }
+
+        HandleGateHeartbeatResponse(gate_node_id, packet);
+        return;
+    }
+
+    if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
+    {
+        log_invalid_response_envelope(
+            "Gate response envelope is invalid.",
+            "Game node ignored Gate response with an invalid envelope.");
+        return;
+    }
+
+    const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-        xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
+        xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+        xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.", context);
 }
@@ -520,6 +601,11 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
     all_nodes_online_ = notify.all_nodes_online;
     last_cluster_nodes_online_server_now_unix_ms_ = notify.server_now_unix_ms;
     session->last_protocol_error.clear();
+
+    if (notify.all_nodes_online)
+    {
+        StartGateConnectors();
+    }
 
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"allNodesOnline", notify.all_nodes_online ? "true" : "false"},
@@ -761,7 +847,7 @@ bool GameNode::SendRegisterRequest()
         return false;
     }
 
-    const std::uint32_t seq = ConsumeNextInnerSequence();
+    const std::uint32_t seq = ConsumeNextInnerSequence(session);
     const xs::net::PacketHeader header = xs::net::MakePacketHeader(
         xs::net::kInnerRegisterMsgId,
         seq,
@@ -842,7 +928,7 @@ bool GameNode::SendHeartbeatRequest()
         return false;
     }
 
-    const std::uint32_t seq = ConsumeNextInnerSequence();
+    const std::uint32_t seq = ConsumeNextInnerSequence(session);
     const xs::net::PacketHeader header = xs::net::MakePacketHeader(
         xs::net::kInnerHeartbeatMsgId,
         seq,
@@ -890,6 +976,418 @@ bool GameNode::SendHeartbeatRequest()
     return true;
 }
 
+void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const xs::net::PacketView& packet)
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    if (session->register_seq == 0U || packet.header.seq != session->register_seq)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"expectedSeq", std::to_string(session->register_seq)},
+        };
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale Gate register response.", context);
+        return;
+    }
+
+    session->register_in_flight = false;
+    session->register_seq = 0U;
+
+    if (packet.header.flags == kErrorResponseFlags)
+    {
+        xs::net::RegisterErrorResponse response{};
+        const xs::net::RegisterCodecErrorCode decode_result =
+            xs::net::DecodeRegisterErrorResponse(packet.payload, &response);
+        if (decode_result != xs::net::RegisterCodecErrorCode::None)
+        {
+            const std::array<xs::core::LogContextField, 5> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
+                xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+                xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+                xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+                xs::core::LogContextField{
+                    "codecError",
+                    std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
+                },
+            };
+            session->registered = false;
+            session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate register error response.", context);
+            return;
+        }
+
+        session->registered = false;
+        session->last_protocol_error =
+            "Gate rejected register request with error code " + std::to_string(response.error_code) + ".";
+
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"errorCode", std::to_string(response.error_code)},
+            xs::core::LogContextField{"retryAfterMs", std::to_string(response.retry_after_ms)},
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+        };
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "inner",
+            "Game node received Gate register error response.",
+            context);
+        return;
+    }
+
+    xs::net::RegisterSuccessResponse response{};
+    const xs::net::RegisterCodecErrorCode decode_result =
+        xs::net::DecodeRegisterSuccessResponse(packet.payload, &response);
+    if (decode_result != xs::net::RegisterCodecErrorCode::None)
+    {
+        session->registered = false;
+        session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
+
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{
+                "codecError",
+                std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
+            },
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate register success response.", context);
+        return;
+    }
+
+    session->registered = true;
+    session->heartbeat_interval_ms = response.heartbeat_interval_ms;
+    session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
+    session->last_server_now_unix_ms = response.server_now_unix_ms;
+    session->last_heartbeat_at_unix_ms = CurrentUnixTimeMilliseconds();
+    session->heartbeat_seq = 0U;
+    session->last_protocol_error.clear();
+
+    StartOrResetGateHeartbeatTimer(gate_node_id, response.heartbeat_interval_ms);
+
+    const std::array<xs::core::LogContextField, 6> context{
+        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
+        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate register success response.", context);
+}
+
+void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const xs::net::PacketView& packet)
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    if (session->heartbeat_seq == 0U || packet.header.seq != session->heartbeat_seq)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"expectedSeq", std::to_string(session->heartbeat_seq)},
+        };
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale Gate heartbeat response.", context);
+        return;
+    }
+
+    session->heartbeat_seq = 0U;
+
+    xs::net::HeartbeatSuccessResponse response{};
+    const xs::net::HeartbeatCodecErrorCode decode_result =
+        xs::net::DecodeHeartbeatSuccessResponse(packet.payload, &response);
+    if (decode_result != xs::net::HeartbeatCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{
+                "codecError",
+                std::string(xs::net::HeartbeatCodecErrorMessage(decode_result)),
+            },
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate heartbeat success response.", context);
+        return;
+    }
+
+    const bool heartbeat_config_changed =
+        session->heartbeat_interval_ms != response.heartbeat_interval_ms ||
+        session->heartbeat_timeout_ms != response.heartbeat_timeout_ms ||
+        session->heartbeat_timer_id == 0;
+
+    session->heartbeat_interval_ms = response.heartbeat_interval_ms;
+    session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
+    session->last_server_now_unix_ms = response.server_now_unix_ms;
+    session->last_heartbeat_at_unix_ms = CurrentUnixTimeMilliseconds();
+    session->last_protocol_error.clear();
+
+    if (heartbeat_config_changed)
+    {
+        StartOrResetGateHeartbeatTimer(gate_node_id, response.heartbeat_interval_ms);
+    }
+
+    const std::array<xs::core::LogContextField, 6> context{
+        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
+        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
+        xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate heartbeat success response.", context);
+}
+
+bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr || inner_network() == nullptr ||
+        session->connection_state != ipc::ZmqConnectionState::Connected ||
+        session->register_in_flight)
+    {
+        return false;
+    }
+
+    const xs::core::GameNodeConfig* config = game_config();
+    if (config == nullptr)
+    {
+        session->last_protocol_error = "Game node configuration is unavailable.";
+        return false;
+    }
+
+    const xs::net::RegisterRequest request{
+        .process_type = static_cast<std::uint16_t>(xs::net::InnerProcessType::Game),
+        .process_flags = 0U,
+        .node_id = std::string(node_id()),
+        .pid = pid(),
+        .started_at_unix_ms = runtime_state_.started_at_unix_ms,
+        .inner_network_endpoint = ToNetEndpoint(config->inner_network_listen_endpoint),
+        .build_version = std::string(kGameBuildVersion),
+        .capability_tags = {},
+        .load = xs::net::LoadSnapshot{},
+    };
+
+    std::size_t payload_size = 0U;
+    const xs::net::RegisterCodecErrorCode size_result =
+        xs::net::GetRegisterRequestWireSize(request, &payload_size);
+    if (size_result != xs::net::RegisterCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(size_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(size_result))},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size Gate register request.", context);
+        return false;
+    }
+
+    std::vector<std::byte> payload(payload_size);
+    const xs::net::RegisterCodecErrorCode encode_result = xs::net::EncodeRegisterRequest(request, payload);
+    if (encode_result != xs::net::RegisterCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(encode_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(encode_result))},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode Gate register request.", context);
+        return false;
+    }
+
+    const std::uint32_t seq = ConsumeNextInnerSequence(session);
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerRegisterMsgId,
+        seq,
+        0U,
+        static_cast<std::uint32_t>(payload.size()));
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(seq)},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap Gate register request into a packet.", context);
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(gate_node_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        session->last_protocol_error = std::string(inner_network()->last_error_message());
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(seq)},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send Gate register request.", context);
+        return false;
+    }
+
+    session->register_in_flight = true;
+    session->register_seq = seq;
+    session->last_protocol_error.clear();
+
+    const std::array<xs::core::LogContextField, 6> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+        xs::core::LogContextField{"seq", std::to_string(seq)},
+        xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
+        xs::core::LogContextField{"buildVersion", std::string(kGameBuildVersion)},
+        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent Gate register request.", context);
+    return true;
+}
+
+bool GameNode::SendGateHeartbeatRequest(std::string_view gate_node_id)
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr || inner_network() == nullptr || !session->registered ||
+        session->connection_state != ipc::ZmqConnectionState::Connected ||
+        session->heartbeat_seq != 0U)
+    {
+        return false;
+    }
+
+    const xs::net::HeartbeatRequest request{
+        .sent_at_unix_ms = CurrentUnixTimeMilliseconds(),
+        .status_flags = 0U,
+        .load = xs::net::LoadSnapshot{},
+    };
+
+    std::array<std::byte, xs::net::kHeartbeatRequestSize> payload{};
+    const xs::net::HeartbeatCodecErrorCode encode_result = xs::net::EncodeHeartbeatRequest(request, payload);
+    if (encode_result != xs::net::HeartbeatCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(encode_result));
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"codecError", std::string(xs::net::HeartbeatCodecErrorMessage(encode_result))},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode Gate heartbeat request.", context);
+        return false;
+    }
+
+    const std::uint32_t seq = ConsumeNextInnerSequence(session);
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kInnerHeartbeatMsgId,
+        seq,
+        0U,
+        static_cast<std::uint32_t>(payload.size()));
+    std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kHeartbeatRequestSize> packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(seq)},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap Gate heartbeat request into a packet.", context);
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(gate_node_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        session->last_protocol_error = std::string(inner_network()->last_error_message());
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+            xs::core::LogContextField{"seq", std::to_string(seq)},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send Gate heartbeat request.", context);
+        return false;
+    }
+
+    session->heartbeat_seq = seq;
+    session->last_protocol_error.clear();
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
+        xs::core::LogContextField{"seq", std::to_string(seq)},
+        xs::core::LogContextField{"sentAtUnixMs", ToString(request.sent_at_unix_ms)},
+        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent Gate heartbeat request.", context);
+    return true;
+}
+
+void GameNode::StartGateConnectors()
+{
+    if (inner_network() == nullptr)
+    {
+        return;
+    }
+
+    for (const auto& [gate_node_id, gate_config] : cluster_config().gates)
+    {
+        (void)gate_config;
+
+        const NodeErrorCode start_result = inner_network()->StartConnector(gate_node_id);
+        if (start_result != NodeErrorCode::None)
+        {
+            InnerNetworkSession* session = remote_session(gate_node_id);
+            if (session != nullptr)
+            {
+                session->last_protocol_error = std::string(inner_network()->last_error_message());
+            }
+
+            const std::array<xs::core::LogContextField, 4> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
+                xs::core::LogContextField{"gateNodeId", gate_node_id},
+                xs::core::LogContextField{"allNodesOnline", all_nodes_online_ ? "true" : "false"},
+                xs::core::LogContextField{"innerNetworkError", std::string(inner_network()->last_error_message())},
+            };
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to start Gate inner connector.", context);
+            continue;
+        }
+
+        InnerNetworkSession* session = remote_session(gate_node_id);
+        if (session != nullptr && session->connection_state == ipc::ZmqConnectionState::Connected &&
+            !session->registered && !session->register_in_flight)
+        {
+            (void)SendGateRegisterRequest(gate_node_id);
+        }
+    }
+}
+
 void GameNode::ResetRuntimeState() noexcept
 {
     runtime_state_ = RuntimeState{};
@@ -926,6 +1424,8 @@ void GameNode::ResetGateSessionStates()
             continue;
         }
 
+        CancelGateHeartbeatTimer(entry.node_id);
+
         InnerNetworkSession* session = remote_session(entry.node_id);
         if (session == nullptr)
         {
@@ -941,6 +1441,7 @@ void GameNode::ResetGateSessionStates()
         session->heartbeat_timeout_ms = 0U;
         session->last_server_now_unix_ms = 0U;
         session->last_heartbeat_at_unix_ms = 0U;
+        session->last_protocol_error.clear();
     }
 }
 
@@ -994,9 +1495,61 @@ void GameNode::CancelHeartbeatTimer() noexcept
     }
 }
 
-std::uint32_t GameNode::ConsumeNextInnerSequence() noexcept
+void GameNode::StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std::uint32_t interval_ms)
 {
-    InnerNetworkSession* session = gm_session();
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    CancelGateHeartbeatTimer(gate_node_id);
+
+    const std::string gate_node_id_text(gate_node_id);
+    const xs::core::TimerCreateResult timer_result =
+        event_loop().timers().CreateRepeating(std::chrono::milliseconds(interval_ms), [this, gate_node_id_text]() {
+            (void)SendGateHeartbeatRequest(gate_node_id_text);
+        });
+    if (!xs::core::IsTimerID(timer_result))
+    {
+        session->last_protocol_error =
+            "Failed to create Gate heartbeat timer: " +
+            std::string(xs::core::TimerErrorMessage(xs::core::TimerErrorFromCreateResult(timer_result)));
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gateNodeId", gate_node_id_text},
+            xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
+            xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "Game node failed to schedule Gate heartbeat timer.", context);
+        return;
+    }
+
+    session->heartbeat_timer_id = timer_result;
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"gateNodeId", gate_node_id_text},
+        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
+        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
+        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node scheduled Gate heartbeat timer.", context);
+}
+
+void GameNode::CancelGateHeartbeatTimer(std::string_view gate_node_id) noexcept
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session != nullptr && session->heartbeat_timer_id > 0)
+    {
+        (void)event_loop().timers().Cancel(session->heartbeat_timer_id);
+        session->heartbeat_timer_id = 0;
+    }
+}
+
+std::uint32_t GameNode::ConsumeNextInnerSequence(InnerNetworkSession* session) noexcept
+{
     if (session == nullptr)
     {
         return 1U;

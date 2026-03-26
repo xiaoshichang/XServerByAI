@@ -62,7 +62,7 @@
 10. M3-10 实现 Game 角色启动骨架与 GM Inner 链路接入。Deps: M3-01, M2-07 | 状态: 已完成
 11. M3-11 实现 Game→GM 注册与心跳。Deps: M3-10, M2-11, M2-12 | 状态: 已完成
 12. M3-12 实现 GM 在期望 `Game` / `Gate` 节点注册完成后下发“所有节点已上线”通知。Deps: M3-03, M3-06, M3-09, M3-11 | 状态: 已完成
-13. M3-13 实现 Gate 被动 `Inner` 接入，以及 `Game→Gate` 注册与心跳闭环。Deps: M3-08, M3-10, M2-08, M2-11, M2-12, M3-12 | 状态: 未开发
+13. M3-13 实现 Gate 被动 `Inner` 接入，以及 `Game→Gate` 注册与心跳闭环。Deps: M3-08, M3-10, M2-08, M2-11, M2-12, M3-12 | 状态: 开发中
 14. M3-14 实现 `Game→GM` 全部 `Gate` 全连接完成上报、GM ownership 下发，以及 ownership 驱动的本地 Stub 初始化挂点。Deps: M3-12, M3-13 | 状态: 未开发
 15. M3-15 实现 Game 服务就绪状态上报、GM 断线剔除、服务就绪聚合与 `clusterReady` 下发。Deps: M3-05, M3-14 | 状态: 未开发
 16. M3-16 基于 `M3-17` 脚本完成集群启动闭环集成验证：验证 `GM -> allNodesOnline -> Gate↔Game -> meshReady -> ownership -> GameReady -> clusterReady` 全流程。Deps: M3-15, M3-17 | 状态: 未开发
