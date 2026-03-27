@@ -161,6 +161,23 @@ std::string JoinPath(std::string_view parent, std::string_view child)
     return path;
 }
 
+std::filesystem::path ResolveConfigRelativePath(
+    const std::filesystem::path& config_base_path,
+    std::string_view raw_path)
+{
+    std::filesystem::path resolved_path{std::string(raw_path)};
+    if (resolved_path.is_absolute())
+    {
+        return resolved_path.lexically_normal();
+    }
+
+    if (config_base_path.empty())
+    {
+        return resolved_path.lexically_normal();
+    }
+
+    return (config_base_path / resolved_path).lexically_normal();
+}
 bool HasDigitsSuffix(std::string_view value, std::size_t prefix_length) noexcept
 {
     if (value.size() <= prefix_length)
@@ -799,10 +816,17 @@ bool ParseKcpConfig(const Json& value, KcpConfig* output, std::string_view path,
     return true;
 }
 
-bool ParseManagedConfig(const Json& value, ManagedConfig* output, std::string_view path, std::string* error_message)
+bool ParseManagedConfig(
+    const Json& value,
+    ManagedConfig* output,
+    const std::filesystem::path& config_base_path,
+    std::string_view path,
+    std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 1> kAllowedFields{
+    static constexpr std::array<std::string_view, 3> kAllowedFields{
         "assemblyName",
+        "assemblyPath",
+        "runtimeConfigPath",
     };
 
     if (output == nullptr)
@@ -830,11 +854,34 @@ bool ParseManagedConfig(const Json& value, ManagedConfig* output, std::string_vi
         }
     }
 
+    const auto parse_asset_path =
+        [&](std::string_view key, std::filesystem::path* output_path) {
+            const Json* member = nullptr;
+            if (!TryGetMember(value, key, &member))
+            {
+                return true;
+            }
+
+            std::string raw_path;
+            if (!ParseNonEmptyString(*member, JoinPath(path, key), &raw_path, error_message))
+            {
+                return false;
+            }
+
+            *output_path = ResolveConfigRelativePath(config_base_path, raw_path);
+            return true;
+        };
+
+    if (!parse_asset_path("assemblyPath", &config.assembly_path) ||
+        !parse_asset_path("runtimeConfigPath", &config.runtime_config_path))
+    {
+        return false;
+    }
+
     *output = std::move(config);
     ClearError(error_message);
     return true;
 }
-
 bool ParseGmConfig(
     const Json& value,
     GmConfig* output,
@@ -973,9 +1020,8 @@ bool ParseGameConfig(
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 2> kAllowedFields{
+    static constexpr std::array<std::string_view, 1> kAllowedFields{
         "innerNetwork",
-        "managed",
     };
 
     if (output == nullptr)
@@ -1014,20 +1060,10 @@ bool ParseGameConfig(
         return false;
     }
 
-    const Json* managed = nullptr;
-    if (TryGetMember(value, "managed", &managed))
-    {
-        if (!ParseManagedConfig(*managed, &config.managed, JoinPath(path, "managed"), error_message))
-        {
-            return false;
-        }
-    }
-
     *output = std::move(config);
     ClearError(error_message);
     return true;
 }
-
 bool ParseGateCollection(
     const Json& value,
     std::map<std::string, GateConfig, std::less<>>* output,
@@ -1160,10 +1196,11 @@ ConfigErrorCode LoadClusterConfigFile(
     ClusterConfig* output,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 6> kAllowedRootFields{
+    static constexpr std::array<std::string_view, 7> kAllowedRootFields{
         "env",
         "logging",
         "kcp",
+        "managed",
         "gm",
         "gate",
         "game",
@@ -1197,12 +1234,14 @@ ConfigErrorCode LoadClusterConfigFile(
     const Json* env = nullptr;
     const Json* logging = nullptr;
     const Json* kcp = nullptr;
+    const Json* managed = nullptr;
     const Json* gm = nullptr;
     const Json* gate = nullptr;
     const Json* game = nullptr;
     if (!GetRequiredMember(document, "env", &env, "root", &detail_error) ||
         !GetRequiredMember(document, "logging", &logging, "root", &detail_error) ||
         !GetRequiredMember(document, "kcp", &kcp, "root", &detail_error) ||
+        !GetRequiredMember(document, "managed", &managed, "root", &detail_error) ||
         !GetRequiredMember(document, "gm", &gm, "root", &detail_error) ||
         !GetRequiredMember(document, "gate", &gate, "root", &detail_error) ||
         !GetRequiredMember(document, "game", &game, "root", &detail_error))
@@ -1215,6 +1254,7 @@ ConfigErrorCode LoadClusterConfigFile(
     if (!ParseEnvConfig(*env, &cluster_config.env, "env", &detail_error) ||
         !ParseLoggingBlock(*logging, LoggingConfig{}, &cluster_config.logging, "logging", &detail_error) ||
         !ParseKcpConfig(*kcp, &cluster_config.kcp, "kcp", &detail_error) ||
+        !ParseManagedConfig(*managed, &cluster_config.managed, path.parent_path(), "managed", &detail_error) ||
         !ParseGmConfig(*gm, &cluster_config.gm, "gm", &detail_error) ||
         !ParseGateCollection(*gate, &cluster_config.gates, "gate", &detail_error) ||
         !ParseGameCollection(*game, &cluster_config.games, "game", &detail_error))
@@ -1290,7 +1330,7 @@ ConfigErrorCode SelectNodeConfig(
 
         auto node_config = std::make_unique<GameNodeConfig>();
         node_config->inner_network_listen_endpoint = iterator->second.inner_network_listen_endpoint;
-        node_config->managed = iterator->second.managed;
+        node_config->managed = cluster_config.managed;
         *output = std::move(node_config);
         break;
     }

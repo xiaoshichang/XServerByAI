@@ -12,7 +12,7 @@
 
 | 概念 | 说明 |
 | --- | --- |
-| `EntityKey` | 逻辑实体身份，由 `EntityType` 与领域内稳定主键组成，例如 `Player + playerId`、`Space + spaceId`。 |
+| `EntityID` | 逻辑实体实例身份；当前由 `ServerEntity` 在构造时生成 GUID，并在该实例生命周期内保持稳定。 |
 | `OwnerGameNodeId` | 当前承载某个实体活动实例的 `Game` 节点标识。任意时刻一个实体只能有一个活动 owner。 |
 | `Activation` | 某个逻辑实体在 `Game` 进程中的运行时实例。 |
 | `MobilityType` | 实体迁移属性，取值为 `Migratable` 或 `Pinned`。 |
@@ -30,15 +30,15 @@
 | `ServerEntity` | `PlayerEntity`、`SpaceEntity`、`NpcEntity` | `Game` | 承载业务权威状态，维护属性、生命周期、同步与持久化边界。 |
 | `ServerStubEntity` | `MatchService`、`ChatService`、`LeaderboardService` | `Game` | 承载集群内全局服务语义；其 owner 由 `GM` 在启动阶段统一分配，运行期默认不迁移。 |
 
-`ServerStubEntity` 继承自 `ServerEntity`，但它不是“普通工具单例”，而是可被消息寻址、可参与生命周期管理、可参与 ready 判定的正式业务实体。
+`ServerStubEntity` 继承自 `ServerEntity`，但它不是“普通工具单例”，而是可被消息寻址、可参与生命周期管理、可参与 ready 判定的正式业务实体。启动编排阶段，`GM` 先以 `entityId = unknown` 分配 Stub owner；真实 GUID ID 由 `Game` 创建本地实体实例后生成，并在 ready 上报时回填给 `GM`。
 
 **启动编排与 ownership**
 1. `GM` 必须先进入 `InnerNetwork` 监听状态，然后等待期望的 `Game` 与 `Gate` 节点完成到 `GM` 的注册与心跳闭环。
 2. `GM` 在确认必需节点到齐后，先通过 `Inner.ClusterNodesOnlineNotify (1204)` 向所有 `Game` 下发“所有节点已上线”的当前结论。
 3. `Game` 只有在收到 `allNodesOnline = true` 后，才允许向全部目标 `Gate` 完成注册与心跳闭环，并通过 `Inner.GameGateMeshReadyReport (1205)` 向 `GM` 报告 mesh ready。
-4. `GM` 在聚合全部必需 `Game` 的 mesh ready 结果后，统一决定 `ServerStubEntity -> OwnerGameNodeId` 映射，并通过 `Inner.ServerStubOwnershipSync (1202)` 以全量分配表的形式下发给所有 `Game`。当前实现只随机生成一次 bootstrap 分配表，后续仅复用该表进行同步。
+4. `GM` 在聚合全部必需 `Game` 的 mesh ready 结果后，统一决定 `ServerStubEntity -> OwnerGameNodeId` 映射，并通过 `Inner.ServerStubOwnershipSync (1202)` 以全量分配表的形式下发给所有 `Game`。当前实现只随机生成一次 bootstrap 分配表，后续仅复用该表进行同步；在实例尚未创建前，Stub 的 `entityId` 先使用占位值 `unknown`。
 5. `Game` 只能在收到当前 `assignmentEpoch` 的 ownership 后，初始化自己负责的 `ServerStubEntity` 托管逻辑；不得自行猜测或抢先承载。
-6. `Game` 在本地 owned `ServerStubEntity` ready 后，才能通过 `Inner.GameServiceReadyReport (1203)` 向 `GM` 报告 ready。
+6. `Game` 在本地 owned `ServerStubEntity` ready 后，才能通过 `Inner.GameServiceReadyReport (1203)` 向 `GM` 报告 ready；ready 条目必须携带该本地实例的真实 GUID `entityId`，供 `GM` 更新 Stub 状态表。
 7. `GM` 聚合所有必需 `Game` 的 ready 结果后，向全部 `Gate` 下发 `Inner.ClusterReadyNotify (1201)`。
 8. `Gate` 只有在收到最新 `clusterReady = true` 后，才允许真正打开 `ClientNetwork`；它不能因为本地配置齐全、已连接 `GM`、已拿到部分目录或局部链路健康，就提前开放客户端入口。
 

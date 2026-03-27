@@ -1,5 +1,6 @@
 #include "Config.h"
 #include "Json.h"
+#include "TestManagedConfigJson.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -98,6 +99,7 @@ xs::core::Json MakeValidClusterConfigJson()
              {"deadLinkCount", 20},
              {"streamMode", false},
          }},
+        {"managed", xs::tests::MakeManagedConfigJson()},
         {"gm",
          xs::core::Json{
              {"innerNetwork",
@@ -136,8 +138,6 @@ xs::core::Json MakeValidClusterConfigJson()
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
                    }},
-                  {"managed",
-                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
               }},
          }},
     };
@@ -386,6 +386,12 @@ void TestLoadNodeConfigForGame()
         XS_CHECK(game_node_config->inner_network_listen_endpoint.host == "127.0.0.1");
         XS_CHECK(game_node_config->inner_network_listen_endpoint.port == 7100);
         XS_CHECK(game_node_config->managed.assembly_name == "XServer.Managed.GameLogic");
+        XS_CHECK(
+            game_node_config->managed.assembly_path ==
+            std::filesystem::path{XS_TEST_GAMELOGIC_ASSEMBLY_PATH}.lexically_normal());
+        XS_CHECK(
+            game_node_config->managed.runtime_config_path ==
+            std::filesystem::path{XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH}.lexically_normal());
     }
 
     CleanupTestDirectory(base_path);

@@ -52,18 +52,18 @@
 | Field | Type | Description |
 | --- | --- | --- |
 | `entityType` | `string` | Stub 实体类型，例如 `MatchService`、`ChatService` |
-| `entityKey` | `string` | 同类型内稳定的 Stub 实例标识 |
+| `entityId` | `string` | Stub 实例标识；启动期 ownership 中默认使用占位值 `unknown`，待 `Game` 创建本地实例后再由 ready 上报回填真实 GUID ID |
 | `ownerGameNodeId` | `string` | 当前负责承载该 Stub 的 `Game` `NodeID` |
 | `entryFlags` | `uint32` | 保留，当前必须为 `0` |
 
-`(entityType, entityKey)` 共同唯一标识一个 `ServerStubEntity` 实例。
+`(entityType, entityId)` 在真实 ID 已经分配后共同唯一标识一个 `ServerStubEntity` 实例。启动期 `entityId = unknown` 仅作为占位值，不应被视为长期稳定身份。
 
 **结构：ServerStubReadyEntry**
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `entityType` | `string` | Stub 实体类型 |
-| `entityKey` | `string` | 同类型内稳定的 Stub 实例标识 |
+| `entityId` | `string` | 当前 ready Stub 的真实实例标识；必须由 `Game` 使用本地实例 GUID ID 填充，不能为 `unknown` |
 | `ready` | `bool` | 当前 Stub 是否已 ready |
 | `entryFlags` | `uint32` | 保留，当前必须为 `0` |
 
@@ -154,7 +154,8 @@
 **Inner.ServerStubOwnershipSync（`msgId = 1202`）**
 1. 发送时机：`GM` 在当前 `allNodesOnline = true` 且聚合全部必需 `Game` 的 `meshReady = true` 结果后，向全部 `Game` 下发当前 `ServerStubEntity` ownership 快照。
 2. 关键语义：接收方只接受不旧于当前 `assignmentEpoch` 的全量快照；`assignments` 必须是一张完整的 `ServerStubEntity -> OwnerGameNodeId` 分配表。当前阶段 `GM` 只构建一次 bootstrap 分配表，因此 `assignmentEpoch` 固定为 `1`。
-3. 使用方式：`Game` 收到后只初始化分配给自己的 Stub；它在进入该步骤前，应已经具备与全部目标 `Gate` 的可用通信链路。当前阶段 `GM` 先采用最简单的随机分配策略，后续可扩展为基于负载的分配策略，但不改变 `1202` 的全量表语义。
+3. `1202` 中的 `entityId` 在启动目录阶段允许为占位值 `unknown`，表示 owner 已决定但具体本地实例 ID 仍待对应 `Game` 创建后确认。
+4. 使用方式：`Game` 收到后只初始化分配给自己的 Stub；它在进入该步骤前，应已经具备与全部目标 `Gate` 的可用通信链路。当前阶段 `GM` 先采用最简单的随机分配策略，后续可扩展为基于负载的分配策略，但不改变 `1202` 的全量表语义。
 
 通知体：
 
@@ -168,7 +169,8 @@
 **Inner.GameServiceReadyReport（`msgId = 1203`）**
 1. 发送时机：`Game` 只有在当前 `assignmentEpoch` 下完成本地 Stub 初始化，并聚合出自身所有必需 `ServerStubEntity` 的 ready 结果后，才允许向 `GM` 上报本地 ready 结果。
 2. 关键语义：`localReady = true` 表示该 `Game` 在当前 `assignmentEpoch` 下已经满足对外服务前提。
-3. 聚合语义：`GM` 必须按 `nodeId + assignmentEpoch` 聚合；旧轮次 ready 上报不得混入新一轮 ownership 结论。
+3. `entries` 中每条记录都必须携带真实的 `entityId`；该 key 来自本地 `ServerEntity` / `ServerStubEntity` 实例构造时生成的 GUID，不能沿用 `1202` 中的占位 `unknown`。
+4. 聚合语义：`GM` 必须按 `nodeId + assignmentEpoch` 聚合；旧轮次 ready 上报不得混入新一轮 ownership 结论，并且在匹配成功后需要用 ready 条目中的真实 ID 更新自己的 Stub 状态表。
 
 上报体：
 

@@ -1,6 +1,7 @@
 #include "GateNode.h"
 #include "GmNode.h"
 #include "Json.h"
+#include "TestManagedConfigJson.h"
 #include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
@@ -218,6 +219,7 @@ xs::core::Json MakeClusterConfigJson(
              {"deadLinkCount", 20},
              {"streamMode", false},
          }},
+        {"managed", xs::tests::MakeManagedConfigJson()},
         {"gm",
          xs::core::Json{
              {"innerNetwork",
@@ -256,8 +258,6 @@ xs::core::Json MakeClusterConfigJson(
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", game_inner_port}}},
                    }},
-                  {"managed",
-                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
               }},
          }},
     };

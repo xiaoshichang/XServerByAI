@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -19,6 +20,12 @@ inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNat
 inline constexpr std::string_view kManagedGameInitMethodName = "GameNativeInit";
 inline constexpr std::string_view kManagedGameOnMessageMethodName = "GameNativeOnMessage";
 inline constexpr std::string_view kManagedGameOnTickMethodName = "GameNativeOnTick";
+inline constexpr std::string_view kManagedGameGetServerStubCatalogCountMethodName =
+    "GameNativeGetServerStubCatalogCount";
+inline constexpr std::string_view kManagedGameGetServerStubCatalogEntryMethodName =
+    "GameNativeGetServerStubCatalogEntry";
+inline constexpr std::size_t XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES = 128u;
+inline constexpr std::size_t XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES = 128u;
 
 struct ManagedInitArgs
 {
@@ -45,10 +52,23 @@ struct ManagedMessageView
     std::uint32_t reserved0;
 };
 
+struct ManagedServerStubCatalogEntry
+{
+    std::uint32_t struct_size{sizeof(ManagedServerStubCatalogEntry)};
+    std::uint32_t entity_type_length{0u};
+    std::uint8_t entity_type_utf8[XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES]{};
+    std::uint32_t entity_id_length{0u};
+    std::uint8_t entity_id_utf8[XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES]{};
+    std::uint32_t reserved0{0u};
+};
+
 using ManagedGetAbiVersionFn = std::uint32_t (XS_MANAGED_CALLTYPE*)();
 using ManagedInitFn = std::int32_t (XS_MANAGED_CALLTYPE*)(const ManagedInitArgs* args);
 using ManagedOnMessageFn = std::int32_t (XS_MANAGED_CALLTYPE*)(const ManagedMessageView* message);
 using ManagedOnTickFn = std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint64_t now_unix_ms_utc, std::uint32_t delta_ms);
+using ManagedGetServerStubCatalogCountFn = std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint32_t* count);
+using ManagedGetServerStubCatalogEntryFn =
+    std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint32_t index, ManagedServerStubCatalogEntry* entry);
 
 struct ManagedGameExports
 {
@@ -57,6 +77,13 @@ struct ManagedGameExports
     ManagedInitFn init{nullptr};
     ManagedOnMessageFn on_message{nullptr};
     ManagedOnTickFn on_tick{nullptr};
+};
+
+struct ManagedServerStubCatalogExports
+{
+    std::uint32_t abi_version{0};
+    ManagedGetServerStubCatalogCountFn get_count{nullptr};
+    ManagedGetServerStubCatalogEntryFn get_entry{nullptr};
 };
 
 } // namespace xs::host

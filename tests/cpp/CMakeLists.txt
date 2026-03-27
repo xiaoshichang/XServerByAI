@@ -306,6 +306,24 @@ xs_add_managed_runtime_asset(
     "InteropMissingExports"
 )
 
+function(xs_use_gamelogic_runtime_assets target_name)
+    add_dependencies(${target_name} xs_managed_gamelogic_runtime_assets)
+    target_compile_definitions(${target_name} PRIVATE
+        XS_TEST_GAMELOGIC_ASSEMBLY_PATH="${xs_managed_gamelogic_runtime_assets_ASSEMBLY_PATH}"
+        XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH="${xs_managed_gamelogic_runtime_assets_RUNTIMECONFIG_PATH}"
+    )
+endfunction()
+
+function(xs_copy_windows_nethost_dll target_name)
+    if (WIN32)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/3rd/dotnet_host/win-x64/nethost.dll"
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+endfunction()
+
 ###############################
 # xs_host_runtime_tests
 ###############################
@@ -331,11 +349,24 @@ target_compile_definitions(xs_host_runtime_tests PRIVATE
     XS_TEST_GAMELOGIC_MISSING_EXPORTS_RUNTIMECONFIG_PATH="${xs_managed_interop_missing_exports_runtime_assets_RUNTIMECONFIG_PATH}"
 )
 
-if (WIN32)
-    add_custom_command(TARGET xs_host_runtime_tests POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_SOURCE_DIR}/3rd/dotnet_host/win-x64/nethost.dll"
-            $<TARGET_FILE_DIR:xs_host_runtime_tests>
-    )
-endif()
+xs_copy_windows_nethost_dll(xs_host_runtime_tests)
 add_test(NAME xs_host_runtime_tests COMMAND xs_host_runtime_tests)
+
+xs_use_gamelogic_runtime_assets(xs_core_json_tests)
+xs_use_gamelogic_runtime_assets(xs_node_create_helper_tests)
+xs_use_gamelogic_runtime_assets(xs_node_gm_node_tests)
+xs_use_gamelogic_runtime_assets(xs_node_gm_register_tests)
+xs_use_gamelogic_runtime_assets(xs_node_game_node_tests)
+xs_use_gamelogic_runtime_assets(xs_node_gate_node_tests)
+xs_use_gamelogic_runtime_assets(xs_node_gate_gm_session_tests)
+xs_use_gamelogic_runtime_assets(xs_node_game_gm_session_tests)
+
+xs_copy_windows_nethost_dll(xs_node_create_helper_tests)
+xs_copy_windows_nethost_dll(xs_node_gm_node_tests)
+xs_copy_windows_nethost_dll(xs_node_gm_register_tests)
+xs_copy_windows_nethost_dll(xs_node_game_node_tests)
+xs_copy_windows_nethost_dll(xs_node_gate_node_tests)
+xs_copy_windows_nethost_dll(xs_node_gate_gm_session_tests)
+xs_copy_windows_nethost_dll(xs_node_game_gm_session_tests)
+xs_copy_windows_nethost_dll(xs_node_inner_network_tests)
+xs_copy_windows_nethost_dll(xs_node_inner_network_session_manager_tests)

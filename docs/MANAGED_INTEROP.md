@@ -1,9 +1,9 @@
-﻿# MANAGED_INTEROP
+# MANAGED_INTEROP
 
 本文档定义 XServerByAI 当前阶段 native `Game` 宿主与 managed `GameLogic` 程序集之间的互操作入口签名、ABI 版本与调用约定。后续 `M5-01`、`M5-02`、`M6-01` 与 `M6-02` 在实现 `nethost` 加载、函数指针绑定、blittable 封送与 `Game` 进程调用 managed 入口时，应以本文件作为统一基线。
 
 **适用范围**
-1. 当前阶段只有 `Game` 进程宿主 CLR；`GM` 与 `Gate` 不直接调用 managed 业务程序集，除非后续条目显式扩展。
+1. 当前阶段 `Game` 进程宿主 CLR 业务入口；`GM` 会按需加载同一 `GameLogic` 程序集读取 ServerStub catalog，但不会运行 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 业务循环；`Gate` 不直接调用 managed 业务程序集。
 2. 当前只定义 native 与 managed 的入口 ABI，不定义 managed 到 native 的回调表；后续如需日志桥接、主动回传或持久化回调，应在兼容 ABI 的前提下扩展。
 3. 当前 contract 覆盖程序集身份、导出类型名、函数签名、结构布局、字符串编码、错误返回与调用时序。
 4. 业务消息编号、会话/实体路由与错误码责任域分别复用 `docs/MSG_ID.md`、`docs/SESSION_ROUTING.md`、`docs/DISTRIBUTED_ENTITY.md` 与 `docs/ERROR_CODE.md`，本文件不重复定义业务语义。
@@ -97,6 +97,18 @@ using ManagedGetAbiVersionFn = uint32_t (*)();
 using ManagedInitFn = int32_t (*)(const ManagedInitArgs* args);
 using ManagedOnMessageFn = int32_t (*)(const ManagedMessageView* message);
 using ManagedOnTickFn = int32_t (*)(uint64_t nowUnixMsUtc, uint32_t deltaMs);
+
+struct ManagedServerStubCatalogEntry {
+  uint32_t structSize;
+  uint32_t entityTypeLength;
+  uint8_t entityTypeUtf8[128];
+  uint32_t entityIdLength;
+  uint8_t entityIdUtf8[128];
+  uint32_t reserved0;
+};
+
+using ManagedGetServerStubCatalogCountFn = int32_t (*)(uint32_t* count);
+using ManagedGetServerStubCatalogEntryFn = int32_t (*)(uint32_t index, ManagedServerStubCatalogEntry* entry);
 ```
 
 managed 侧等价导出形式应如下：
@@ -147,6 +159,12 @@ public static unsafe class GameNativeExports
 
     [UnmanagedCallersOnly(EntryPoint = "GameNativeOnTick", CallConvs = [typeof(CallConvCdecl)])]
     public static int GameNativeOnTick(ulong nowUnixMsUtc, uint deltaMs) => 0;
+
+    [UnmanagedCallersOnly(EntryPoint = "GameNativeGetServerStubCatalogCount", CallConvs = [typeof(CallConvCdecl)])]
+    public static int GameNativeGetServerStubCatalogCount(uint* count) => 0;
+
+    [UnmanagedCallersOnly(EntryPoint = "GameNativeGetServerStubCatalogEntry", CallConvs = [typeof(CallConvCdecl)])]
+    public static int GameNativeGetServerStubCatalogEntry(uint index, ManagedServerStubCatalogEntry* entry) => 0;
 }
 ```
 
@@ -178,3 +196,10 @@ public static unsafe class GameNativeExports
 2. `M5-02` 的函数指针绑定应只绑定本文件列出的首版导出入口，不应临时拼装额外私有入口名。
 3. `M6-01` 的 blittable 封送实现应直接复用 `ManagedInitArgs` 与 `ManagedMessageView` 的字段顺序和基础类型语义。
 4. `M6-02` 的 `Game` 进程托管调用只应调用本文件定义的 `GameNativeInit`、`GameNativeOnMessage`、`GameNativeOnTick`，并在此之前完成 ABI 校验。
+
+**Stub Catalog 导出**
+1. `GameNativeGetServerStubCatalogCount` 供 native 读取当前程序集导出的 Stub 数量；返回 `0` 表示成功，非零表示目录读取失败。
+2. `GameNativeGetServerStubCatalogEntry` 按索引返回单条 Stub 目录项；目录项当前包含 `entityType` 与 `entityId` 两个 UTF-8 字段，其中 `entityId` 在启动目录阶段固定返回占位值 `unknown`。
+3. 当前 `GM` 通过这两个导出完成 ServerStub catalog 发现，再在 native 侧分配 ownership 并维护 `Init` / `Ready` 状态；反射逻辑仍留在 managed 程序集中。
+4. 真实的运行时实体 ID 来自 managed `ServerEntity.EntityId`，由实例构造时生成 GUID；`Game` 在 `Inner.GameServiceReadyReport (1203)` 中上报该 ID，`GM` 据此把状态表中的占位 `unknown` 更新为真实实例 ID。
+5. catalog 导出与 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 共用同一 ABI 版本与导出类型名。

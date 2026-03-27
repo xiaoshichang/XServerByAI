@@ -1,4 +1,4 @@
-﻿# 项目说明（初版）
+# 项目说明（初版）
 
 本文档描述 XServerByAI 当前阶段的目标、节点拓扑、网络分层与关键技术边界。当前阶段以“统一节点入口 + 配置基线 + 协议骨架 + 运行时骨架”为主，不展开完整业务玩法实现。
 
@@ -53,12 +53,12 @@
 4. `kill` 命令当前只覆盖 Windows，按“配置路径 + `NodeID` + `xserver-node.exe`”精确匹配并强制终止本机进程，不接入优雅退出流程。
 
 **配置模型**
-1. 顶层配置块固定为 `env`、`logging`、`kcp`、`gm`、`gate`、`game`。
-2. `logging` 与 `kcp` 是集群级公共配置。
+1. 顶层配置块固定为 `env`、`logging`、`kcp`、`managed`、`gm`、`gate`、`game`。
+2. `logging`、`kcp` 与 `managed` 是集群级公共配置。
 3. `gm.innerNetwork.listenEndpoint` 表示 `GM` 的内部监听地址。
 4. `gm.controlNetwork.listenEndpoint` 表示 `GM` 的本地 HTTP 管理接口监听地址。
 5. `gate.<NodeID>` 同时包含 `innerNetwork.listenEndpoint` 与 `clientNetwork.listenEndpoint`。
-6. `game.<NodeID>` 包含 `innerNetwork.listenEndpoint` 与可选 `managed.assemblyName`。
+6. `managed` 包含 `assemblyName`、`assemblyPath` 与 `runtimeConfigPath`，由 `GM` 与全部 `Game` 共用；`game.<NodeID>` 只包含实例级 `innerNetwork.listenEndpoint`。
 7. 当前仓库样例配置位于 `configs/local-dev.json`。
 
 **协议与运行时**
@@ -68,7 +68,7 @@
 4. `Gate` 的客户端路由语义见 `docs/SESSION_ROUTING.md` 与 `docs/GATE_GAME_ENVELOPE.md`。
 
 **托管互操作**
-1. 当前阶段只有 `Game` 进程承载 CLR。
+1. 当前阶段 `Game` 进程承载 CLR 业务入口；`GM` 会在启动编排阶段短暂加载 `GameLogic` 程序集读取 ServerStub catalog，但不会运行 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 业务循环。
 2. 默认托管程序集名为 `XServer.Managed.GameLogic`。
 3. `src/managed/Foundation` 承载通用契约与互操作共享类型，`src/managed/Framework` 承载 `ServerEntity` / `ServerStubEntity` 等分布式实体框架公共抽象，`src/managed/GameLogic` 承载业务逻辑并依赖 `Framework`。
 4. ABI 与导出函数约定见 `docs/MANAGED_INTEROP.md`。
@@ -78,4 +78,3 @@
 2. KCP：`docs/KCP_CONFIG.md`
 3. 启动顺序：`docs/STARTUP_FLOW.md`
 4. 分布式实体：`docs/DISTRIBUTED_ENTITY.md`
-

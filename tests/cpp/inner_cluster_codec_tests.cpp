@@ -155,13 +155,13 @@ void TestEncodeServerStubOwnershipSyncRoundTrip()
             {
                 xs::net::ServerStubOwnershipEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .owner_game_node_id = "Game0",
                     .entry_flags = 0u,
                 },
                 xs::net::ServerStubOwnershipEntry{
                     .entity_type = "ChatService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .owner_game_node_id = "Game1",
                     .entry_flags = 0u,
                 },
@@ -189,11 +189,11 @@ void TestEncodeServerStubOwnershipSyncRoundTrip()
     XS_CHECK(decoded.server_now_unix_ms == sync.server_now_unix_ms);
     XS_CHECK(decoded.assignments.size() == sync.assignments.size());
     XS_CHECK(decoded.assignments[0].entity_type == "MatchService");
-    XS_CHECK(decoded.assignments[0].entity_key == "default");
+    XS_CHECK(decoded.assignments[0].entity_id == "default");
     XS_CHECK(decoded.assignments[0].owner_game_node_id == "Game0");
     XS_CHECK(decoded.assignments[0].entry_flags == 0u);
     XS_CHECK(decoded.assignments[1].entity_type == "ChatService");
-    XS_CHECK(decoded.assignments[1].entity_key == "default");
+    XS_CHECK(decoded.assignments[1].entity_id == "default");
     XS_CHECK(decoded.assignments[1].owner_game_node_id == "Game1");
     XS_CHECK(decoded.assignments[1].entry_flags == 0u);
 }
@@ -208,13 +208,13 @@ void TestEncodeGameServiceReadyReportRoundTrip()
             {
                 xs::net::ServerStubReadyEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .ready = true,
                     .entry_flags = 0u,
                 },
                 xs::net::ServerStubReadyEntry{
                     .entity_type = "LeaderboardService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .ready = true,
                     .entry_flags = 0u,
                 },
@@ -243,11 +243,11 @@ void TestEncodeGameServiceReadyReportRoundTrip()
     XS_CHECK(decoded.reported_at_unix_ms == report.reported_at_unix_ms);
     XS_CHECK(decoded.entries.size() == report.entries.size());
     XS_CHECK(decoded.entries[0].entity_type == "MatchService");
-    XS_CHECK(decoded.entries[0].entity_key == "default");
+    XS_CHECK(decoded.entries[0].entity_id == "default");
     XS_CHECK(decoded.entries[0].ready);
     XS_CHECK(decoded.entries[0].entry_flags == 0u);
     XS_CHECK(decoded.entries[1].entity_type == "LeaderboardService");
-    XS_CHECK(decoded.entries[1].entity_key == "default");
+    XS_CHECK(decoded.entries[1].entity_id == "default");
     XS_CHECK(decoded.entries[1].ready);
     XS_CHECK(decoded.entries[1].entry_flags == 0u);
 }
@@ -376,7 +376,7 @@ void TestRejectsServerStubOwnershipSyncSemanticViolationsAndMalformedBuffers()
             {
                 xs::net::ServerStubOwnershipEntry{
                     .entity_type = "LeaderboardService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .owner_game_node_id = "Game0",
                     .entry_flags = 0u,
                 },
@@ -429,7 +429,7 @@ void TestRejectsGameServiceReadyReportSemanticViolationsAndMalformedBuffers()
             {
                 xs::net::ServerStubReadyEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .ready = true,
                     .entry_flags = 0u,
                 },
@@ -461,7 +461,7 @@ void TestRejectsGameServiceReadyReportSemanticViolationsAndMalformedBuffers()
         sizeof(std::uint32_t) +
         sizeof(std::uint32_t) +
         sizeof(std::uint16_t) + valid_report.entries[0].entity_type.size() +
-        sizeof(std::uint16_t) + valid_report.entries[0].entity_key.size();
+        sizeof(std::uint16_t) + valid_report.entries[0].entity_id.size();
 
     std::vector<std::byte> invalid_entry_ready = buffer;
     invalid_entry_ready[entry_ready_offset] = std::byte{0x02};
@@ -574,7 +574,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubReadyEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .ready = true,
                     .entry_flags = 0u,
                 },
@@ -594,7 +594,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubReadyEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .ready = true,
                     .entry_flags = 1u,
                 },
@@ -613,7 +613,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubReadyEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .ready = true,
                     .entry_flags = 0u,
                 },
@@ -644,7 +644,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubReadyEntry{
                     .entity_type = std::string(static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()) + 1u, 'A'),
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .ready = true,
                     .entry_flags = 0u,
                 },
@@ -662,7 +662,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubOwnershipEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .owner_game_node_id = "Game0",
                     .entry_flags = 0u,
                 },
@@ -680,7 +680,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubOwnershipEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .owner_game_node_id = "Game0",
                     .entry_flags = 1u,
                 },
@@ -698,7 +698,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubOwnershipEntry{
                     .entity_type = "MatchService",
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .owner_game_node_id = "Game0",
                     .entry_flags = 0u,
                 },
@@ -729,7 +729,7 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
             {
                 xs::net::ServerStubOwnershipEntry{
                     .entity_type = std::string(static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()) + 1u, 'A'),
-                    .entity_key = "default",
+                    .entity_id = "default",
                     .owner_game_node_id = "Game0",
                     .entry_flags = 0u,
                 },

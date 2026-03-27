@@ -47,9 +47,9 @@
 | `13` | `Game` | `Gate` | `Inner.NodeHeartbeat (1100)` | 已登记消息 | `Game` 在注册成功后对该 `Gate` 进入周期心跳 |
 | `14` | `Gate` | `Game` | `Inner.NodeHeartbeat (1100)` response | 已登记消息 | `Gate` 确认该 `Game` 针对自己的注册仍然有效 |
 | `15` | `Game` | `GM` | `Inner.GameGateMeshReadyReport (1205)` | 已登记消息 | `Game` 在收到 `allNodesOnline = true` 并完成到全部目标 `Gate` 的注册/心跳闭环后，向 `GM` 报告自身 mesh ready 结论；该上报不携带额外业务元信息 |
-| `16` | `GM` | `Game` | `Inner.ServerStubOwnershipSync (1202)` | 已登记消息 | `GM` 在聚合全部必需 `Game` 的 mesh ready 结果后，下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照；当前实现只随机生成一次 bootstrap 分配表，`assignmentEpoch` 固定为 `1` |
-| `17` | `Game` | - | - | 本地状态切换 | `Game` 基于最新 `assignmentEpoch` 初始化本地托管逻辑与分配给自己的 `ServerStubEntity` |
-| `18` | `Game` | `GM` | `Inner.GameServiceReadyReport (1203)` | 已登记消息 | `Game` 在自身负责的 `ServerStubEntity` ready 后，向 `GM` 上报当前 `assignmentEpoch` 下的本地 ready 结果 |
+| `16` | `GM` | `Game` | `Inner.ServerStubOwnershipSync (1202)` | 已登记消息 | `GM` 在聚合全部必需 `Game` 的 mesh ready 结果后，下发 `ServerStubEntity -> OwnerGameNodeId` 的全量 ownership 快照；当前实现只随机生成一次 bootstrap 分配表，`assignmentEpoch` 固定为 `1`，且启动期 `entityId` 先使用占位值 `unknown` |
+| `17` | `Game` | - | - | 本地状态切换 | `Game` 基于最新 `assignmentEpoch` 初始化本地托管逻辑与分配给自己的 `ServerStubEntity`，并在创建本地实例时为每个实体生成 GUID `EntityID` |
+| `18` | `Game` | `GM` | `Inner.GameServiceReadyReport (1203)` | 已登记消息 | `Game` 在自身负责的 `ServerStubEntity` ready 后，向 `GM` 上报当前 `assignmentEpoch` 下的本地 ready 结果，并携带真实实例 `entityId` 供 `GM` 回填状态表 |
 | `19` | `GM` | `Gate` | `Inner.ClusterReadyNotify (1201)` | 已登记消息 | `GM` 在聚合全部必需 `Game` 的 ready 结论后，下发集群是否 ready 的结果 |
 | `20` | `Gate` | - | - | 本地状态切换 | `Gate` 仅在收到最新 `clusterReady = true` 后打开 `gate.<NodeID>.clientNetwork.listenEndpoint` |
 

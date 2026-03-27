@@ -356,7 +356,7 @@ InnerClusterCodecErrorCode GetServerStubOwnershipSyncWireSize(
             return add_result;
         }
 
-        add_result = GetString16WireSize(entry.entity_key, &entry_field_size);
+        add_result = GetString16WireSize(entry.entity_id, &entry_field_size);
         if (add_result != InnerClusterCodecErrorCode::None)
         {
             return add_result;
@@ -418,7 +418,7 @@ InnerClusterCodecErrorCode EncodeServerStubOwnershipSync(
     for (const ServerStubOwnershipEntry& entry : message.assignments)
     {
         if (!writer.WriteString16(entry.entity_type) ||
-            !writer.WriteString16(entry.entity_key) ||
+            !writer.WriteString16(entry.entity_id) ||
             !writer.WriteString16(entry.owner_game_node_id) ||
             !writer.WriteUInt32(entry.entry_flags))
         {
@@ -460,7 +460,7 @@ InnerClusterCodecErrorCode DecodeServerStubOwnershipSync(
     {
         ServerStubOwnershipEntry entry{};
         if (!reader.ReadString16(&entry.entity_type) ||
-            !reader.ReadString16(&entry.entity_key) ||
+            !reader.ReadString16(&entry.entity_id) ||
             !reader.ReadString16(&entry.owner_game_node_id) ||
             !reader.ReadUInt32(&entry.entry_flags))
         {
@@ -538,7 +538,7 @@ InnerClusterCodecErrorCode GetGameServiceReadyReportWireSize(
             return add_result;
         }
 
-        add_result = GetString16WireSize(entry.entity_key, &entry_field_size);
+        add_result = GetString16WireSize(entry.entity_id, &entry_field_size);
         if (add_result != InnerClusterCodecErrorCode::None)
         {
             return add_result;
@@ -589,7 +589,7 @@ InnerClusterCodecErrorCode EncodeGameServiceReadyReport(
     for (const ServerStubReadyEntry& entry : message.entries)
     {
         if (!writer.WriteString16(entry.entity_type) ||
-            !writer.WriteString16(entry.entity_key) ||
+            !writer.WriteString16(entry.entity_id) ||
             !writer.WriteBool(entry.ready) ||
             !writer.WriteUInt32(entry.entry_flags))
         {
@@ -632,7 +632,7 @@ InnerClusterCodecErrorCode DecodeGameServiceReadyReport(
     {
         ServerStubReadyEntry entry{};
         if (!reader.ReadString16(&entry.entity_type) ||
-            !reader.ReadString16(&entry.entity_key) ||
+            !reader.ReadString16(&entry.entity_id) ||
             !reader.ReadBool(&entry.ready) ||
             !reader.ReadUInt32(&entry.entry_flags))
         {

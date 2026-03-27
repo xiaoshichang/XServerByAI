@@ -4,6 +4,7 @@
 #include "Json.h"
 #include "NodeCreateHelper.h"
 #include "ServerNode.h"
+#include "TestManagedConfigJson.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -91,6 +92,7 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
              {"deadLinkCount", 20},
              {"streamMode", false},
          }},
+        {"managed", xs::tests::MakeManagedConfigJson()},
         {"gm",
          xs::core::Json{
              {"innerNetwork",
@@ -129,8 +131,6 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
                    }},
-                  {"managed",
-                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
               }},
          }},
     };

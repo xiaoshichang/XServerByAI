@@ -9,6 +9,9 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <iomanip>
+#include <random>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,6 +24,7 @@ namespace
 
 constexpr std::string_view kGameBuildVersion = "dev";
 constexpr std::string_view kGmRemoteNodeId = "GM";
+constexpr std::string_view kUnknownServerEntityId = "unknown";
 constexpr std::uint16_t kResponseFlags = static_cast<std::uint16_t>(xs::net::PacketFlag::Response);
 constexpr std::uint16_t kErrorResponseFlags =
     kResponseFlags | static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
@@ -33,6 +37,44 @@ std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 std::string ToString(std::uint64_t value)
 {
     return std::to_string(value);
+}
+
+std::string GenerateGuidText()
+{
+    std::array<std::uint8_t, 16> bytes{};
+    std::random_device random_device;
+    for (std::uint8_t& value : bytes)
+    {
+        value = static_cast<std::uint8_t>(random_device());
+    }
+
+    // RFC 4122 variant + version 4 layout.
+    bytes[6] = static_cast<std::uint8_t>((bytes[6] & 0x0F) | 0x40);
+    bytes[8] = static_cast<std::uint8_t>((bytes[8] & 0x3F) | 0x80);
+
+    std::ostringstream stream;
+    stream << std::hex << std::setfill('0');
+    for (std::size_t index = 0; index < bytes.size(); ++index)
+    {
+        if (index == 4U || index == 6U || index == 8U || index == 10U)
+        {
+            stream << '-';
+        }
+
+        stream << std::setw(2) << static_cast<std::uint32_t>(bytes[index]);
+    }
+
+    return stream.str();
+}
+
+std::string ResolveServerEntityId(std::string_view assigned_entity_id)
+{
+    if (!assigned_entity_id.empty() && assigned_entity_id != kUnknownServerEntityId)
+    {
+        return std::string(assigned_entity_id);
+    }
+
+    return GenerateGuidText();
 }
 
 xs::net::Endpoint ToNetEndpoint(const xs::core::EndpointConfig& endpoint)
@@ -1905,10 +1947,11 @@ void GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
         if (entry.owner_game_node_id == node_id())
         {
             ownership_state_.owned_assignments.push_back(entry);
+            const std::string entity_id = ResolveServerEntityId(entry.entity_id);
             service_ready_state_.ready_entries.push_back(
                 xs::net::ServerStubReadyEntry{
                     .entity_type = entry.entity_type,
-                    .entity_key = entry.entity_key,
+                    .entity_id = entity_id,
                     .ready = true,
                     .entry_flags = 0U,
                 });

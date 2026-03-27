@@ -23,6 +23,11 @@
     "deadLinkCount": 20,
     "streamMode": false
   },
+  "managed": {
+    "assemblyName": "XServer.Managed.GameLogic",
+    "assemblyPath": "../src/managed/GameLogic/bin/Debug/net10.0/XServer.Managed.GameLogic.dll",
+    "runtimeConfigPath": "../src/managed/GameLogic/bin/Debug/net10.0/XServer.Managed.GameLogic.runtimeconfig.json"
+  },
   "gm": {
     "innerNetwork": {
       "listenEndpoint": {
@@ -74,9 +79,6 @@
           "host": "127.0.0.1",
           "port": 7100
         }
-      },
-      "managed": {
-        "assemblyName": "XServer.Managed.GameLogic"
       }
     },
     "Game1": {
@@ -85,9 +87,6 @@
           "host": "127.0.0.1",
           "port": 7101
         }
-      },
-      "managed": {
-        "assemblyName": "XServer.Managed.GameLogic"
       }
     }
   }

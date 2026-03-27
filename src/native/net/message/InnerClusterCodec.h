@@ -72,7 +72,7 @@ struct GameGateMeshReadyReport
 struct ServerStubOwnershipEntry
 {
     std::string entity_type{};
-    std::string entity_key{};
+    std::string entity_id{};
     std::string owner_game_node_id{};
     std::uint32_t entry_flags{0};
 };
@@ -98,7 +98,7 @@ struct ServerStubOwnershipSync
 struct ServerStubReadyEntry
 {
     std::string entity_type{};
-    std::string entity_key{};
+    std::string entity_id{};
     bool ready{false};
     std::uint32_t entry_flags{0};
 };

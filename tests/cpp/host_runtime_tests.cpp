@@ -1,5 +1,6 @@
 #include "ManagedRuntimeHost.h"
 
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -83,6 +84,16 @@ std::filesystem::path NormalizePath(const std::filesystem::path& path)
     }
 
     return path;
+}
+
+std::string ReadManagedUtf8(const std::uint8_t* buffer, std::uint32_t length)
+{
+    if (buffer == nullptr)
+    {
+        return {};
+    }
+
+    return std::string(reinterpret_cast<const char*>(buffer), static_cast<std::size_t>(length));
 }
 
 void TestManagedAssetsExist()
@@ -240,6 +251,64 @@ void TestLoadAndBindGameExportsSucceed()
     XS_CHECK(after_unload_result == xs::host::ManagedHostErrorCode::EntryPointNotBound);
 }
 
+void TestLoadAndBindServerStubCatalogExportsSucceed()
+{
+    xs::host::ManagedRuntimeHost host;
+
+    const xs::host::ManagedHostErrorCode load_result = host.Load(
+        xs::host::ManagedRuntimeHostOptions{
+            kManagedRuntimeConfigPath,
+            kManagedAssemblyPath,
+        });
+    XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
+    XS_CHECK(host.IsLoaded());
+    XS_CHECK(!host.AreServerStubCatalogExportsBound());
+
+    xs::host::ManagedServerStubCatalogExports exports_before_bind{};
+    const xs::host::ManagedHostErrorCode unbound_result = host.GetServerStubCatalogExports(exports_before_bind);
+    XS_CHECK(unbound_result == xs::host::ManagedHostErrorCode::EntryPointNotBound);
+
+    const xs::host::ManagedHostErrorCode bind_result = host.BindServerStubCatalogExports();
+    XS_CHECK_MSG(bind_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(bind_result).c_str());
+    XS_CHECK(host.AreServerStubCatalogExportsBound());
+
+    const xs::host::ManagedHostErrorCode second_bind_result = host.BindServerStubCatalogExports();
+    XS_CHECK(second_bind_result == xs::host::ManagedHostErrorCode::None);
+
+    xs::host::ManagedServerStubCatalogExports exports{};
+    const xs::host::ManagedHostErrorCode get_exports_result = host.GetServerStubCatalogExports(exports);
+    XS_CHECK_MSG(
+        get_exports_result == xs::host::ManagedHostErrorCode::None,
+        DescribeManagedHostResult(get_exports_result).c_str());
+    XS_CHECK(exports.abi_version == xs::host::XS_MANAGED_ABI_VERSION);
+    XS_CHECK(exports.get_count != nullptr);
+    XS_CHECK(exports.get_entry != nullptr);
+
+    std::uint32_t count = 0U;
+    XS_CHECK(exports.get_count(&count) == 0);
+    XS_CHECK(count == 3U);
+
+    struct ExpectedEntry final
+    {
+        std::string_view entity_type;
+        std::string_view entity_id;
+    };
+
+    const std::array<ExpectedEntry, 3> expected_entries{
+        ExpectedEntry{"ChatService", "unknown"},
+        ExpectedEntry{"LeaderboardService", "unknown"},
+        ExpectedEntry{"MatchService", "unknown"},
+    };
+
+    for (std::uint32_t index = 0U; index < count && index < expected_entries.size(); ++index)
+    {
+        xs::host::ManagedServerStubCatalogEntry entry{};
+        XS_CHECK(exports.get_entry(index, &entry) == 0);
+        XS_CHECK(ReadManagedUtf8(entry.entity_type_utf8, entry.entity_type_length) == expected_entries[index].entity_type);
+        XS_CHECK(ReadManagedUtf8(entry.entity_id_utf8, entry.entity_id_length) == expected_entries[index].entity_id);
+    }
+}
+
 void TestLoadAllowsSecondInitializationAfterUnload()
 {
     xs::host::ManagedRuntimeHost first_host;
@@ -329,6 +398,7 @@ int main()
     TestLoadRejectsMissingRuntimeConfig();
     TestLoadRejectsMissingAssembly();
     TestLoadAndBindGameExportsSucceed();
+    TestLoadAndBindServerStubCatalogExportsSucceed();
     TestLoadAllowsSecondInitializationAfterUnload();
     TestBindRejectsAbiMismatch();
     TestBindRejectsMissingExport();

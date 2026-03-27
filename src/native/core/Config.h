@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Logging.h"
 
@@ -63,6 +63,8 @@ struct KcpConfig
 struct ManagedConfig
 {
     std::string assembly_name{"XServer.Managed.GameLogic"};
+    std::filesystem::path assembly_path{};
+    std::filesystem::path runtime_config_path{};
 };
 
 struct GmConfig
@@ -80,7 +82,6 @@ struct GateConfig
 struct GameConfig
 {
     EndpointConfig inner_network_listen_endpoint;
-    ManagedConfig managed{};
 };
 
 struct ClusterConfig
@@ -88,6 +89,7 @@ struct ClusterConfig
     EnvConfig env;
     LoggingConfig logging{};
     KcpConfig kcp{};
+    ManagedConfig managed{};
     GmConfig gm{};
     std::map<std::string, GateConfig, std::less<>> gates;
     std::map<std::string, GameConfig, std::less<>> games;

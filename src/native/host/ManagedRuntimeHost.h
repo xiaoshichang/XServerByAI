@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "ManagedInterop.h"
 
@@ -53,9 +53,12 @@ class ManagedRuntimeHost final
     [[nodiscard]] ManagedHostErrorCode Unload() noexcept;
     [[nodiscard]] ManagedHostErrorCode BindGameExports();
     [[nodiscard]] ManagedHostErrorCode GetGameExports(ManagedGameExports& exports) const noexcept;
+    [[nodiscard]] ManagedHostErrorCode BindServerStubCatalogExports();
+    [[nodiscard]] ManagedHostErrorCode GetServerStubCatalogExports(ManagedServerStubCatalogExports& exports) const noexcept;
 
     [[nodiscard]] bool IsLoaded() const noexcept;
     [[nodiscard]] bool AreGameExportsBound() const noexcept;
+    [[nodiscard]] bool AreServerStubCatalogExportsBound() const noexcept;
     [[nodiscard]] load_assembly_and_get_function_pointer_fn load_assembly_and_get_function_pointer() const noexcept;
     [[nodiscard]] const std::filesystem::path& runtime_config_path() const noexcept;
     [[nodiscard]] const std::filesystem::path& assembly_path() const noexcept;

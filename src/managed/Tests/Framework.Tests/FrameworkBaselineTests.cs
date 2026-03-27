@@ -1,6 +1,8 @@
+using System.Linq;
 using XServer.Managed.Framework;
 using XServer.Managed.Framework.Entities;
 using XServer.Managed.GameLogic;
+using XServer.Managed.GameLogic.Catalog;
 
 namespace XServer.Managed.Framework.Tests
 {
@@ -52,6 +54,51 @@ namespace XServer.Managed.Framework.Tests
         public void GameLogicAssemblyMarker_DependsOnFramework()
         {
             Assert.Equal(FrameworkAssemblyMarker.Name, GameLogicAssemblyMarker.DependencyName);
+        }
+
+        [Fact]
+        public void ServerEntity_AssignsUniqueGuidIds()
+        {
+            var first = new TestEntity();
+            var second = new TestEntity();
+            var stub = new TestStubEntity();
+
+            Assert.NotEqual(Guid.Empty, first.EntityId);
+            Assert.NotEqual(Guid.Empty, second.EntityId);
+            Assert.NotEqual(Guid.Empty, stub.EntityId);
+            Assert.NotEqual(first.EntityId, second.EntityId);
+            Assert.NotEqual(first.EntityId, stub.EntityId);
+        }
+
+        [Fact]
+        public void ServerStubCatalog_ReturnsConcreteStubTypesInStableOrder()
+        {
+            var entries = ServerStubCatalog.Entries.ToArray();
+
+            Assert.Equal(3, entries.Length);
+            Assert.Collection(
+                entries,
+                entry =>
+                {
+                    Assert.Equal("ChatService", entry.EntityType);
+                    Assert.Equal(ServerStubCatalog.UnknownEntityId, entry.EntityId);
+                },
+                entry =>
+                {
+                    Assert.Equal("LeaderboardService", entry.EntityType);
+                    Assert.Equal(ServerStubCatalog.UnknownEntityId, entry.EntityId);
+                },
+                entry =>
+                {
+                    Assert.Equal("MatchService", entry.EntityType);
+                    Assert.Equal(ServerStubCatalog.UnknownEntityId, entry.EntityId);
+                });
+        }
+
+        [Fact]
+        public void ServerStubCatalog_DoesNotIncludeAbstractBaseType()
+        {
+            Assert.DoesNotContain(ServerStubCatalog.Entries, entry => entry.EntityType == nameof(ServerStubEntity));
         }
 
         [Fact]

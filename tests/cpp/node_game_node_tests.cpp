@@ -2,6 +2,7 @@
 #include "GateNode.h"
 #include "GmNode.h"
 #include "Json.h"
+#include "TestManagedConfigJson.h"
 
 #include <asio/io_context.hpp>
 #include <asio/ip/address_v4.hpp>
@@ -104,10 +105,6 @@ xs::core::Json MakeClusterConfigJson(
             {"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 7100}}},
         };
     }
-    game_instance["managed"] = xs::core::Json{
-        {"assemblyName", "XServer.Managed.GameLogic"},
-    };
-
     return xs::core::Json{
         {"env", xs::core::Json{{"id", "local-dev"}, {"environment", "dev"}}},
         {"logging",
@@ -132,6 +129,7 @@ xs::core::Json MakeClusterConfigJson(
              {"deadLinkCount", 20},
              {"streamMode", false},
          }},
+        {"managed", xs::tests::MakeManagedConfigJson()},
         {"gm", gm_block},
         {"gate",
          xs::core::Json{

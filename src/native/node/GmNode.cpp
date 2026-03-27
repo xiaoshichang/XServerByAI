@@ -2,6 +2,7 @@
 
 #include "BinarySerialization.h"
 #include "InnerNetwork.h"
+#include "ManagedRuntimeHost.h"
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
@@ -32,18 +33,7 @@ inline constexpr std::int32_t kInnerNodeNotRegistered = 3003;
 inline constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
 inline constexpr std::int32_t kInnerChannelInvalid = 3004;
 inline constexpr std::int32_t kInnerRequestInvalid = 3005;
-
-struct BootstrapStubDefinition final
-{
-    std::string_view entity_type;
-    std::string_view entity_key;
-};
-
-constexpr std::array<BootstrapStubDefinition, 3> kBootstrapStubCatalog{
-    BootstrapStubDefinition{"MatchService", "default"},
-    BootstrapStubDefinition{"ChatService", "default"},
-    BootstrapStubDefinition{"LeaderboardService", "default"},
-};
+inline constexpr std::string_view kUnknownServerEntityId = "unknown";
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -76,6 +66,41 @@ std::string BuildPacketFlagsText(std::uint16_t flags)
 std::string ToString(std::uint64_t value)
 {
     return std::to_string(value);
+}
+
+std::string DescribeManagedHostError(xs::host::ManagedHostErrorCode code)
+{
+    return std::string(xs::host::ManagedHostErrorCanonicalName(code)) + ": " +
+           std::string(xs::host::ManagedHostErrorMessage(code));
+}
+
+xs::host::ManagedRuntimeHostOptions BuildManagedRuntimeHostOptions(const xs::core::ManagedConfig& managed_config)
+{
+    return xs::host::ManagedRuntimeHostOptions{
+        .runtime_config_path = managed_config.runtime_config_path,
+        .assembly_path = managed_config.assembly_path,
+    };
+}
+
+bool TryReadManagedUtf8String(
+    std::span<const std::uint8_t> utf8_buffer,
+    std::uint32_t utf8_length,
+    std::string* output)
+{
+    if (output == nullptr)
+    {
+        return false;
+    }
+
+    if (static_cast<std::size_t>(utf8_length) > utf8_buffer.size())
+    {
+        return false;
+    }
+
+    output->assign(
+        reinterpret_cast<const char*>(utf8_buffer.data()),
+        static_cast<std::size_t>(utf8_length));
+    return true;
 }
 
 bool HasPacketFlag(std::uint16_t flags, xs::net::PacketFlag flag) noexcept
@@ -294,8 +319,7 @@ NodeErrorCode GmNode::OnInit()
     inner_network_remote_sessions().Clear();
     InitializeClusterNodesOnlineState();
     InitializeGameToGateFullConnectionAggregationState();
-    InitializeGameServiceReadyAggregationState();
-    server_stub_distribute_table_.reset();
+    ResetServerStubStateTable();
     cluster_ready_state_ = ClusterReadyState{};
 
     const NodeErrorCode init_result = InitInnerNetwork(std::move(options));
@@ -416,8 +440,7 @@ NodeErrorCode GmNode::OnUninit()
 
     cluster_nodes_online_state_ = ClusterNodesOnlineState{};
     game_to_gate_full_connection_aggregation_state_ = GameToGateFullConnectionAggregationState{};
-    game_service_ready_aggregation_state_ = GameServiceReadyAggregationState{};
-    server_stub_distribute_table_.reset();
+    ResetServerStubStateTable();
     cluster_ready_state_ = ClusterReadyState{};
     ClearError();
     return NodeErrorCode::None;
@@ -455,18 +478,271 @@ void GmNode::InitializeGameToGateFullConnectionAggregationState()
     }
 }
 
-void GmNode::InitializeGameServiceReadyAggregationState()
+void GmNode::ResetServerStubStateTable() noexcept
 {
-    game_service_ready_aggregation_state_ = GameServiceReadyAggregationState{};
-    game_service_ready_aggregation_state_.entries.reserve(cluster_config().games.size());
-    for (const auto& [node_id, config] : cluster_config().games)
+    server_stub_state_table_ = ServerStubStateTable{};
+}
+
+void GmNode::ResetServerStubStates() noexcept
+{
+    for (ServerStubEntry& entry : server_stub_state_table_.entries)
     {
-        (void)config;
-        game_service_ready_aggregation_state_.entries.push_back(
-            GameServiceReadyEntry{
-                .node_id = node_id,
+        entry.entity_id = std::string(kUnknownServerEntityId);
+        entry.state = ServerStubState::Init;
+    }
+}
+
+bool GmNode::LoadManagedServerStubCatalog()
+{
+    if (server_stub_state_table_.catalog_loaded)
+    {
+        return true;
+    }
+
+    if (server_stub_state_table_.catalog_load_failed)
+    {
+        return false;
+    }
+
+    const xs::core::ManagedConfig& managed_config = cluster_config().managed;
+    const auto log_failure =
+        [this, &managed_config](
+            std::string_view message,
+            std::string_view error_code,
+            std::string_view error_detail,
+            std::string_view entry_index = {},
+            std::string_view export_result = {}) {
+            server_stub_state_table_.entries.clear();
+            server_stub_state_table_.catalog_loaded = false;
+            server_stub_state_table_.catalog_load_failed = true;
+
+            std::vector<xs::core::LogContextField> context;
+            context.reserve(6);
+            context.push_back(xs::core::LogContextField{"assemblyName", managed_config.assembly_name});
+            context.push_back(xs::core::LogContextField{"assemblyPath", managed_config.assembly_path.string()});
+            context.push_back(
+                xs::core::LogContextField{"runtimeConfigPath", managed_config.runtime_config_path.string()});
+            context.push_back(xs::core::LogContextField{"errorCode", std::string(error_code)});
+            context.push_back(xs::core::LogContextField{"errorDetail", std::string(error_detail)});
+
+            if (!entry_index.empty())
+            {
+                context.push_back(xs::core::LogContextField{"entryIndex", std::string(entry_index)});
+            }
+
+            if (!export_result.empty())
+            {
+                context.push_back(xs::core::LogContextField{"exportResult", std::string(export_result)});
+            }
+
+            logger().Log(xs::core::LogLevel::Error, "runtime", std::string(message), context);
+            return false;
+        };
+
+    xs::host::ManagedRuntimeHost runtime_host;
+    const xs::host::ManagedHostErrorCode load_result =
+        runtime_host.Load(BuildManagedRuntimeHostOptions(managed_config));
+    if (load_result != xs::host::ManagedHostErrorCode::None)
+    {
+        return log_failure(
+            "GM failed to load managed server stub catalog runtime.",
+            xs::host::ManagedHostErrorCanonicalName(load_result),
+            DescribeManagedHostError(load_result));
+    }
+
+    const xs::host::ManagedHostErrorCode bind_result = runtime_host.BindServerStubCatalogExports();
+    if (bind_result != xs::host::ManagedHostErrorCode::None)
+    {
+        return log_failure(
+            "GM failed to bind managed server stub catalog exports.",
+            xs::host::ManagedHostErrorCanonicalName(bind_result),
+            DescribeManagedHostError(bind_result));
+    }
+
+    xs::host::ManagedServerStubCatalogExports catalog_exports{};
+    const xs::host::ManagedHostErrorCode exports_result = runtime_host.GetServerStubCatalogExports(catalog_exports);
+    if (exports_result != xs::host::ManagedHostErrorCode::None)
+    {
+        return log_failure(
+            "GM failed to resolve managed server stub catalog exports.",
+            xs::host::ManagedHostErrorCanonicalName(exports_result),
+            DescribeManagedHostError(exports_result));
+    }
+
+    if (catalog_exports.get_count == nullptr || catalog_exports.get_entry == nullptr)
+    {
+        return log_failure(
+            "GM resolved incomplete managed server stub catalog exports.",
+            "Interop.InvalidCatalogExports",
+            "Managed server stub catalog exports must provide both count and entry delegates.");
+    }
+
+    std::uint32_t catalog_count = 0U;
+    const std::int32_t count_result = catalog_exports.get_count(&catalog_count);
+    if (count_result != 0)
+    {
+        return log_failure(
+            "GM failed to read managed server stub catalog count.",
+            "Interop.ManagedCatalogCountFailed",
+            "Managed server stub catalog count export returned an error.",
+            {},
+            std::to_string(count_result));
+    }
+
+    if (catalog_count == 0U)
+    {
+        return log_failure(
+            "GM loaded an empty managed server stub catalog.",
+            "Interop.ManagedCatalogEmpty",
+            "Managed server stub catalog must contain at least one entry.");
+    }
+
+    std::vector<ServerStubEntry> catalog_entries;
+    catalog_entries.reserve(catalog_count);
+
+    for (std::uint32_t index = 0U; index < catalog_count; ++index)
+    {
+        xs::host::ManagedServerStubCatalogEntry catalog_entry{};
+        const std::int32_t entry_result = catalog_exports.get_entry(index, &catalog_entry);
+        if (entry_result != 0)
+        {
+            return log_failure(
+                "GM failed to read a managed server stub catalog entry.",
+                "Interop.ManagedCatalogEntryFailed",
+                "Managed server stub catalog entry export returned an error.",
+                std::to_string(index),
+                std::to_string(entry_result));
+        }
+
+        ServerStubEntry definition{};
+        const bool entity_type_ok = TryReadManagedUtf8String(
+            std::span<const std::uint8_t>(
+                catalog_entry.entity_type_utf8,
+                std::size(catalog_entry.entity_type_utf8)),
+            catalog_entry.entity_type_length,
+            &definition.entity_type);
+        const bool entity_id_ok = TryReadManagedUtf8String(
+            std::span<const std::uint8_t>(
+                catalog_entry.entity_id_utf8,
+                std::size(catalog_entry.entity_id_utf8)),
+            catalog_entry.entity_id_length,
+            &definition.entity_id);
+        if (!entity_type_ok || !entity_id_ok)
+        {
+            return log_failure(
+                "GM received an invalid UTF-8 buffer description from the managed server stub catalog.",
+                "Interop.ManagedCatalogEntryInvalid",
+                "Managed server stub catalog entry lengths exceeded their declared native buffers.",
+                std::to_string(index));
+        }
+
+        if (definition.entity_type.empty())
+        {
+            return log_failure(
+                "GM received an empty managed server stub catalog entry.",
+                "Interop.ManagedCatalogEntryInvalid",
+                "Managed server stub catalog entries must provide a non-empty entityType value.",
+                std::to_string(index));
+        }
+
+        if (definition.entity_id.empty())
+        {
+            definition.entity_id = std::string(kUnknownServerEntityId);
+        }
+
+        const auto duplicate_iterator = std::find_if(
+            catalog_entries.begin(),
+            catalog_entries.end(),
+            [&definition](const ServerStubEntry& existing) {
+                return existing.entity_type == definition.entity_type &&
+                       existing.entity_id == definition.entity_id;
+            });
+        if (duplicate_iterator != catalog_entries.end())
+        {
+            return log_failure(
+                "GM found a duplicate managed server stub catalog entry.",
+                "Interop.ManagedCatalogDuplicate",
+                definition.entity_type + "/" + definition.entity_id,
+                std::to_string(index));
+        }
+
+        catalog_entries.push_back(std::move(definition));
+    }
+
+    server_stub_state_table_.entries = std::move(catalog_entries);
+    server_stub_state_table_.catalog_loaded = true;
+    server_stub_state_table_.catalog_load_failed = false;
+    ResetServerStubStates();
+
+    const std::array<xs::core::LogContextField, 4> context{
+        xs::core::LogContextField{"assemblyName", managed_config.assembly_name},
+        xs::core::LogContextField{"assemblyPath", managed_config.assembly_path.string()},
+        xs::core::LogContextField{"runtimeConfigPath", managed_config.runtime_config_path.string()},
+        xs::core::LogContextField{"entryCount", ToString(server_stub_state_table_.entries.size())},
+    };
+    logger().Log(xs::core::LogLevel::Info, "runtime", "GM loaded managed server stub catalog.", context);
+    return true;
+}
+
+bool GmNode::EnsureServerStubAssignments()
+{
+    if (!LoadManagedServerStubCatalog())
+    {
+        return false;
+    }
+
+    if (server_stub_state_table_.entries.empty() || cluster_nodes_online_state_.expected_game_node_ids.empty())
+    {
+        return false;
+    }
+
+    const bool all_assigned = std::all_of(
+        server_stub_state_table_.entries.begin(),
+        server_stub_state_table_.entries.end(),
+        [](const ServerStubEntry& entry) {
+            return !entry.owner_game_node_id.empty();
+        });
+    if (all_assigned)
+    {
+        return true;
+    }
+
+    std::uniform_int_distribution<std::size_t> distribution(
+        0u,
+        cluster_nodes_online_state_.expected_game_node_ids.size() - 1u);
+    std::mt19937_64 random_engine{std::random_device{}()};
+    for (ServerStubEntry& entry : server_stub_state_table_.entries)
+    {
+        entry.owner_game_node_id =
+            cluster_nodes_online_state_.expected_game_node_ids[distribution(random_engine)];
+        entry.state = ServerStubState::Init;
+    }
+
+    return true;
+}
+
+std::vector<xs::net::ServerStubOwnershipEntry> GmNode::BuildServerStubOwnershipAssignments() const
+{
+    std::vector<xs::net::ServerStubOwnershipEntry> assignments;
+    assignments.reserve(server_stub_state_table_.entries.size());
+
+    for (const ServerStubEntry& entry : server_stub_state_table_.entries)
+    {
+        if (entry.owner_game_node_id.empty())
+        {
+            continue;
+        }
+
+        assignments.push_back(
+            xs::net::ServerStubOwnershipEntry{
+                .entity_type = entry.entity_type,
+                .entity_id = entry.entity_id,
+                .owner_game_node_id = entry.owner_game_node_id,
+                .entry_flags = 0U,
             });
     }
+
+    return assignments;
 }
 
 GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node_id) noexcept
@@ -489,28 +765,6 @@ const GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node
             return entry.node_id == node_id;
         });
     return iterator != game_to_gate_full_connection_aggregation_state_.entries.end() ? &(*iterator) : nullptr;
-}
-
-GmNode::GameServiceReadyEntry* GmNode::service_ready_entry(std::string_view node_id) noexcept
-{
-    auto iterator = std::find_if(
-        game_service_ready_aggregation_state_.entries.begin(),
-        game_service_ready_aggregation_state_.entries.end(),
-        [node_id](const GameServiceReadyEntry& entry) {
-            return entry.node_id == node_id;
-        });
-    return iterator != game_service_ready_aggregation_state_.entries.end() ? &(*iterator) : nullptr;
-}
-
-const GmNode::GameServiceReadyEntry* GmNode::service_ready_entry(std::string_view node_id) const noexcept
-{
-    auto iterator = std::find_if(
-        game_service_ready_aggregation_state_.entries.begin(),
-        game_service_ready_aggregation_state_.entries.end(),
-        [node_id](const GameServiceReadyEntry& entry) {
-            return entry.node_id == node_id;
-        });
-    return iterator != game_service_ready_aggregation_state_.entries.end() ? &(*iterator) : nullptr;
 }
 
 bool GmNode::AreAllExpectedNodesOnline() const noexcept
@@ -557,30 +811,16 @@ bool GmNode::AreAllExpectedGamesMeshReady() const noexcept
 
 bool GmNode::AreAllServerStubsReady() const noexcept
 {
-    if (server_stub_distribute_table_ == nullptr || server_stub_distribute_table_->assignments.empty())
+    if (server_stub_state_table_.entries.empty())
     {
         return false;
     }
 
     return std::all_of(
-        server_stub_distribute_table_->assignments.begin(),
-        server_stub_distribute_table_->assignments.end(),
-        [this](const xs::net::ServerStubOwnershipEntry& assignment) {
-            const GameServiceReadyEntry* entry = service_ready_entry(assignment.owner_game_node_id);
-            if (entry == nullptr || entry->assignment_epoch != kServerStubOwnershipAssignmentEpoch)
-            {
-                return false;
-            }
-
-            const auto iterator = std::find_if(
-                entry->ready_entries.begin(),
-                entry->ready_entries.end(),
-                [&assignment](const xs::net::ServerStubReadyEntry& ready_entry) {
-                    return ready_entry.entity_type == assignment.entity_type &&
-                        ready_entry.entity_key == assignment.entity_key &&
-                        ready_entry.ready;
-                });
-            return iterator != entry->ready_entries.end();
+        server_stub_state_table_.entries.begin(),
+        server_stub_state_table_.entries.end(),
+        [](const ServerStubEntry& entry) {
+            return !entry.owner_game_node_id.empty() && entry.state == ServerStubState::Ready;
         });
 }
 
@@ -625,7 +865,7 @@ void GmNode::RefreshClusterNodesOnlineState(std::string_view trigger_node_id)
     if (!all_nodes_online)
     {
         InvalidateAllGameMeshReadyState();
-        InitializeGameServiceReadyAggregationState();
+        ResetServerStubStates();
         cluster_ready_state_ = ClusterReadyState{};
     }
 
@@ -653,50 +893,6 @@ void GmNode::RefreshClusterNodesOnlineState(std::string_view trigger_node_id)
     RefreshServerStubDistributeTable();
 }
 
-GmNode::ServerStubDistributeTable GmNode::BuildServerStubDistributeTable() const
-{
-    struct RandomServerStubDistributeStrategy final
-    {
-        explicit RandomServerStubDistributeStrategy(std::mt19937_64 random_engine)
-            : random_engine_(std::move(random_engine))
-        {
-        }
-
-        [[nodiscard]] GmNode::ServerStubDistributeTable Build(
-            const std::vector<std::string>& candidate_game_node_ids)
-        {
-            GmNode::ServerStubDistributeTable table{};
-            table.assignments.reserve(kBootstrapStubCatalog.size());
-
-            if (candidate_game_node_ids.empty())
-            {
-                return table;
-            }
-
-            std::uniform_int_distribution<std::size_t> distribution(0u, candidate_game_node_ids.size() - 1u);
-
-            for (const BootstrapStubDefinition& stub : kBootstrapStubCatalog)
-            {
-                table.assignments.push_back(
-                    xs::net::ServerStubOwnershipEntry{
-                        .entity_type = std::string(stub.entity_type),
-                        .entity_key = std::string(stub.entity_key),
-                        .owner_game_node_id = candidate_game_node_ids[distribution(random_engine_)],
-                        .entry_flags = 0U,
-                    });
-            }
-
-            return table;
-        }
-
-      private:
-        std::mt19937_64 random_engine_;
-    };
-
-    RandomServerStubDistributeStrategy strategy{std::mt19937_64{std::random_device{}()}};
-    return strategy.Build(cluster_nodes_online_state_.expected_game_node_ids);
-}
-
 void GmNode::RefreshServerStubDistributeTable()
 {
     const bool all_expected_games_mesh_ready = cluster_nodes_online_state_.all_nodes_online && AreAllExpectedGamesMeshReady();
@@ -708,27 +904,34 @@ void GmNode::RefreshServerStubDistributeTable()
     game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready = all_expected_games_mesh_ready;
     if (!all_expected_games_mesh_ready)
     {
-        InitializeGameServiceReadyAggregationState();
+        ResetServerStubStates();
         cluster_ready_state_ = ClusterReadyState{};
         return;
     }
 
-    if (server_stub_distribute_table_ == nullptr)
+    if (!EnsureServerStubAssignments())
     {
-        server_stub_distribute_table_ = std::make_unique<ServerStubDistributeTable>(BuildServerStubDistributeTable());
+        ResetServerStubStates();
+        cluster_ready_state_ = ClusterReadyState{};
+        return;
     }
 
-    InitializeGameServiceReadyAggregationState();
+    ResetServerStubStates();
     cluster_ready_state_ = ClusterReadyState{};
 
-    const ServerStubDistributeTable& server_stub_distribute_table = *server_stub_distribute_table_;
+    const std::vector<xs::net::ServerStubOwnershipEntry> assignments = BuildServerStubOwnershipAssignments();
+    if (assignments.empty())
+    {
+        return;
+    }
+
     const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
 
     const xs::net::ServerStubOwnershipSync sync
     {
         .assignment_epoch = kServerStubOwnershipAssignmentEpoch,
         .status_flags = 0U,
-        .assignments = server_stub_distribute_table.assignments,
+        .assignments = assignments,
         .server_now_unix_ms = server_now_unix_ms,
     };
 
@@ -747,7 +950,7 @@ void GmNode::RefreshServerStubDistributeTable()
 
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"assignmentEpoch", ToString(kServerStubOwnershipAssignmentEpoch)},
-        xs::core::LogContextField{"assignmentCount", ToString(server_stub_distribute_table.assignments.size())},
+        xs::core::LogContextField{"assignmentCount", ToString(assignments.size())},
         xs::core::LogContextField{"notifyTargetCount", ToString(notify_target_count)},
         xs::core::LogContextField{"expectedGameCount", ToString(cluster_nodes_online_state_.expected_game_node_ids.size())},
         xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
@@ -796,7 +999,7 @@ void GmNode::RefreshClusterReadyState()
         xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
         xs::core::LogContextField{"clusterReady", notify.cluster_ready ? "true" : "false"},
         xs::core::LogContextField{"notifyTargetCount", ToString(notify_target_count)},
-        xs::core::LogContextField{"assignmentCount", server_stub_distribute_table_ != nullptr ? ToString(server_stub_distribute_table_->assignments.size()) : "0"},
+        xs::core::LogContextField{"assignmentCount", ToString(server_stub_state_table_.entries.size())},
         xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed cluster ready state.", context);
@@ -1612,7 +1815,14 @@ void GmNode::HandleGameServiceReadyReport(
         return;
     }
 
-    if (!cluster_nodes_online_state_.all_nodes_online || server_stub_distribute_table_ == nullptr)
+    const bool ownership_active = !server_stub_state_table_.entries.empty() &&
+                                  std::all_of(
+                                      server_stub_state_table_.entries.begin(),
+                                      server_stub_state_table_.entries.end(),
+                                      [](const ServerStubEntry& entry) {
+                                          return !entry.owner_game_node_id.empty();
+                                      });
+    if (!cluster_nodes_online_state_.all_nodes_online || !ownership_active)
     {
         std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
         context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
@@ -1632,27 +1842,65 @@ void GmNode::HandleGameServiceReadyReport(
         return;
     }
 
-    GameServiceReadyEntry* entry = service_ready_entry(session->node_id);
-    if (entry == nullptr)
+    std::vector<ServerStubEntry*> owned_entries;
+    owned_entries.reserve(server_stub_state_table_.entries.size());
+    for (ServerStubEntry& entry : server_stub_state_table_.entries)
+    {
+        if (entry.owner_game_node_id != session->node_id)
+        {
+            continue;
+        }
+
+        entry.state = ServerStubState::Init;
+        owned_entries.push_back(&entry);
+    }
+
+    if (owned_entries.empty())
     {
         std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
         context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
-        logger().Log(xs::core::LogLevel::Warn, "inner", "GM ignored service ready report from an unexpected Game node.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "GM ignored service ready report from a Game node without owned stubs.", context);
         return;
     }
 
-    const std::size_t ready_entry_count = report.entries.size();
-    entry->assignment_epoch = report.assignment_epoch;
-    entry->local_ready = report.local_ready;
-    entry->reported_at_unix_ms = report.reported_at_unix_ms;
-    entry->ready_entries = std::move(report.entries);
+    std::size_t matched_ready_count = 0U;
+    std::size_t ignored_ready_count = 0U;
+    for (const xs::net::ServerStubReadyEntry& ready_entry : report.entries)
+    {
+        if (ready_entry.entity_id.empty() || ready_entry.entity_id == kUnknownServerEntityId)
+        {
+            ++ignored_ready_count;
+            continue;
+        }
 
-    const std::array<xs::core::LogContextField, 5> context{
+        const auto iterator = std::find_if(
+            owned_entries.begin(),
+            owned_entries.end(),
+            [&ready_entry](const ServerStubEntry* entry) {
+                return entry != nullptr &&
+                       entry->entity_type == ready_entry.entity_type &&
+                       (entry->entity_id == kUnknownServerEntityId ||
+                        entry->entity_id == ready_entry.entity_id);
+            });
+        if (iterator == owned_entries.end())
+        {
+            ++ignored_ready_count;
+            continue;
+        }
+
+        (*iterator)->entity_id = ready_entry.entity_id;
+        (*iterator)->state = ServerStubState::Ready;
+        ++matched_ready_count;
+    }
+
+    const std::array<xs::core::LogContextField, 7> context{
         xs::core::LogContextField{"nodeId", session->node_id},
-        xs::core::LogContextField{"assignmentEpoch", ToString(entry->assignment_epoch)},
-        xs::core::LogContextField{"localReady", entry->local_ready ? "true" : "false"},
-        xs::core::LogContextField{"readyEntryCount", ToString(ready_entry_count)},
-        xs::core::LogContextField{"reportedAtUnixMs", ToString(entry->reported_at_unix_ms)},
+        xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
+        xs::core::LogContextField{"localReady", report.local_ready ? "true" : "false"},
+        xs::core::LogContextField{"ownedStubCount", ToString(owned_entries.size())},
+        xs::core::LogContextField{"readyEntryCount", ToString(report.entries.size())},
+        xs::core::LogContextField{"matchedReadyCount", ToString(matched_ready_count)},
+        xs::core::LogContextField{"ignoredReadyCount", ToString(ignored_ready_count)},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted service ready report.", context);
 

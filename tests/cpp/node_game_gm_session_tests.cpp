@@ -1,6 +1,7 @@
 #include "GameNode.h"
 #include "GmNode.h"
 #include "Json.h"
+#include "TestManagedConfigJson.h"
 #include "TimeUtils.h"
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -53,6 +55,34 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 
 #define XS_CHECK(expr) Check((expr), #expr)
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
+
+bool IsCanonicalGuidText(std::string_view value)
+{
+    if (value.size() != 36U)
+    {
+        return false;
+    }
+
+    for (std::size_t index = 0U; index < value.size(); ++index)
+    {
+        if (index == 8U || index == 13U || index == 18U || index == 23U)
+        {
+            if (value[index] != '-')
+            {
+                return false;
+            }
+
+            continue;
+        }
+
+        if (!std::isxdigit(static_cast<unsigned char>(value[index])))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 class RawZmqSocket final
 {
@@ -218,6 +248,7 @@ xs::core::Json MakeClusterConfigJson(
              {"deadLinkCount", 20},
              {"streamMode", false},
          }},
+        {"managed", xs::tests::MakeManagedConfigJson()},
         {"gm",
          xs::core::Json{
              {"innerNetwork",
@@ -241,8 +272,6 @@ xs::core::Json MakeClusterConfigJson(
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", game_inner_port}}},
                    }},
-                  {"managed",
-                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
               }},
          }},
     };
@@ -1333,19 +1362,19 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
         .assignments = {
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "MatchService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "ChatService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "LeaderboardService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
             },
@@ -1358,13 +1387,13 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
         .assignments = {
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "MatchService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "ChatService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
             },
@@ -1611,11 +1640,12 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
     if (service_ready_report.entries.size() == 2U)
     {
         XS_CHECK(service_ready_report.entries[0].entity_type == "MatchService");
-        XS_CHECK(service_ready_report.entries[0].entity_key == "default");
+        XS_CHECK(IsCanonicalGuidText(service_ready_report.entries[0].entity_id));
         XS_CHECK(service_ready_report.entries[0].ready);
         XS_CHECK(service_ready_report.entries[0].entry_flags == 0U);
         XS_CHECK(service_ready_report.entries[1].entity_type == "LeaderboardService");
-        XS_CHECK(service_ready_report.entries[1].entity_key == "default");
+        XS_CHECK(IsCanonicalGuidText(service_ready_report.entries[1].entity_id));
+        XS_CHECK(service_ready_report.entries[0].entity_id != service_ready_report.entries[1].entity_id);
         XS_CHECK(service_ready_report.entries[1].ready);
         XS_CHECK(service_ready_report.entries[1].entry_flags == 0U);
     }
@@ -1707,19 +1737,19 @@ void TestGameNodeSkipsServiceReadyReportWhenNoStubIsOwned()
         .assignments = {
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "MatchService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "ChatService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
                 .entity_type = "LeaderboardService",
-                .entity_key = "default",
+                .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
             },

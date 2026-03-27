@@ -1,5 +1,6 @@
 #include "GmNode.h"
 #include "Json.h"
+#include "TestManagedConfigJson.h"
 #include "ZmqActiveConnector.h"
 #include "ZmqContext.h"
 #include "message/InnerClusterCodec.h"
@@ -89,6 +90,11 @@ std::uint16_t AcquireLoopbackPort()
     return port;
 }
 
+std::string BuildTestServerEntityId(std::size_t index)
+{
+    return "00000000-0000-4000-8000-00000000000" + std::to_string(static_cast<unsigned long long>(index));
+}
+
 xs::core::Json MakeClusterConfigJson(
     const std::filesystem::path& base_path,
     std::uint16_t gm_inner_port,
@@ -120,6 +126,7 @@ xs::core::Json MakeClusterConfigJson(
              {"deadLinkCount", 20},
              {"streamMode", false},
          }},
+        {"managed", xs::tests::MakeManagedConfigJson()},
         {"gm",
          xs::core::Json{
              {"innerNetwork",
@@ -158,8 +165,6 @@ xs::core::Json MakeClusterConfigJson(
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
                    }},
-                  {"managed",
-                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
               }},
          }},
     };
@@ -908,12 +913,12 @@ void TestGmNodeBroadcastsOwnershipSyncAfterExpectedGamesReportMeshReady()
     XS_CHECK(first_sync.server_now_unix_ms != 0U);
     if (first_sync.assignments.size() == 3U)
     {
-        XS_CHECK(first_sync.assignments[0].entity_type == "MatchService");
-        XS_CHECK(first_sync.assignments[1].entity_type == "ChatService");
-        XS_CHECK(first_sync.assignments[2].entity_type == "LeaderboardService");
-        XS_CHECK(first_sync.assignments[0].entity_key == "default");
-        XS_CHECK(first_sync.assignments[1].entity_key == "default");
-        XS_CHECK(first_sync.assignments[2].entity_key == "default");
+        XS_CHECK(first_sync.assignments[0].entity_type == "ChatService");
+        XS_CHECK(first_sync.assignments[1].entity_type == "LeaderboardService");
+        XS_CHECK(first_sync.assignments[2].entity_type == "MatchService");
+        XS_CHECK(first_sync.assignments[0].entity_id == "unknown");
+        XS_CHECK(first_sync.assignments[1].entity_id == "unknown");
+        XS_CHECK(first_sync.assignments[2].entity_id == "unknown");
         XS_CHECK(first_sync.assignments[0].owner_game_node_id == "Game0");
         XS_CHECK(first_sync.assignments[1].owner_game_node_id == "Game0");
         XS_CHECK(first_sync.assignments[2].owner_game_node_id == "Game0");
@@ -953,7 +958,7 @@ void TestGmNodeBroadcastsOwnershipSyncAfterExpectedGamesReportMeshReady()
         for (const xs::net::ServerStubOwnershipEntry& entry : second_sync.assignments)
         {
             XS_CHECK(entry.owner_game_node_id == "Game0");
-            XS_CHECK(entry.entity_key == "default");
+            XS_CHECK(entry.entity_id == "unknown");
             XS_CHECK(entry.entry_flags == 0U);
         }
     }
@@ -1103,7 +1108,7 @@ void TestGmNodeOpensGateOnlyAfterAllOwnedStubsReportReady()
         partial_entries.push_back(
             xs::net::ServerStubReadyEntry{
                 .entity_type = sync.assignments[index].entity_type,
-                .entity_key = sync.assignments[index].entity_key,
+                .entity_id = BuildTestServerEntityId(index),
                 .ready = true,
                 .entry_flags = 0U,
             });
@@ -1135,7 +1140,7 @@ void TestGmNodeOpensGateOnlyAfterAllOwnedStubsReportReady()
         full_entries.push_back(
             xs::net::ServerStubReadyEntry{
                 .entity_type = assignment.entity_type,
-                .entity_key = assignment.entity_key,
+                .entity_id = BuildTestServerEntityId(full_entries.size()),
                 .ready = true,
                 .entry_flags = 0U,
             });

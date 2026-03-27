@@ -1,4 +1,4 @@
-#include "ManagedRuntimeHost.h"
+﻿#include "ManagedRuntimeHost.h"
 
 #include <hostfxr.h>
 #include <nethost.h>
@@ -354,15 +354,21 @@ class ManagedRuntimeHost::Impl final
         assembly_path_ = assembly_path;
         hostfxr_path_ = process_hostfxr_state.library_path;
         load_assembly_and_get_function_pointer_ = reinterpret_cast<load_assembly_and_get_function_pointer_fn>(raw_delegate);
+        abi_version_ = 0U;
         game_exports_ = ManagedGameExports{};
         game_exports_bound_ = false;
+        server_stub_catalog_exports_ = ManagedServerStubCatalogExports{};
+        server_stub_catalog_exports_bound_ = false;
         return ManagedHostErrorCode::None;
     }
 
     [[nodiscard]] ManagedHostErrorCode Unload() noexcept
     {
+        abi_version_ = 0U;
         game_exports_ = ManagedGameExports{};
         game_exports_bound_ = false;
+        server_stub_catalog_exports_ = ManagedServerStubCatalogExports{};
+        server_stub_catalog_exports_bound_ = false;
         load_assembly_and_get_function_pointer_ = nullptr;
         runtime_config_path_.clear();
         assembly_path_.clear();
@@ -382,6 +388,12 @@ class ManagedRuntimeHost::Impl final
             return ManagedHostErrorCode::None;
         }
 
+        const ManagedHostErrorCode abi_result = EnsureManagedAbiVersion();
+        if (abi_result != ManagedHostErrorCode::None)
+        {
+            return abi_result;
+        }
+
         ManagedGameExports resolved_exports{};
 
         void* raw_get_abi_version = nullptr;
@@ -396,12 +408,8 @@ class ManagedRuntimeHost::Impl final
             return result;
         }
 
+        resolved_exports.abi_version = abi_version_;
         resolved_exports.get_abi_version = reinterpret_cast<ManagedGetAbiVersionFn>(raw_get_abi_version);
-        resolved_exports.abi_version = resolved_exports.get_abi_version();
-        if (resolved_exports.abi_version != XS_MANAGED_ABI_VERSION)
-        {
-            return ManagedHostErrorCode::AbiVersionMismatch;
-        }
 
         void* raw_init = nullptr;
         result = ResolveManagedEntryPoint(
@@ -458,6 +466,69 @@ class ManagedRuntimeHost::Impl final
         return ManagedHostErrorCode::None;
     }
 
+    [[nodiscard]] ManagedHostErrorCode BindServerStubCatalogExports()
+    {
+        if (load_assembly_and_get_function_pointer_ == nullptr)
+        {
+            return ManagedHostErrorCode::RuntimeNotLoaded;
+        }
+
+        if (server_stub_catalog_exports_bound_)
+        {
+            return ManagedHostErrorCode::None;
+        }
+
+        const ManagedHostErrorCode abi_result = EnsureManagedAbiVersion();
+        if (abi_result != ManagedHostErrorCode::None)
+        {
+            return abi_result;
+        }
+
+        ManagedServerStubCatalogExports resolved_exports{};
+        resolved_exports.abi_version = abi_version_;
+
+        void* raw_get_count = nullptr;
+        ManagedHostErrorCode result = ResolveManagedEntryPoint(
+            load_assembly_and_get_function_pointer_,
+            assembly_path_,
+            kManagedGameExportsTypeName,
+            kManagedGameGetServerStubCatalogCountMethodName,
+            &raw_get_count);
+        if (result != ManagedHostErrorCode::None)
+        {
+            return result;
+        }
+        resolved_exports.get_count = reinterpret_cast<ManagedGetServerStubCatalogCountFn>(raw_get_count);
+
+        void* raw_get_entry = nullptr;
+        result = ResolveManagedEntryPoint(
+            load_assembly_and_get_function_pointer_,
+            assembly_path_,
+            kManagedGameExportsTypeName,
+            kManagedGameGetServerStubCatalogEntryMethodName,
+            &raw_get_entry);
+        if (result != ManagedHostErrorCode::None)
+        {
+            return result;
+        }
+        resolved_exports.get_entry = reinterpret_cast<ManagedGetServerStubCatalogEntryFn>(raw_get_entry);
+
+        server_stub_catalog_exports_ = resolved_exports;
+        server_stub_catalog_exports_bound_ = true;
+        return ManagedHostErrorCode::None;
+    }
+
+    [[nodiscard]] ManagedHostErrorCode GetServerStubCatalogExports(ManagedServerStubCatalogExports& exports) const noexcept
+    {
+        if (!server_stub_catalog_exports_bound_)
+        {
+            return ManagedHostErrorCode::EntryPointNotBound;
+        }
+
+        exports = server_stub_catalog_exports_;
+        return ManagedHostErrorCode::None;
+    }
+
     [[nodiscard]] bool IsLoaded() const noexcept
     {
         return load_assembly_and_get_function_pointer_ != nullptr;
@@ -466,6 +537,11 @@ class ManagedRuntimeHost::Impl final
     [[nodiscard]] bool AreGameExportsBound() const noexcept
     {
         return game_exports_bound_;
+    }
+
+    [[nodiscard]] bool AreServerStubCatalogExportsBound() const noexcept
+    {
+        return server_stub_catalog_exports_bound_;
     }
 
     [[nodiscard]] load_assembly_and_get_function_pointer_fn load_assembly_and_get_function_pointer() const noexcept
@@ -489,14 +565,46 @@ class ManagedRuntimeHost::Impl final
     }
 
   private:
+    [[nodiscard]] ManagedHostErrorCode EnsureManagedAbiVersion()
+    {
+        if (abi_version_ != 0U)
+        {
+            return ManagedHostErrorCode::None;
+        }
+
+        void* raw_get_abi_version = nullptr;
+        const ManagedHostErrorCode resolve_result = ResolveManagedEntryPoint(
+            load_assembly_and_get_function_pointer_,
+            assembly_path_,
+            kManagedGameExportsTypeName,
+            kManagedGameGetAbiVersionMethodName,
+            &raw_get_abi_version);
+        if (resolve_result != ManagedHostErrorCode::None)
+        {
+            return resolve_result;
+        }
+
+        const auto get_abi_version = reinterpret_cast<ManagedGetAbiVersionFn>(raw_get_abi_version);
+        const std::uint32_t resolved_abi_version = get_abi_version();
+        if (resolved_abi_version != XS_MANAGED_ABI_VERSION)
+        {
+            return ManagedHostErrorCode::AbiVersionMismatch;
+        }
+
+        abi_version_ = resolved_abi_version;
+        return ManagedHostErrorCode::None;
+    }
+
     std::filesystem::path runtime_config_path_{};
     std::filesystem::path assembly_path_{};
     std::filesystem::path hostfxr_path_{};
     ManagedGameExports game_exports_{};
+    ManagedServerStubCatalogExports server_stub_catalog_exports_{};
     load_assembly_and_get_function_pointer_fn load_assembly_and_get_function_pointer_{nullptr};
+    std::uint32_t abi_version_{0U};
     bool game_exports_bound_{false};
+    bool server_stub_catalog_exports_bound_{false};
 };
-
 std::string_view ManagedHostErrorCanonicalName(ManagedHostErrorCode code) noexcept
 {
     switch (code)
@@ -612,6 +720,16 @@ ManagedHostErrorCode ManagedRuntimeHost::GetGameExports(ManagedGameExports& expo
     return impl_->GetGameExports(exports);
 }
 
+ManagedHostErrorCode ManagedRuntimeHost::BindServerStubCatalogExports()
+{
+    return impl_->BindServerStubCatalogExports();
+}
+
+ManagedHostErrorCode ManagedRuntimeHost::GetServerStubCatalogExports(ManagedServerStubCatalogExports& exports) const noexcept
+{
+    return impl_->GetServerStubCatalogExports(exports);
+}
+
 bool ManagedRuntimeHost::IsLoaded() const noexcept
 {
     return impl_->IsLoaded();
@@ -620,6 +738,11 @@ bool ManagedRuntimeHost::IsLoaded() const noexcept
 bool ManagedRuntimeHost::AreGameExportsBound() const noexcept
 {
     return impl_->AreGameExportsBound();
+}
+
+bool ManagedRuntimeHost::AreServerStubCatalogExportsBound() const noexcept
+{
+    return impl_->AreServerStubCatalogExportsBound();
 }
 
 load_assembly_and_get_function_pointer_fn ManagedRuntimeHost::load_assembly_and_get_function_pointer() const noexcept

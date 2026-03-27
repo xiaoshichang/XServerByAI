@@ -5,6 +5,8 @@ namespace XServer.Managed.GameLogic.Interop
     public static class ManagedAbi
     {
         public const uint Version = 1;
+        public const int ServerStubEntityTypeMaxUtf8Bytes = 128;
+        public const int ServerStubEntityIdMaxUtf8Bytes = 128;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -31,6 +33,17 @@ namespace XServer.Managed.GameLogic.Interop
         public ulong PlayerId;
         public byte* Payload;
         public uint PayloadLength;
+        public uint Reserved0;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct ManagedServerStubCatalogEntry
+    {
+        public uint StructSize;
+        public uint EntityTypeLength;
+        public fixed byte EntityTypeUtf8[ManagedAbi.ServerStubEntityTypeMaxUtf8Bytes];
+        public uint EntityIdLength;
+        public fixed byte EntityIdUtf8[ManagedAbi.ServerStubEntityIdMaxUtf8Bytes];
         public uint Reserved0;
     }
 }

@@ -2,6 +2,7 @@
 #include "InnerNetwork.h"
 #include "Json.h"
 #include "NodeCommon.h"
+#include "TestManagedConfigJson.h"
 #include "ZmqActiveConnector.h"
 #include "ZmqContext.h"
 
@@ -125,6 +126,7 @@ xs::core::Json MakeClusterConfigJson(
              {"deadLinkCount", 20},
              {"streamMode", false},
          }},
+        {"managed", xs::tests::MakeManagedConfigJson()},
         {"gm", gm_block},
         {"gate",
          xs::core::Json{
@@ -151,8 +153,6 @@ xs::core::Json MakeClusterConfigJson(
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7100}}},
                    }},
-                  {"managed",
-                   xs::core::Json{{"assemblyName", "XServer.Managed.GameLogic"}}},
               }},
          }},
     };
