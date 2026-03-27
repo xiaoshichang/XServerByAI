@@ -46,6 +46,12 @@
 2. `configPath` 指向单个 UTF-8 JSON 配置文件。
 3. `nodeId` 当前支持 `GM`、`Gate<index>`、`Game<index>`。
 
+**开发期管理脚本**
+1. `M3-17` 当前提供 Python 主入口 `tools/cluster_ctl.py`，用于执行 `start` / `kill` 两类本地开发管理命令。
+2. Windows 下提供薄包装脚本 `tools/start_local_cluster.bat` 与 `tools/kill_local_cluster.bat`，默认面向 `configs/local-dev.json`。
+3. `start` 命令按 `GM -> Game[*] -> Gate[*]` 顺序拉起节点，并通过 `GM` 的本地 HTTP `GET /healthz` / `GET /status` 做最小启动探活。
+4. `kill` 命令当前只覆盖 Windows，按“配置路径 + `NodeID` + `xserver-node.exe`”精确匹配并强制终止本机进程，不接入优雅退出流程。
+
 **配置模型**
 1. 顶层配置块固定为 `env`、`logging`、`kcp`、`gm`、`gate`、`game`。
 2. `logging` 与 `kcp` 是集群级公共配置。

@@ -19,3 +19,7 @@
 /logs/
 /.dotnet-cli-home/
 /.cache/
+
+# Python cache
+**/__pycache__/
+**/*.pyc

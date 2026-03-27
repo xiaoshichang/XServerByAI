@@ -47,8 +47,8 @@ M2 C++ 基础运行时
 
 M3 进程与注册 Inner 网络
 目标：GM/Gate/Game 生命周期与启动编排闭环可靠。
-覆盖：注册表一致性、`NodeID` 唯一性、注册流程、心跳超时剔除、“所有节点已上线”通知、`Game -> Gate` 注册与心跳闭环、Game mesh ready 上报、`ServerStubEntity` ownership 下发、`Game` 服务就绪上报、`clusterReady` 状态下发，以及开发用管理命令脚本（集群启动、集群关闭、单机杀进程）。
-测试活动：开发期默认以 `1 GM + N Gate + M Game` 单机多进程方式验证启动/关闭/异常退出，并补充跨机部署下的注册心跳稳定性检查；对 `M3-17` 额外验证 `bat` / `shell` 脚本的启动顺序、关闭顺序、失败回收与单机杀进程行为。
+覆盖：注册表一致性、`NodeID` 唯一性、注册流程、心跳超时剔除、“所有节点已上线”通知、`Game -> Gate` 注册与心跳闭环、Game mesh ready 上报、`ServerStubEntity` ownership 下发、`Game` 服务就绪上报、`clusterReady` 状态下发，以及开发用管理命令脚本（集群启动、Windows 包装脚本、单机杀进程）。
+测试活动：开发期默认以 `1 GM + N Gate + M Game` 单机多进程方式验证启动/关闭/异常退出，并补充跨机部署下的注册心跳稳定性检查；对 `M3-17` 额外验证 Python 主脚本与 Windows `bat` 包装脚本的启动顺序、GM 探活、失败回收与单机杀进程行为。
 入口：GM/Gate/Game 主入口与注册逻辑完成。
 退出：启动闭环稳定，异常情况下能正确恢复或降级。
 交付物：集成测试记录、异常场景验证记录。
