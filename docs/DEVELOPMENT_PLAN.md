@@ -66,7 +66,7 @@
 14. M3-14 实现 `Game→GM` 全部 `Gate` 全连接完成上报、GM ownership 下发，以及 ownership 驱动的本地 Stub 初始化挂点。Deps: M3-12, M3-13 | 状态: 已完成
 15. M3-15 实现 Game 服务就绪状态上报、GM 断线剔除、服务就绪聚合与 `clusterReady` 下发。Deps: M3-05, M3-14 | 状态: 已完成
 16. M3-16 管理命令脚本：集群启动、单机环境下强杀所有节点进程。暂时只实现windows平台。Deps: M3-07, M3-15 | 状态: 已完成
-17. M3-17 managed配置调整到顶层，实现3个占位用的ServerStub，GM实现利用反射获取所有Stub列表。Deps: M3-14 | 状态: 开发中
+17. M3-17 managed配置调整到顶层，实现3个占位用的ServerStub，GM实现利用反射获取所有Stub列表。Deps: M3-14 | 状态: 已完成
 
 **里程碑 M4：网络与会话（16 条）**
 1. M4-01 集成 KCP 库并封装会话对象。Deps: M2-06 | 状态: 未开发
