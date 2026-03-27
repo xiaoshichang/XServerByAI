@@ -51,6 +51,20 @@
           "port": 4000
         }
       }
+    },
+    "Gate1": {
+      "innerNetwork": {
+        "listenEndpoint": {
+          "host": "0.0.0.0",
+          "port": 7001
+        }
+      },
+      "clientNetwork": {
+        "listenEndpoint": {
+          "host": "0.0.0.0",
+          "port": 4001
+        }
+      }
     }
   },
   "game": {
@@ -59,6 +73,17 @@
         "listenEndpoint": {
           "host": "127.0.0.1",
           "port": 7100
+        }
+      },
+      "managed": {
+        "assemblyName": "XServer.Managed.GameLogic"
+      }
+    },
+    "Game1": {
+      "innerNetwork": {
+        "listenEndpoint": {
+          "host": "127.0.0.1",
+          "port": 7101
         }
       },
       "managed": {
