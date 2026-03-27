@@ -92,7 +92,7 @@
 3. M5-03 建立 C# Framework 基础项目（ServerEntity/ServerStubEntity）。Deps: M1-04, M1-14 | 状态: 已完成
 4. M5-04 实现 `ServerEntity` 基类（Id/属性/生命周期）。Deps: M5-03 | 状态: 未开发
 5. M5-05 实现 `ServerStubEntity` 基类（全局服务语义）。Deps: M5-04 | 状态: 未开发
-6. M5-06 实现实体注册表与查找索引。Deps: M5-04 | 状态: 未开发
+6. M5-06 实现 EntityManager 管理所有ServerEntity。实现Game创建ServerStub并等待Stub调用OnReady。 Deps: M5-04 | 状态: 未开发
 7. M5-07 实现实体消息分发（msgId → entity）。Deps: M2-10, M5-06 | 状态: 未开发
 8. M5-08 实现实体路由：session → player proxy → space mailbox。Deps: M1-12, M4-04 | 状态: 未开发
 9. M5-09 实现场景实体模型（SpaceEntity/PlayerEntity）。Deps: M5-04, M5-08 | 状态: 未开发
