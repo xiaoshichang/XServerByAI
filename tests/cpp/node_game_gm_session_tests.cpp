@@ -812,10 +812,7 @@ void TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
     const std::string log_text = ReadDirectoryText(log_dir);
     XS_CHECK(log_text.find("Game node sent GM register request.") != std::string::npos);
     XS_CHECK(log_text.find("Game node accepted GM register success response.") != std::string::npos);
-    XS_CHECK(log_text.find("Game node sent GM heartbeat request.") != std::string::npos);
-    XS_CHECK(log_text.find("Game node accepted GM heartbeat success response.") != std::string::npos);
     XS_CHECK(log_text.find("GM accepted register request.") != std::string::npos);
-    XS_CHECK(log_text.find("GM inner service refreshed heartbeat state.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }
@@ -1306,9 +1303,6 @@ void TestGameNodeStartsGateRegisterOnlyAfterClusterNodesOnlineNotify()
     const std::string log_text = ReadDirectoryText(log_dir);
     XS_CHECK(log_text.find("Game node sent Gate register request.") != std::string::npos);
     XS_CHECK(log_text.find("Game node accepted Gate register success response.") != std::string::npos);
-    XS_CHECK(log_text.find("Game node sent Gate heartbeat request.") != std::string::npos);
-    XS_CHECK(log_text.find("Game node accepted Gate heartbeat success response.") != std::string::npos);
-
     CleanupTestDirectory(base_path);
 }
 

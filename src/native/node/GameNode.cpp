@@ -989,7 +989,7 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM heartbeat success response.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted GM heartbeat success response.", context);
     RefreshMeshReadyState();
 }
 
@@ -1176,7 +1176,7 @@ bool GameNode::SendHeartbeatRequest()
         xs::core::LogContextField{"sentAtUnixMs", ToString(request.sent_at_unix_ms)},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent GM heartbeat request.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node sent GM heartbeat request.", context);
     return true;
 }
 
@@ -1539,7 +1539,7 @@ void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const 
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate heartbeat success response.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted Gate heartbeat success response.", context);
     RefreshMeshReadyState();
 }
 
@@ -1735,7 +1735,7 @@ bool GameNode::SendGateHeartbeatRequest(std::string_view gate_node_id)
         xs::core::LogContextField{"sentAtUnixMs", ToString(request.sent_at_unix_ms)},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent Gate heartbeat request.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node sent Gate heartbeat request.", context);
     return true;
 }
 
@@ -1996,7 +1996,7 @@ void GameNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
         xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node scheduled GM heartbeat timer.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node scheduled GM heartbeat timer.", context);
 }
 
 void GameNode::CancelHeartbeatTimer() noexcept
@@ -2049,7 +2049,7 @@ void GameNode::StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std
         xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
         xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node scheduled Gate heartbeat timer.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node scheduled Gate heartbeat timer.", context);
 }
 
 void GameNode::CancelGateHeartbeatTimer(std::string_view gate_node_id) noexcept

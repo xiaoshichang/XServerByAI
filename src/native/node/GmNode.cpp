@@ -1680,7 +1680,7 @@ void GmNode::HandleHeartbeatMessage(
         return;
     }
 
-    logger().Log(xs::core::LogLevel::Info, "inner", "GM inner service refreshed heartbeat state.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "GM inner service refreshed heartbeat state.", context);
     if (cluster_nodes_online_state_may_change)
     {
         RefreshClusterNodesOnlineState();

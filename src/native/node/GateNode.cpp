@@ -972,7 +972,7 @@ void GateNode::HandleGameHeartbeatMessage(
         return;
     }
 
-    logger().Log(xs::core::LogLevel::Info, "inner", "Gate node refreshed Game heartbeat state.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Gate node refreshed Game heartbeat state.", context);
 }
 
 void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
@@ -1237,7 +1237,7 @@ void GateNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
         xs::core::LogContextField{"nodeId", std::string(node_id())},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Gate node accepted GM heartbeat success response.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Gate node accepted GM heartbeat success response.", context);
 }
 
 bool GateNode::SendRegisterRequest()
@@ -1423,7 +1423,7 @@ bool GateNode::SendHeartbeatRequest()
         xs::core::LogContextField{"sentAtUnixMs", ToString(request.sent_at_unix_ms)},
         xs::core::LogContextField{"clusterReady", cluster_ready_ ? "true" : "false"},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Gate node sent GM heartbeat request.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Gate node sent GM heartbeat request.", context);
     return true;
 }
 
@@ -1541,7 +1541,7 @@ void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
         xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
         xs::core::LogContextField{"clusterReady", cluster_ready_ ? "true" : "false"},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Gate node scheduled GM heartbeat timer.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Gate node scheduled GM heartbeat timer.", context);
 }
 
 void GateNode::CancelHeartbeatTimer() noexcept
