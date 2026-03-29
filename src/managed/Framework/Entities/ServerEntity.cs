@@ -4,10 +4,9 @@ namespace XServer.Managed.Framework.Entities
 {
     public abstract partial class ServerEntity
     {
-        protected ServerEntity(MobilityType mobilityType = MobilityType.Migratable)
+        protected ServerEntity()
         {
             EntityId = Guid.NewGuid();
-            MobilityType = mobilityType;
             LifecycleState = EntityLifecycleState.Constructed;
         }
 
@@ -16,6 +15,9 @@ namespace XServer.Managed.Framework.Entities
 
         public string EntityType => GetType().Name;
 
-        public MobilityType MobilityType { get; }
+        public virtual bool IsMigratable()
+        {
+            return true;
+        }
     }
 }

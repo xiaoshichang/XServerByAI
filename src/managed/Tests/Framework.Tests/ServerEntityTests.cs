@@ -10,7 +10,7 @@ namespace XServer.Managed.Framework.Tests
             var entity = new MigratableEntity();
 
             Assert.Equal(nameof(MigratableEntity), entity.EntityType);
-            Assert.Equal(MobilityType.Migratable, entity.MobilityType);
+            Assert.True(entity.IsMigratable());
             Assert.Equal(EntityLifecycleState.Constructed, entity.LifecycleState);
         }
 
@@ -29,11 +29,11 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
-        public void ServerStubEntity_DefaultsToPinnedMobility()
+        public void ServerStubEntity_DefaultsToNonMigratable()
         {
             var entity = new StubEntity();
 
-            Assert.Equal(MobilityType.Pinned, entity.MobilityType);
+            Assert.False(entity.IsMigratable());
             Assert.Equal(EntityLifecycleState.Constructed, entity.LifecycleState);
         }
 
@@ -119,9 +119,11 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
-        public void LifecycleStateMachine_AllowsPinnedEntityMigrationForNow()
+        public void LifecycleStateMachine_AllowsNonMigratableEntityMigrationForNow()
         {
             var entity = new StubEntity();
+
+            Assert.False(entity.IsMigratable());
 
             entity.Activate();
             entity.BeginMigration();

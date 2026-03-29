@@ -15,9 +15,9 @@
 | `EntityID` | 逻辑实体实例身份；当前由 `ServerEntity` 在构造时生成 GUID，并在该实例生命周期内保持稳定。 |
 | `OwnerGameNodeId` | 当前承载某个实体活动实例的 `Game` 节点标识。任意时刻一个实体只能有一个活动 owner。 |
 | `Activation` | 某个逻辑实体在 `Game` 进程中的运行时实例。 |
-| `MobilityType` | 实体迁移属性，取值为 `Migratable` 或 `Pinned`。 |
-| `Mailbox` | 静态目标地址，适用于 `Pinned` 实体或启动期由 `GM` 分配好的 `ServerStubEntity`。它携带目标 `GameNodeId`，供 `Gate` 直接转发。 |
-| `Proxy` | 动态实体引用，适用于 `Migratable` 实体。它不直接绑定最终 owner，而是依赖 `Gate` 根据最新路由解析目标。 |
+| `IsMigratable()` | 实体是否支持迁移；返回 `true` 表示允许迁移，返回 `false` 表示生命周期内不发生 owner 切换。 |
+| `Mailbox` | 静态目标地址，适用于 `IsMigratable()` 返回 `false` 的实体或启动期由 `GM` 分配好的 `ServerStubEntity`。它携带目标 `GameNodeId`，供 `Gate` 直接转发。 |
+| `Proxy` | 动态实体引用，适用于 `IsMigratable()` 返回 `true` 的实体。它不直接绑定最终 owner，而是依赖 `Gate` 根据最新路由解析目标。 |
 | `ExecutionLane` | 实体串行执行上下文。实体消息、Tick 与异步回调都必须先回到所属 lane，再修改实体状态。 |
 | `assignmentEpoch` | `GM` 下发 ownership 分配的版本号。当前实现固定为 `1`；`Game` 只应基于当前版本初始化本地承载。 |
 | `readyEpoch` | `GM` 聚合所有必需 `Game` 的 ready 后形成的轮次号，随 `clusterReady` 一起下发给 `Gate`。 |
@@ -43,9 +43,9 @@
 8. `Gate` 只有在收到最新 `clusterReady = true` 后，才允许真正打开 `ClientNetwork`；它不能因为本地配置齐全、已连接 `GM`、已拿到部分目录或局部链路健康，就提前开放客户端入口。
 
 **迁移性分类**
-1. `Migratable ServerEntity` 允许显式迁移到新的 `OwnerGameNodeId`，典型示例是 `PlayerEntity`。
-2. `Pinned ServerEntity` 在其生命周期内不发生 owner 切换，典型示例是 `SpaceEntity`。
-3. `ServerStubEntity` 当前默认属于 `Pinned` 语义，但其 owner 并非静态写死，而是由 `GM` 在启动阶段统一分配。
+1. `IsMigratable()` 返回 `true` 的 `ServerEntity` 允许显式迁移到新的 `OwnerGameNodeId`，典型示例是 `PlayerEntity`。
+2. `IsMigratable()` 返回 `false` 的 `ServerEntity` 在其生命周期内不发生 owner 切换，典型示例是 `SpaceEntity`。
+3. `ServerStubEntity` 当前默认通过覆写 `IsMigratable()` 返回 `false`，但其 owner 并非静态写死，而是由 `GM` 在启动阶段统一分配。
 4. 迁移是业务层的显式语义，不是网络层或会话层的隐式副作用。
 
 **职责边界**
