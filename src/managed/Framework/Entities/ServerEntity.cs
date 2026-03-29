@@ -6,7 +6,7 @@ namespace XServer.Managed.Framework.Entities
     {
         protected ServerEntity()
         {
-            ((IServerEntityProperties)this).EntityId = Guid.NewGuid();
+            EntityId = Guid.NewGuid();
             LifecycleState = EntityLifecycleState.Constructed;
         }
 
