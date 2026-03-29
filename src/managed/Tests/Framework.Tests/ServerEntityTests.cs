@@ -39,7 +39,19 @@ namespace XServer.Managed.Framework.Tests
             var entity = new StubEntity();
 
             Assert.False(entity.IsMigratable());
+            Assert.False(entity.IsReady);
             Assert.Equal(EntityLifecycleState.Constructed, entity.LifecycleState);
+        }
+
+        [Fact]
+        public void ServerStubEntity_TryMarkReady_IsIdempotent_AndInvokesOnReadyOnce()
+        {
+            var entity = new ReadyTrackingStubEntity();
+
+            Assert.True(entity.TryMarkReady());
+            Assert.True(entity.IsReady);
+            Assert.False(entity.TryMarkReady());
+            Assert.Equal(1, entity.ReadyCallCount);
         }
 
         [Fact]
@@ -201,6 +213,16 @@ namespace XServer.Managed.Framework.Tests
 
     internal sealed class StubEntity : ServerStubEntity
     {
+    }
+
+    internal sealed class ReadyTrackingStubEntity : ServerStubEntity
+    {
+        public int ReadyCallCount { get; private set; }
+
+        protected override void OnReady()
+        {
+            ReadyCallCount++;
+        }
     }
 
     internal sealed class HookTrackingEntity : ServerEntity

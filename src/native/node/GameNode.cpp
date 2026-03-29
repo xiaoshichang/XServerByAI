@@ -1,17 +1,18 @@
 #include "GameNode.h"
 
 #include "InnerNetwork.h"
+#include "ManagedRuntimeHost.h"
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RegisterCodec.h"
 
+#include <asio/post.hpp>
+
 #include <array>
 #include <chrono>
+#include <cstring>
 #include <cstdint>
-#include <iomanip>
-#include <random>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -39,42 +40,18 @@ std::string ToString(std::uint64_t value)
     return std::to_string(value);
 }
 
-std::string GenerateGuidText()
+std::string DescribeManagedHostError(xs::host::ManagedHostErrorCode code)
 {
-    std::array<std::uint8_t, 16> bytes{};
-    std::random_device random_device;
-    for (std::uint8_t& value : bytes)
-    {
-        value = static_cast<std::uint8_t>(random_device());
-    }
-
-    // RFC 4122 variant + version 4 layout.
-    bytes[6] = static_cast<std::uint8_t>((bytes[6] & 0x0F) | 0x40);
-    bytes[8] = static_cast<std::uint8_t>((bytes[8] & 0x3F) | 0x80);
-
-    std::ostringstream stream;
-    stream << std::hex << std::setfill('0');
-    for (std::size_t index = 0; index < bytes.size(); ++index)
-    {
-        if (index == 4U || index == 6U || index == 8U || index == 10U)
-        {
-            stream << '-';
-        }
-
-        stream << std::setw(2) << static_cast<std::uint32_t>(bytes[index]);
-    }
-
-    return stream.str();
+    return std::string(xs::host::ManagedHostErrorCanonicalName(code)) + ": " +
+           std::string(xs::host::ManagedHostErrorMessage(code));
 }
 
-std::string ResolveServerEntityId(std::string_view assigned_entity_id)
+xs::host::ManagedRuntimeHostOptions BuildManagedRuntimeHostOptions(const xs::core::ManagedConfig& managed_config)
 {
-    if (!assigned_entity_id.empty() && assigned_entity_id != kUnknownServerEntityId)
-    {
-        return std::string(assigned_entity_id);
-    }
-
-    return GenerateGuidText();
+    return xs::host::ManagedRuntimeHostOptions{
+        .runtime_config_path = managed_config.runtime_config_path,
+        .assembly_path = managed_config.assembly_path,
+    };
 }
 
 xs::net::Endpoint ToNetEndpoint(const xs::core::EndpointConfig& endpoint)
@@ -85,6 +62,75 @@ xs::net::Endpoint ToNetEndpoint(const xs::core::EndpointConfig& endpoint)
     };
 }
 
+bool TryReadManagedUtf8String(
+    std::span<const std::uint8_t> utf8_buffer,
+    std::uint32_t utf8_length,
+    std::string* output)
+{
+    if (output == nullptr)
+    {
+        return false;
+    }
+
+    if (static_cast<std::size_t>(utf8_length) > utf8_buffer.size())
+    {
+        return false;
+    }
+
+    output->assign(
+        reinterpret_cast<const char*>(utf8_buffer.data()),
+        static_cast<std::size_t>(utf8_length));
+    return true;
+}
+
+bool TryWriteManagedUtf8String(
+    std::string_view value,
+    std::span<std::uint8_t> utf8_buffer,
+    std::uint32_t* output_length)
+{
+    if (output_length == nullptr)
+    {
+        return false;
+    }
+
+    if (value.size() > utf8_buffer.size())
+    {
+        return false;
+    }
+
+    std::fill(utf8_buffer.begin(), utf8_buffer.end(), static_cast<std::uint8_t>(0));
+    if (!value.empty())
+    {
+        std::memcpy(utf8_buffer.data(), value.data(), value.size());
+    }
+
+    *output_length = static_cast<std::uint32_t>(value.size());
+    return true;
+}
+
+bool HaveEquivalentOwnedAssignments(
+    const std::vector<xs::net::ServerStubOwnershipEntry>& left,
+    const std::vector<xs::net::ServerStubOwnershipEntry>& right)
+{
+    if (left.size() != right.size())
+    {
+        return false;
+    }
+
+    for (std::size_t index = 0U; index < left.size(); ++index)
+    {
+        if (left[index].entity_type != right[index].entity_type ||
+            left[index].entity_id != right[index].entity_id ||
+            left[index].owner_game_node_id != right[index].owner_game_node_id ||
+            left[index].entry_flags != right[index].entry_flags)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 } // namespace
 
 GameNode::GameNode(NodeCommandLineArgs args)
@@ -93,6 +139,23 @@ GameNode::GameNode(NodeCommandLineArgs args)
 }
 
 GameNode::~GameNode() = default;
+
+void GameNode::HandleManagedServerStubReadyCallback(
+    void* context,
+    std::uint64_t assignment_epoch,
+    const xs::host::ManagedServerStubReadyEntry* entry)
+{
+    if (context == nullptr || entry == nullptr)
+    {
+        return;
+    }
+
+    auto* game_node = static_cast<GameNode*>(context);
+    const xs::host::ManagedServerStubReadyEntry entry_copy = *entry;
+    asio::post(game_node->event_loop().executor(), [game_node, assignment_epoch, entry_copy]() mutable {
+        game_node->HandleManagedServerStubReady(assignment_epoch, entry_copy);
+    });
+}
 
 std::string_view GameNode::managed_assembly_name() const noexcept
 {
@@ -196,6 +259,18 @@ NodeErrorCode GameNode::OnInit()
     last_cluster_nodes_online_server_now_unix_ms_ = 0U;
     all_nodes_online_ = false;
     inner_network_remote_sessions().Clear();
+    managed_game_exports_ = xs::host::ManagedGameExports{};
+    managed_game_exports_loaded_ = false;
+
+    const NodeErrorCode managed_runtime_result = InitializeManagedRuntime(config->managed);
+    if (managed_runtime_result != NodeErrorCode::None)
+    {
+        ResetRuntimeState();
+        ResetGmSessionState();
+        ResetGateSessionStates();
+        inner_network_remote_sessions().Clear();
+        return managed_runtime_result;
+    }
 
     InnerNetworkOptions inner_options;
     inner_options.connectors.push_back(
@@ -345,6 +420,78 @@ NodeErrorCode GameNode::OnUninit()
     }
 
     ClearError();
+    return NodeErrorCode::None;
+}
+
+NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& managed_config)
+{
+    const xs::host::ManagedHostErrorCode load_result =
+        managed_runtime_host_.Load(BuildManagedRuntimeHostOptions(managed_config));
+    if (load_result != xs::host::ManagedHostErrorCode::None)
+    {
+        return SetError(
+            NodeErrorCode::NodeInitFailed,
+            "Failed to load Game managed runtime host: " + DescribeManagedHostError(load_result));
+    }
+
+    const xs::host::ManagedHostErrorCode bind_result = managed_runtime_host_.BindGameExports();
+    if (bind_result != xs::host::ManagedHostErrorCode::None)
+    {
+        (void)managed_runtime_host_.Unload();
+        return SetError(
+            NodeErrorCode::NodeInitFailed,
+            "Failed to bind Game managed runtime exports: " + DescribeManagedHostError(bind_result));
+    }
+
+    const xs::host::ManagedHostErrorCode exports_result = managed_runtime_host_.GetGameExports(managed_game_exports_);
+    if (exports_result != xs::host::ManagedHostErrorCode::None)
+    {
+        managed_game_exports_ = xs::host::ManagedGameExports{};
+        (void)managed_runtime_host_.Unload();
+        return SetError(
+            NodeErrorCode::NodeInitFailed,
+            "Failed to read Game managed runtime exports: " + DescribeManagedHostError(exports_result));
+    }
+
+    const std::string node_id_text(node_id());
+    const std::string config_path_text = config_path().lexically_normal().string();
+    const xs::host::ManagedNativeCallbacks native_callbacks{
+        .struct_size = sizeof(xs::host::ManagedNativeCallbacks),
+        .reserved0 = 0U,
+        .context = this,
+        .on_server_stub_ready = &GameNode::HandleManagedServerStubReadyCallback,
+    };
+    const xs::host::ManagedInitArgs init_args{
+        .struct_size = sizeof(xs::host::ManagedInitArgs),
+        .abi_version = xs::host::XS_MANAGED_ABI_VERSION,
+        .process_type = static_cast<std::uint16_t>(role_process_type()),
+        .reserved0 = 0U,
+        .node_id_utf8 = reinterpret_cast<const std::uint8_t*>(node_id_text.data()),
+        .node_id_length = static_cast<std::uint32_t>(node_id_text.size()),
+        .config_path_utf8 = reinterpret_cast<const std::uint8_t*>(config_path_text.data()),
+        .config_path_length = static_cast<std::uint32_t>(config_path_text.size()),
+        .native_callbacks = native_callbacks,
+    };
+
+    const std::int32_t init_result = managed_game_exports_.init(&init_args);
+    if (init_result != 0)
+    {
+        managed_game_exports_ = xs::host::ManagedGameExports{};
+        (void)managed_runtime_host_.Unload();
+        return SetError(
+            NodeErrorCode::NodeInitFailed,
+            "Game managed runtime initialization returned error code " + std::to_string(init_result) + '.');
+    }
+
+    managed_game_exports_loaded_ = true;
+
+    const std::array<xs::core::LogContextField, 4> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        xs::core::LogContextField{"assemblyPath", managed_config.assembly_path.string()},
+        xs::core::LogContextField{"runtimeConfigPath", managed_config.runtime_config_path.string()},
+    };
+    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node loaded managed runtime host.", context);
     return NodeErrorCode::None;
 }
 
@@ -638,6 +785,89 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.", context);
 }
 
+void GameNode::HandleManagedServerStubReady(
+    std::uint64_t assignment_epoch,
+    xs::host::ManagedServerStubReadyEntry entry)
+{
+    if (!managed_game_exports_loaded_ ||
+        assignment_epoch == 0U ||
+        assignment_epoch != ownership_state_.assignment_epoch ||
+        entry.ready == 0U)
+    {
+        return;
+    }
+
+    std::string entity_type;
+    std::string entity_id;
+    if (!TryReadManagedUtf8String(
+            std::span<const std::uint8_t>(
+                entry.entity_type_utf8,
+                xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
+            entry.entity_type_length,
+            &entity_type) ||
+        !TryReadManagedUtf8String(
+            std::span<const std::uint8_t>(
+                entry.entity_id_utf8,
+                xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
+            entry.entity_id_length,
+            &entity_id))
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(assignment_epoch)},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            xs::core::LogContextField{"ready", entry.ready != 0U ? "true" : "false"},
+        };
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "runtime",
+            "Game node failed to decode managed ready callback entry.",
+            context);
+        return;
+    }
+
+    bool owned_by_current_node = false;
+    for (const xs::net::ServerStubOwnershipEntry& owned_assignment : ownership_state_.owned_assignments)
+    {
+        if (owned_assignment.entity_type == entity_type)
+        {
+            owned_by_current_node = true;
+            break;
+        }
+    }
+
+    if (!owned_by_current_node)
+    {
+        return;
+    }
+
+    const xs::net::ServerStubReadyEntry ready_entry{
+        .entity_type = std::move(entity_type),
+        .entity_id = std::move(entity_id),
+        .ready = true,
+        .entry_flags = entry.entry_flags,
+    };
+
+    bool replaced_existing_entry = false;
+    for (xs::net::ServerStubReadyEntry& existing_entry : service_ready_state_.ready_entries)
+    {
+        if (existing_entry.entity_id == ready_entry.entity_id ||
+            existing_entry.entity_type == ready_entry.entity_type)
+        {
+            existing_entry = ready_entry;
+            replaced_existing_entry = true;
+            break;
+        }
+    }
+
+    if (!replaced_existing_entry)
+    {
+        service_ready_state_.ready_entries.push_back(ready_entry);
+    }
+
+    RefreshLocalServiceReadyState();
+}
+
 void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
 {
     InnerNetworkSession* session = gm_session();
@@ -804,7 +1034,12 @@ void GameNode::HandleServerStubOwnershipSync(const xs::net::PacketView& packet)
         return;
     }
 
-    ApplyStubOwnership(sync);
+    if (!ApplyStubOwnership(sync))
+    {
+        session->last_protocol_error = "Game node failed to apply managed ownership sync.";
+        return;
+    }
+
     RefreshLocalServiceReadyState();
     session->last_protocol_error.clear();
 
@@ -1780,6 +2015,9 @@ void GameNode::StartGateConnectors()
 
 void GameNode::ResetRuntimeState() noexcept
 {
+    managed_game_exports_loaded_ = false;
+    managed_game_exports_ = xs::host::ManagedGameExports{};
+    (void)managed_runtime_host_.Unload();
     runtime_state_ = RuntimeState{};
 }
 
@@ -1790,6 +2028,25 @@ void GameNode::ResetMeshReadyState() noexcept
 
 void GameNode::ResetOwnershipState()
 {
+    if (managed_game_exports_loaded_ &&
+        managed_game_exports_.reset_server_stub_ownership != nullptr)
+    {
+        const std::int32_t reset_result = managed_game_exports_.reset_server_stub_ownership();
+        if (reset_result != 0)
+        {
+            const std::array<xs::core::LogContextField, 3> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
+                xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+                xs::core::LogContextField{"resetResult", std::to_string(reset_result)},
+            };
+            logger().Log(
+                xs::core::LogLevel::Warn,
+                "runtime",
+                "Game node failed to reset managed ownership state.",
+                context);
+        }
+    }
+
     ownership_state_ = OwnershipState{};
     ResetServiceReadyState();
 }
@@ -1921,7 +2178,8 @@ void GameNode::RefreshLocalServiceReadyState()
         return;
     }
 
-    if (ownership_state_.owned_assignments.empty() || service_ready_state_.ready_entries.empty())
+    if (ownership_state_.owned_assignments.empty() ||
+        service_ready_state_.ready_entries.size() != ownership_state_.owned_assignments.size())
     {
         return;
     }
@@ -1934,29 +2192,113 @@ void GameNode::RefreshLocalServiceReadyState()
     (void)SendServiceReadyReport();
 }
 
-void GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
+bool GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
 {
+    if (!managed_game_exports_loaded_ ||
+        managed_game_exports_.apply_server_stub_ownership == nullptr)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "runtime",
+            "Game node cannot apply ownership before managed exports are ready.",
+            context);
+        return false;
+    }
+
+    std::vector<xs::host::ManagedServerStubOwnershipEntry> managed_assignments(sync.assignments.size());
+    std::vector<xs::net::ServerStubOwnershipEntry> next_owned_assignments;
+    next_owned_assignments.reserve(sync.assignments.size());
+    for (std::size_t index = 0U; index < sync.assignments.size(); ++index)
+    {
+        const xs::net::ServerStubOwnershipEntry& assignment = sync.assignments[index];
+        xs::host::ManagedServerStubOwnershipEntry& managed_assignment = managed_assignments[index];
+
+        if (!TryWriteManagedUtf8String(
+                assignment.entity_type,
+                std::span<std::uint8_t>(
+                    managed_assignment.entity_type_utf8,
+                    xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
+                &managed_assignment.entity_type_length) ||
+            !TryWriteManagedUtf8String(
+                assignment.entity_id,
+                std::span<std::uint8_t>(
+                    managed_assignment.entity_id_utf8,
+                    xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
+                &managed_assignment.entity_id_length) ||
+            !TryWriteManagedUtf8String(
+                assignment.owner_game_node_id,
+                std::span<std::uint8_t>(
+                    managed_assignment.owner_game_node_id_utf8,
+                    xs::host::XS_MANAGED_NODE_ID_MAX_UTF8_BYTES),
+                &managed_assignment.owner_game_node_id_length))
+        {
+            const std::array<xs::core::LogContextField, 4> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
+                xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+                xs::core::LogContextField{"entityType", assignment.entity_type},
+                xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+            };
+            logger().Log(
+                xs::core::LogLevel::Warn,
+                "runtime",
+                "Game node failed to encode managed ownership assignment.",
+                context);
+            return false;
+        }
+
+        managed_assignment.entry_flags = assignment.entry_flags;
+        if (assignment.owner_game_node_id == node_id())
+        {
+            next_owned_assignments.push_back(assignment);
+        }
+    }
+
+    const bool preserve_ready_state =
+        sync.assignment_epoch == ownership_state_.assignment_epoch &&
+        HaveEquivalentOwnedAssignments(next_owned_assignments, ownership_state_.owned_assignments);
+
+    xs::host::ManagedServerStubOwnershipSync managed_sync{};
+    managed_sync.struct_size = sizeof(xs::host::ManagedServerStubOwnershipSync);
+    managed_sync.status_flags = sync.status_flags;
+    managed_sync.assignment_epoch = sync.assignment_epoch;
+    managed_sync.server_now_unix_ms = sync.server_now_unix_ms;
+    managed_sync.assignment_count = static_cast<std::uint32_t>(managed_assignments.size());
+    managed_sync.assignments = managed_assignments.empty() ? nullptr : managed_assignments.data();
+
+    const std::int32_t apply_result = managed_game_exports_.apply_server_stub_ownership(&managed_sync);
+    if (apply_result != 0)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
+            xs::core::LogContextField{"assignmentCount", ToString(sync.assignments.size())},
+            xs::core::LogContextField{"applyResult", std::to_string(apply_result)},
+            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
+        };
+        logger().Log(
+            xs::core::LogLevel::Warn,
+            "runtime",
+            "Game node failed to apply ownership in managed runtime.",
+            context);
+        return false;
+    }
+
     ownership_state_.assignment_epoch = sync.assignment_epoch;
     ownership_state_.server_now_unix_ms = sync.server_now_unix_ms;
     ownership_state_.assignments = sync.assignments;
-    ownership_state_.owned_assignments.clear();
-    service_ready_state_.ready_entries.clear();
+    ownership_state_.owned_assignments = std::move(next_owned_assignments);
 
-    for (const xs::net::ServerStubOwnershipEntry& entry : sync.assignments)
+    if (!preserve_ready_state)
     {
-        if (entry.owner_game_node_id == node_id())
-        {
-            ownership_state_.owned_assignments.push_back(entry);
-            const std::string entity_id = ResolveServerEntityId(entry.entity_id);
-            service_ready_state_.ready_entries.push_back(
-                xs::net::ServerStubReadyEntry{
-                    .entity_type = entry.entity_type,
-                    .entity_id = entity_id,
-                    .ready = true,
-                    .entry_flags = 0U,
-                });
-        }
+        service_ready_state_ = ServiceReadyState{};
     }
+
+    return true;
 }
 
 void GameNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)

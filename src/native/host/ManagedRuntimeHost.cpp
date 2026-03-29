@@ -450,6 +450,62 @@ class ManagedRuntimeHost::Impl final
         }
         resolved_exports.on_tick = reinterpret_cast<ManagedOnTickFn>(raw_on_tick);
 
+        void* raw_apply_server_stub_ownership = nullptr;
+        result = ResolveManagedEntryPoint(
+            load_assembly_and_get_function_pointer_,
+            assembly_path_,
+            kManagedGameExportsTypeName,
+            kManagedGameApplyServerStubOwnershipMethodName,
+            &raw_apply_server_stub_ownership);
+        if (result != ManagedHostErrorCode::None)
+        {
+            return result;
+        }
+        resolved_exports.apply_server_stub_ownership =
+            reinterpret_cast<ManagedApplyServerStubOwnershipFn>(raw_apply_server_stub_ownership);
+
+        void* raw_reset_server_stub_ownership = nullptr;
+        result = ResolveManagedEntryPoint(
+            load_assembly_and_get_function_pointer_,
+            assembly_path_,
+            kManagedGameExportsTypeName,
+            kManagedGameResetServerStubOwnershipMethodName,
+            &raw_reset_server_stub_ownership);
+        if (result != ManagedHostErrorCode::None)
+        {
+            return result;
+        }
+        resolved_exports.reset_server_stub_ownership =
+            reinterpret_cast<ManagedResetServerStubOwnershipFn>(raw_reset_server_stub_ownership);
+
+        void* raw_get_ready_server_stub_count = nullptr;
+        result = ResolveManagedEntryPoint(
+            load_assembly_and_get_function_pointer_,
+            assembly_path_,
+            kManagedGameExportsTypeName,
+            kManagedGameGetReadyServerStubCountMethodName,
+            &raw_get_ready_server_stub_count);
+        if (result != ManagedHostErrorCode::None)
+        {
+            return result;
+        }
+        resolved_exports.get_ready_server_stub_count =
+            reinterpret_cast<ManagedGetReadyServerStubCountFn>(raw_get_ready_server_stub_count);
+
+        void* raw_get_ready_server_stub_entry = nullptr;
+        result = ResolveManagedEntryPoint(
+            load_assembly_and_get_function_pointer_,
+            assembly_path_,
+            kManagedGameExportsTypeName,
+            kManagedGameGetReadyServerStubEntryMethodName,
+            &raw_get_ready_server_stub_entry);
+        if (result != ManagedHostErrorCode::None)
+        {
+            return result;
+        }
+        resolved_exports.get_ready_server_stub_entry =
+            reinterpret_cast<ManagedGetReadyServerStubEntryFn>(raw_get_ready_server_stub_entry);
+
         game_exports_ = resolved_exports;
         game_exports_bound_ = true;
         return ManagedHostErrorCode::None;

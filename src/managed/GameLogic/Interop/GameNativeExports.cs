@@ -1,14 +1,21 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
+using XServer.Managed.Framework.Entities;
 using XServer.Managed.GameLogic.Catalog;
+using XServer.Managed.GameLogic.Runtime;
 
 namespace XServer.Managed.GameLogic.Interop
 {
     public static unsafe class GameNativeExports
     {
-        private const int CatalogInvalidArgument = -1;
-        private const int CatalogIndexOutOfRange = -2;
-        private const int CatalogBufferTooSmall = -3;
+        private const int InvalidArgument = -1;
+        private const int RuntimeNotInitialized = -2;
+        private const int IndexOutOfRange = -3;
+        private const int BufferTooSmall = -4;
+        private const int OwnershipApplyErrorOffset = 1000;
+        private static ManagedNativeCallbacks s_nativeCallbacks;
+        private static GameNodeRuntimeState? s_runtimeState;
 
         [UnmanagedCallersOnly(EntryPoint = "GameNativeGetAbiVersion", CallConvs = [typeof(CallConvCdecl)])]
         public static uint GameNativeGetAbiVersion()
@@ -19,8 +26,25 @@ namespace XServer.Managed.GameLogic.Interop
         [UnmanagedCallersOnly(EntryPoint = "GameNativeInit", CallConvs = [typeof(CallConvCdecl)])]
         public static int GameNativeInit(ManagedInitArgs* args)
         {
-            _ = args;
-            return 0;
+            if (args == null || args->StructSize < sizeof(ManagedInitArgs) || args->AbiVersion != ManagedAbi.Version)
+            {
+                return InvalidArgument;
+            }
+
+            try
+            {
+                s_nativeCallbacks = args->NativeCallbacks;
+                string nodeId = ReadUtf8(args->NodeIdUtf8, args->NodeIdLength);
+                _ = ReadUtf8(args->ConfigPathUtf8, args->ConfigPathLength);
+                s_runtimeState = new GameNodeRuntimeState(nodeId, NotifyNativeServerStubReady);
+                return 0;
+            }
+            catch
+            {
+                s_nativeCallbacks = default;
+                s_runtimeState = null;
+                return InvalidArgument;
+            }
         }
 
         [UnmanagedCallersOnly(EntryPoint = "GameNativeOnMessage", CallConvs = [typeof(CallConvCdecl)])]
@@ -38,12 +62,104 @@ namespace XServer.Managed.GameLogic.Interop
             return 0;
         }
 
+        [UnmanagedCallersOnly(EntryPoint = "GameNativeApplyServerStubOwnership", CallConvs = [typeof(CallConvCdecl)])]
+        public static int GameNativeApplyServerStubOwnership(ManagedServerStubOwnershipSync* sync)
+        {
+            if (s_runtimeState == null)
+            {
+                return RuntimeNotInitialized;
+            }
+
+            try
+            {
+                ServerStubOwnershipSnapshot snapshot = BuildOwnershipSnapshot(sync);
+                GameNodeRuntimeStateErrorCode result = s_runtimeState.ApplyOwnership(snapshot);
+                return result == GameNodeRuntimeStateErrorCode.None
+                    ? 0
+                    : OwnershipApplyErrorOffset + (int)result;
+            }
+            catch
+            {
+                return InvalidArgument;
+            }
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "GameNativeResetServerStubOwnership", CallConvs = [typeof(CallConvCdecl)])]
+        public static int GameNativeResetServerStubOwnership()
+        {
+            if (s_runtimeState == null)
+            {
+                return RuntimeNotInitialized;
+            }
+
+            s_runtimeState.ResetOwnership();
+            return 0;
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "GameNativeGetReadyServerStubCount", CallConvs = [typeof(CallConvCdecl)])]
+        public static int GameNativeGetReadyServerStubCount(uint* count)
+        {
+            if (count == null)
+            {
+                return InvalidArgument;
+            }
+
+            if (s_runtimeState == null)
+            {
+                *count = 0;
+                return RuntimeNotInitialized;
+            }
+
+            try
+            {
+                *count = checked((uint)GetReadyServerStubs().Count);
+                return 0;
+            }
+            catch
+            {
+                *count = 0;
+                return InvalidArgument;
+            }
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "GameNativeGetReadyServerStubEntry", CallConvs = [typeof(CallConvCdecl)])]
+        public static int GameNativeGetReadyServerStubEntry(uint index, ManagedServerStubReadyEntry* entry)
+        {
+            if (entry == null || entry->StructSize < sizeof(ManagedServerStubReadyEntry))
+            {
+                return InvalidArgument;
+            }
+
+            ResetReadyEntry(entry);
+            if (s_runtimeState == null)
+            {
+                return RuntimeNotInitialized;
+            }
+
+            try
+            {
+                IReadOnlyList<ServerStubEntity> readyStubs = GetReadyServerStubs();
+                if (index >= (uint)readyStubs.Count)
+                {
+                    return IndexOutOfRange;
+                }
+
+                ServerStubEntity stub = readyStubs[(int)index];
+                return WriteReadyEntry(stub, entry);
+            }
+            catch
+            {
+                ResetReadyEntry(entry);
+                return InvalidArgument;
+            }
+        }
+
         [UnmanagedCallersOnly(EntryPoint = "GameNativeGetServerStubCatalogCount", CallConvs = [typeof(CallConvCdecl)])]
         public static int GameNativeGetServerStubCatalogCount(uint* count)
         {
             if (count == null)
             {
-                return CatalogInvalidArgument;
+                return InvalidArgument;
             }
 
             try
@@ -54,7 +170,7 @@ namespace XServer.Managed.GameLogic.Interop
             catch
             {
                 *count = 0;
-                return CatalogInvalidArgument;
+                return InvalidArgument;
             }
         }
 
@@ -63,7 +179,7 @@ namespace XServer.Managed.GameLogic.Interop
         {
             if (entry == null || entry->StructSize < sizeof(ManagedServerStubCatalogEntry))
             {
-                return CatalogInvalidArgument;
+                return InvalidArgument;
             }
 
             try
@@ -71,7 +187,7 @@ namespace XServer.Managed.GameLogic.Interop
                 if (index >= (uint)ServerStubCatalog.Entries.Count)
                 {
                     ResetCatalogEntry(entry);
-                    return CatalogIndexOutOfRange;
+                    return IndexOutOfRange;
                 }
 
                 ServerStubCatalogEntry catalogEntry = ServerStubCatalog.Entries[(int)index];
@@ -102,8 +218,67 @@ namespace XServer.Managed.GameLogic.Interop
             catch
             {
                 ResetCatalogEntry(entry);
-                return CatalogInvalidArgument;
+                return InvalidArgument;
             }
+        }
+
+        private static IReadOnlyList<ServerStubEntity> GetReadyServerStubs()
+        {
+            if (s_runtimeState == null)
+            {
+                return Array.Empty<ServerStubEntity>();
+            }
+
+            return s_runtimeState.ReadyServerStubs;
+        }
+
+        private static ServerStubOwnershipSnapshot BuildOwnershipSnapshot(ManagedServerStubOwnershipSync* sync)
+        {
+            if (sync == null || sync->StructSize < sizeof(ManagedServerStubOwnershipSync))
+            {
+                throw new ArgumentException("Ownership sync pointer is invalid.");
+            }
+
+            if (sync->AssignmentCount != 0 && sync->Assignments == null)
+            {
+                throw new ArgumentException("Ownership assignments pointer is invalid.");
+            }
+
+            ServerStubOwnershipAssignment[] assignments = new ServerStubOwnershipAssignment[sync->AssignmentCount];
+            for (int index = 0; index < assignments.Length; ++index)
+            {
+                ManagedServerStubOwnershipEntry* entry = sync->Assignments + index;
+                if (entry->StructSize < sizeof(ManagedServerStubOwnershipEntry))
+                {
+                    throw new ArgumentException("Ownership entry pointer is invalid.");
+                }
+
+                string entityType;
+                string entityId;
+                string ownerGameNodeId;
+
+                byte* entityTypeBuffer = entry->EntityTypeUtf8;
+                entityType = ReadUtf8(
+                    entityTypeBuffer,
+                    entry->EntityTypeLength,
+                    ManagedAbi.ServerStubEntityTypeMaxUtf8Bytes);
+
+                byte* entityIdBuffer = entry->EntityIdUtf8;
+                entityId = ReadUtf8(
+                    entityIdBuffer,
+                    entry->EntityIdLength,
+                    ManagedAbi.ServerStubEntityIdMaxUtf8Bytes);
+
+                byte* ownerNodeIdBuffer = entry->OwnerGameNodeIdUtf8;
+                ownerGameNodeId = ReadUtf8(
+                    ownerNodeIdBuffer,
+                    entry->OwnerGameNodeIdLength,
+                    ManagedAbi.NodeIdMaxUtf8Bytes);
+
+                assignments[index] = new ServerStubOwnershipAssignment(entityType, entityId, ownerGameNodeId);
+            }
+
+            return new ServerStubOwnershipSnapshot(sync->AssignmentEpoch, assignments);
         }
 
         private static void ResetCatalogEntry(ManagedServerStubCatalogEntry* entry)
@@ -124,17 +299,100 @@ namespace XServer.Managed.GameLogic.Interop
             }
         }
 
+        private static void ResetReadyEntry(ManagedServerStubReadyEntry* entry)
+        {
+            entry->StructSize = (uint)sizeof(ManagedServerStubReadyEntry);
+            entry->EntityTypeLength = 0;
+            entry->EntityIdLength = 0;
+            entry->Ready = 0;
+            entry->EntryFlags = 0;
+
+            for (int index = 0; index < ManagedAbi.ServerStubEntityTypeMaxUtf8Bytes; ++index)
+            {
+                entry->EntityTypeUtf8[index] = 0;
+            }
+
+            for (int index = 0; index < ManagedAbi.ServerStubEntityIdMaxUtf8Bytes; ++index)
+            {
+                entry->EntityIdUtf8[index] = 0;
+            }
+
+            for (int index = 0; index < 3; ++index)
+            {
+                entry->Reserved0[index] = 0;
+            }
+        }
+
+        private static void NotifyNativeServerStubReady(ulong assignmentEpoch, ServerStubEntity stub)
+        {
+            if (s_nativeCallbacks.OnServerStubReady == null)
+            {
+                return;
+            }
+
+            ManagedServerStubReadyEntry entry = default;
+            ResetReadyEntry(&entry);
+
+            try
+            {
+                if (WriteReadyEntry(stub, &entry) != 0)
+                {
+                    return;
+                }
+
+                s_nativeCallbacks.OnServerStubReady(
+                    s_nativeCallbacks.Context,
+                    assignmentEpoch,
+                    &entry);
+            }
+            catch
+            {
+            }
+        }
+
+        private static int WriteReadyEntry(ServerStubEntity stub, ManagedServerStubReadyEntry* entry)
+        {
+            byte[] entityTypeUtf8 = Encoding.UTF8.GetBytes(stub.EntityType);
+            byte[] entityIdUtf8 = Encoding.UTF8.GetBytes(stub.EntityId.ToString());
+
+            byte* entityTypeBuffer = entry->EntityTypeUtf8;
+            int entityTypeResult = CopyUtf8(
+                entityTypeUtf8,
+                entityTypeBuffer,
+                ManagedAbi.ServerStubEntityTypeMaxUtf8Bytes,
+                &entry->EntityTypeLength);
+            if (entityTypeResult != 0)
+            {
+                return entityTypeResult;
+            }
+
+            byte* entityIdBuffer = entry->EntityIdUtf8;
+            int entityIdResult = CopyUtf8(
+                entityIdUtf8,
+                entityIdBuffer,
+                ManagedAbi.ServerStubEntityIdMaxUtf8Bytes,
+                &entry->EntityIdLength);
+            if (entityIdResult != 0)
+            {
+                return entityIdResult;
+            }
+
+            entry->Ready = stub.IsReady ? (byte)1 : (byte)0;
+            entry->EntryFlags = 0;
+            return 0;
+        }
+
         private static int CopyUtf8(byte[] source, byte* destination, int capacity, uint* outputLength)
         {
             if (outputLength == null)
             {
-                return CatalogInvalidArgument;
+                return InvalidArgument;
             }
 
             if (source.Length > capacity)
             {
                 *outputLength = 0;
-                return CatalogBufferTooSmall;
+                return BufferTooSmall;
             }
 
             for (int index = 0; index < source.Length; ++index)
@@ -149,6 +407,31 @@ namespace XServer.Managed.GameLogic.Interop
 
             *outputLength = (uint)source.Length;
             return 0;
+        }
+
+        private static string ReadUtf8(byte* utf8, uint utf8Length)
+        {
+            if (utf8 == null)
+            {
+                if (utf8Length == 0)
+                {
+                    return string.Empty;
+                }
+
+                throw new ArgumentException("UTF-8 pointer is null.");
+            }
+
+            return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(utf8, checked((int)utf8Length)));
+        }
+
+        private static string ReadUtf8(byte* utf8, uint utf8Length, int capacity)
+        {
+            if (utf8Length > capacity)
+            {
+                throw new ArgumentException("UTF-8 length exceeds capacity.");
+            }
+
+            return ReadUtf8(utf8, utf8Length);
         }
     }
 }

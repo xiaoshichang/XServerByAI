@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ManagedRuntimeHost.h"
 #include "ServerNode.h"
 #include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
@@ -75,6 +76,11 @@ class GameNode final : public ServerNode
     void HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload);
     void HandleGmMessage(std::span<const std::byte> payload);
     void HandleGateMessage(std::string_view gate_node_id, std::span<const std::byte> payload);
+    static void HandleManagedServerStubReadyCallback(
+        void* context,
+        std::uint64_t assignment_epoch,
+        const xs::host::ManagedServerStubReadyEntry* entry);
+    void HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry);
     void HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet);
     void HandleServerStubOwnershipSync(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
@@ -87,6 +93,7 @@ class GameNode final : public ServerNode
     [[nodiscard]] bool SendServiceReadyReport();
     [[nodiscard]] bool SendGateRegisterRequest(std::string_view gate_node_id);
     [[nodiscard]] bool SendGateHeartbeatRequest(std::string_view gate_node_id);
+    [[nodiscard]] NodeErrorCode InitializeManagedRuntime(const xs::core::ManagedConfig& managed_config);
     void StartGateConnectors();
     void ResetRuntimeState() noexcept;
     void ResetMeshReadyState() noexcept;
@@ -96,7 +103,7 @@ class GameNode final : public ServerNode
     void ResetGateSessionStates();
     void RefreshMeshReadyState();
     void RefreshLocalServiceReadyState();
-    void ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync);
+    [[nodiscard]] bool ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync);
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;
@@ -113,6 +120,9 @@ class GameNode final : public ServerNode
     MeshReadyState mesh_ready_state_{};
     OwnershipState ownership_state_{};
     ServiceReadyState service_ready_state_{};
+    xs::host::ManagedRuntimeHost managed_runtime_host_{};
+    xs::host::ManagedGameExports managed_game_exports_{};
+    bool managed_game_exports_loaded_{false};
     std::uint64_t last_cluster_nodes_online_server_now_unix_ms_{0U};
     bool all_nodes_online_{false};
 };

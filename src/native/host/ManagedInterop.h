@@ -13,19 +13,41 @@
 namespace xs::host
 {
 
-inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 1;
+inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 3;
 inline constexpr std::string_view kManagedGameExportsTypeName =
     "XServer.Managed.GameLogic.Interop.GameNativeExports, XServer.Managed.GameLogic";
 inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNativeGetAbiVersion";
 inline constexpr std::string_view kManagedGameInitMethodName = "GameNativeInit";
 inline constexpr std::string_view kManagedGameOnMessageMethodName = "GameNativeOnMessage";
 inline constexpr std::string_view kManagedGameOnTickMethodName = "GameNativeOnTick";
+inline constexpr std::string_view kManagedGameApplyServerStubOwnershipMethodName =
+    "GameNativeApplyServerStubOwnership";
+inline constexpr std::string_view kManagedGameResetServerStubOwnershipMethodName =
+    "GameNativeResetServerStubOwnership";
+inline constexpr std::string_view kManagedGameGetReadyServerStubCountMethodName =
+    "GameNativeGetReadyServerStubCount";
+inline constexpr std::string_view kManagedGameGetReadyServerStubEntryMethodName =
+    "GameNativeGetReadyServerStubEntry";
 inline constexpr std::string_view kManagedGameGetServerStubCatalogCountMethodName =
     "GameNativeGetServerStubCatalogCount";
 inline constexpr std::string_view kManagedGameGetServerStubCatalogEntryMethodName =
     "GameNativeGetServerStubCatalogEntry";
+inline constexpr std::size_t XS_MANAGED_NODE_ID_MAX_UTF8_BYTES = 128u;
 inline constexpr std::size_t XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES = 128u;
 inline constexpr std::size_t XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES = 128u;
+
+struct ManagedServerStubReadyEntry;
+
+using ManagedOnServerStubReadyCallbackFn =
+    void (XS_MANAGED_CALLTYPE*)(void* context, std::uint64_t assignment_epoch, const ManagedServerStubReadyEntry* entry);
+
+struct ManagedNativeCallbacks
+{
+    std::uint32_t struct_size{sizeof(ManagedNativeCallbacks)};
+    std::uint32_t reserved0{0u};
+    void* context{nullptr};
+    ManagedOnServerStubReadyCallbackFn on_server_stub_ready{nullptr};
+};
 
 struct ManagedInitArgs
 {
@@ -37,6 +59,7 @@ struct ManagedInitArgs
     std::uint32_t node_id_length;
     const std::uint8_t* config_path_utf8;
     std::uint32_t config_path_length;
+    ManagedNativeCallbacks native_callbacks{};
 };
 
 struct ManagedMessageView
@@ -62,10 +85,51 @@ struct ManagedServerStubCatalogEntry
     std::uint32_t reserved0{0u};
 };
 
+struct ManagedServerStubOwnershipEntry
+{
+    std::uint32_t struct_size{sizeof(ManagedServerStubOwnershipEntry)};
+    std::uint32_t entity_type_length{0u};
+    std::uint8_t entity_type_utf8[XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES]{};
+    std::uint32_t entity_id_length{0u};
+    std::uint8_t entity_id_utf8[XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES]{};
+    std::uint32_t owner_game_node_id_length{0u};
+    std::uint8_t owner_game_node_id_utf8[XS_MANAGED_NODE_ID_MAX_UTF8_BYTES]{};
+    std::uint32_t entry_flags{0u};
+};
+
+struct ManagedServerStubOwnershipSync
+{
+    std::uint32_t struct_size{sizeof(ManagedServerStubOwnershipSync)};
+    std::uint32_t status_flags{0u};
+    std::uint64_t assignment_epoch{0u};
+    std::uint64_t server_now_unix_ms{0u};
+    std::uint32_t assignment_count{0u};
+    std::uint32_t reserved0{0u};
+    ManagedServerStubOwnershipEntry* assignments{nullptr};
+};
+
+struct ManagedServerStubReadyEntry
+{
+    std::uint32_t struct_size{sizeof(ManagedServerStubReadyEntry)};
+    std::uint32_t entity_type_length{0u};
+    std::uint8_t entity_type_utf8[XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES]{};
+    std::uint32_t entity_id_length{0u};
+    std::uint8_t entity_id_utf8[XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES]{};
+    std::uint8_t ready{0u};
+    std::uint8_t reserved0[3]{};
+    std::uint32_t entry_flags{0u};
+};
+
 using ManagedGetAbiVersionFn = std::uint32_t (XS_MANAGED_CALLTYPE*)();
 using ManagedInitFn = std::int32_t (XS_MANAGED_CALLTYPE*)(const ManagedInitArgs* args);
 using ManagedOnMessageFn = std::int32_t (XS_MANAGED_CALLTYPE*)(const ManagedMessageView* message);
 using ManagedOnTickFn = std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint64_t now_unix_ms_utc, std::uint32_t delta_ms);
+using ManagedApplyServerStubOwnershipFn =
+    std::int32_t (XS_MANAGED_CALLTYPE*)(const ManagedServerStubOwnershipSync* sync);
+using ManagedResetServerStubOwnershipFn = std::int32_t (XS_MANAGED_CALLTYPE*)();
+using ManagedGetReadyServerStubCountFn = std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint32_t* count);
+using ManagedGetReadyServerStubEntryFn =
+    std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint32_t index, ManagedServerStubReadyEntry* entry);
 using ManagedGetServerStubCatalogCountFn = std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint32_t* count);
 using ManagedGetServerStubCatalogEntryFn =
     std::int32_t (XS_MANAGED_CALLTYPE*)(std::uint32_t index, ManagedServerStubCatalogEntry* entry);
@@ -77,6 +141,10 @@ struct ManagedGameExports
     ManagedInitFn init{nullptr};
     ManagedOnMessageFn on_message{nullptr};
     ManagedOnTickFn on_tick{nullptr};
+    ManagedApplyServerStubOwnershipFn apply_server_stub_ownership{nullptr};
+    ManagedResetServerStubOwnershipFn reset_server_stub_ownership{nullptr};
+    ManagedGetReadyServerStubCountFn get_ready_server_stub_count{nullptr};
+    ManagedGetReadyServerStubEntryFn get_ready_server_stub_entry{nullptr};
 };
 
 struct ManagedServerStubCatalogExports

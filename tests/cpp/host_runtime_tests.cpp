@@ -1,11 +1,15 @@
 #include "ManagedRuntimeHost.h"
 
 #include <array>
+#include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #ifndef XS_TEST_GAMELOGIC_ASSEMBLY_PATH
 #error XS_TEST_GAMELOGIC_ASSEMBLY_PATH must be defined.
@@ -94,6 +98,140 @@ std::string ReadManagedUtf8(const std::uint8_t* buffer, std::uint32_t length)
     }
 
     return std::string(reinterpret_cast<const char*>(buffer), static_cast<std::size_t>(length));
+}
+
+bool IsCanonicalGuidText(std::string_view value)
+{
+    if (value.size() != 36U)
+    {
+        return false;
+    }
+
+    for (std::size_t index = 0U; index < value.size(); ++index)
+    {
+        if (index == 8U || index == 13U || index == 18U || index == 23U)
+        {
+            if (value[index] != '-')
+            {
+                return false;
+            }
+
+            continue;
+        }
+
+        if (!std::isxdigit(static_cast<unsigned char>(value[index])))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryWriteManagedUtf8String(
+    std::string_view value,
+    std::span<std::uint8_t> utf8_buffer,
+    std::uint32_t* output_length)
+{
+    if (output_length == nullptr || value.size() > utf8_buffer.size())
+    {
+        return false;
+    }
+
+    std::fill(utf8_buffer.begin(), utf8_buffer.end(), static_cast<std::uint8_t>(0));
+    if (!value.empty())
+    {
+        std::memcpy(utf8_buffer.data(), value.data(), value.size());
+    }
+
+    *output_length = static_cast<std::uint32_t>(value.size());
+    return true;
+}
+
+struct ManagedInitInput final
+{
+    std::string node_id{};
+    std::string config_path{};
+    xs::host::ManagedInitArgs args{};
+};
+
+struct ReadyCallbackCapture final
+{
+    std::uint32_t call_count{0U};
+    std::vector<std::uint64_t> assignment_epochs{};
+    std::vector<std::string> entity_types{};
+    std::vector<std::string> entity_ids{};
+};
+
+void OnServerStubReady(
+    void* context,
+    std::uint64_t assignment_epoch,
+    const xs::host::ManagedServerStubReadyEntry* entry)
+{
+    auto* capture = static_cast<ReadyCallbackCapture*>(context);
+    if (capture == nullptr || entry == nullptr)
+    {
+        XS_CHECK(false);
+        return;
+    }
+
+    ++capture->call_count;
+    capture->assignment_epochs.push_back(assignment_epoch);
+    capture->entity_types.push_back(ReadManagedUtf8(entry->entity_type_utf8, entry->entity_type_length));
+    capture->entity_ids.push_back(ReadManagedUtf8(entry->entity_id_utf8, entry->entity_id_length));
+}
+
+void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
+{
+    if (input == nullptr)
+    {
+        XS_CHECK(false);
+        return;
+    }
+
+    input->node_id = std::string(node_id);
+    input->config_path = NormalizePath(kManagedRuntimeConfigPath).string();
+    input->args = xs::host::ManagedInitArgs{
+        .struct_size = sizeof(xs::host::ManagedInitArgs),
+        .abi_version = xs::host::XS_MANAGED_ABI_VERSION,
+        .process_type = 2U,
+        .reserved0 = 0U,
+        .node_id_utf8 = reinterpret_cast<const std::uint8_t*>(input->node_id.data()),
+        .node_id_length = static_cast<std::uint32_t>(input->node_id.size()),
+        .config_path_utf8 = reinterpret_cast<const std::uint8_t*>(input->config_path.data()),
+        .config_path_length = static_cast<std::uint32_t>(input->config_path.size()),
+    };
+    input->args.native_callbacks.struct_size = sizeof(xs::host::ManagedNativeCallbacks);
+    input->args.native_callbacks.reserved0 = 0U;
+    input->args.native_callbacks.context = nullptr;
+    input->args.native_callbacks.on_server_stub_ready = nullptr;
+}
+
+xs::host::ManagedServerStubOwnershipEntry MakeOwnershipEntry(
+    std::string_view entity_type,
+    std::string_view entity_id,
+    std::string_view owner_game_node_id)
+{
+    xs::host::ManagedServerStubOwnershipEntry entry{};
+    XS_CHECK(TryWriteManagedUtf8String(
+        entity_type,
+        std::span<std::uint8_t>(
+            entry.entity_type_utf8,
+            xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
+        &entry.entity_type_length));
+    XS_CHECK(TryWriteManagedUtf8String(
+        entity_id,
+        std::span<std::uint8_t>(
+            entry.entity_id_utf8,
+            xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
+        &entry.entity_id_length));
+    XS_CHECK(TryWriteManagedUtf8String(
+        owner_game_node_id,
+        std::span<std::uint8_t>(
+            entry.owner_game_node_id_utf8,
+            xs::host::XS_MANAGED_NODE_ID_MAX_UTF8_BYTES),
+        &entry.owner_game_node_id_length));
+    return entry;
 }
 
 void TestManagedAssetsExist()
@@ -233,10 +371,87 @@ void TestLoadAndBindGameExportsSucceed()
     XS_CHECK(exports.init != nullptr);
     XS_CHECK(exports.on_message != nullptr);
     XS_CHECK(exports.on_tick != nullptr);
+    XS_CHECK(exports.apply_server_stub_ownership != nullptr);
+    XS_CHECK(exports.reset_server_stub_ownership != nullptr);
+    XS_CHECK(exports.get_ready_server_stub_count != nullptr);
+    XS_CHECK(exports.get_ready_server_stub_entry != nullptr);
     XS_CHECK(exports.get_abi_version() == xs::host::XS_MANAGED_ABI_VERSION);
-    XS_CHECK(exports.init(nullptr) == 0);
+
+    ManagedInitInput init_input{};
+    PopulateManagedInitInput(&init_input, "Game0");
+    ReadyCallbackCapture ready_callback_capture{};
+    init_input.args.native_callbacks.context = &ready_callback_capture;
+    init_input.args.native_callbacks.on_server_stub_ready = &OnServerStubReady;
+    XS_CHECK(exports.init(&init_input.args) == 0);
     XS_CHECK(exports.on_message(nullptr) == 0);
     XS_CHECK(exports.on_tick(1234, 16) == 0);
+    XS_CHECK(exports.reset_server_stub_ownership() == 0);
+
+    std::uint32_t ready_count = 0U;
+    XS_CHECK(exports.get_ready_server_stub_count(&ready_count) == 0);
+    XS_CHECK(ready_count == 0U);
+
+    std::vector<xs::host::ManagedServerStubOwnershipEntry> assignments;
+    assignments.push_back(MakeOwnershipEntry("MatchService", "unknown", "Game0"));
+    assignments.push_back(MakeOwnershipEntry("ChatService", "unknown", "Game9"));
+    assignments.push_back(MakeOwnershipEntry("LeaderboardService", "unknown", "Game0"));
+
+    xs::host::ManagedServerStubOwnershipSync ownership_sync{};
+    ownership_sync.struct_size = sizeof(xs::host::ManagedServerStubOwnershipSync);
+    ownership_sync.assignment_epoch = 7U;
+    ownership_sync.assignment_count = static_cast<std::uint32_t>(assignments.size());
+    ownership_sync.assignments = assignments.data();
+
+    XS_CHECK(exports.apply_server_stub_ownership(&ownership_sync) == 0);
+    XS_CHECK(ready_callback_capture.call_count == 2U);
+    XS_CHECK(ready_callback_capture.assignment_epochs.size() == 2U);
+    XS_CHECK(ready_callback_capture.entity_types.size() == 2U);
+    XS_CHECK(ready_callback_capture.entity_ids.size() == 2U);
+    if (ready_callback_capture.assignment_epochs.size() == 2U)
+    {
+        XS_CHECK(ready_callback_capture.assignment_epochs[0] == 7U);
+        XS_CHECK(ready_callback_capture.assignment_epochs[1] == 7U);
+    }
+    if (ready_callback_capture.entity_types.size() == 2U)
+    {
+        XS_CHECK(ready_callback_capture.entity_types[0] == "MatchService");
+        XS_CHECK(ready_callback_capture.entity_types[1] == "LeaderboardService");
+    }
+    if (ready_callback_capture.entity_ids.size() == 2U)
+    {
+        XS_CHECK(IsCanonicalGuidText(ready_callback_capture.entity_ids[0]));
+        XS_CHECK(IsCanonicalGuidText(ready_callback_capture.entity_ids[1]));
+        XS_CHECK(ready_callback_capture.entity_ids[0] != ready_callback_capture.entity_ids[1]);
+    }
+    XS_CHECK(exports.get_ready_server_stub_count(&ready_count) == 0);
+    XS_CHECK(ready_count == 2U);
+
+    xs::host::ManagedServerStubReadyEntry first_ready_entry{};
+    xs::host::ManagedServerStubReadyEntry second_ready_entry{};
+    XS_CHECK(exports.get_ready_server_stub_entry(0U, &first_ready_entry) == 0);
+    XS_CHECK(exports.get_ready_server_stub_entry(1U, &second_ready_entry) == 0);
+    XS_CHECK(ReadManagedUtf8(first_ready_entry.entity_type_utf8, first_ready_entry.entity_type_length) == "MatchService");
+    XS_CHECK(ReadManagedUtf8(second_ready_entry.entity_type_utf8, second_ready_entry.entity_type_length) == "LeaderboardService");
+    XS_CHECK(IsCanonicalGuidText(ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length)));
+    XS_CHECK(IsCanonicalGuidText(ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length)));
+    XS_CHECK(
+        ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length) !=
+        ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
+    XS_CHECK(first_ready_entry.ready == 1U);
+    XS_CHECK(second_ready_entry.ready == 1U);
+    if (ready_callback_capture.entity_ids.size() == 2U)
+    {
+        XS_CHECK(
+            ready_callback_capture.entity_ids[0] ==
+            ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length));
+        XS_CHECK(
+            ready_callback_capture.entity_ids[1] ==
+            ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
+    }
+
+    XS_CHECK(exports.reset_server_stub_ownership() == 0);
+    XS_CHECK(exports.get_ready_server_stub_count(&ready_count) == 0);
+    XS_CHECK(ready_count == 0U);
 
     XS_CHECK(host.Unload() == xs::host::ManagedHostErrorCode::None);
     XS_CHECK(!host.IsLoaded());

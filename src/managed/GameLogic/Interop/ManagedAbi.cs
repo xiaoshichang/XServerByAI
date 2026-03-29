@@ -4,9 +4,19 @@ namespace XServer.Managed.GameLogic.Interop
 {
     public static class ManagedAbi
     {
-        public const uint Version = 1;
+        public const uint Version = 3;
+        public const int NodeIdMaxUtf8Bytes = 128;
         public const int ServerStubEntityTypeMaxUtf8Bytes = 128;
         public const int ServerStubEntityIdMaxUtf8Bytes = 128;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct ManagedNativeCallbacks
+    {
+        public uint StructSize;
+        public uint Reserved0;
+        public void* Context;
+        public delegate* unmanaged[Cdecl]<void*, ulong, ManagedServerStubReadyEntry*, void> OnServerStubReady;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -20,6 +30,7 @@ namespace XServer.Managed.GameLogic.Interop
         public uint NodeIdLength;
         public byte* ConfigPathUtf8;
         public uint ConfigPathLength;
+        public ManagedNativeCallbacks NativeCallbacks;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -45,5 +56,43 @@ namespace XServer.Managed.GameLogic.Interop
         public uint EntityIdLength;
         public fixed byte EntityIdUtf8[ManagedAbi.ServerStubEntityIdMaxUtf8Bytes];
         public uint Reserved0;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct ManagedServerStubOwnershipEntry
+    {
+        public uint StructSize;
+        public uint EntityTypeLength;
+        public fixed byte EntityTypeUtf8[ManagedAbi.ServerStubEntityTypeMaxUtf8Bytes];
+        public uint EntityIdLength;
+        public fixed byte EntityIdUtf8[ManagedAbi.ServerStubEntityIdMaxUtf8Bytes];
+        public uint OwnerGameNodeIdLength;
+        public fixed byte OwnerGameNodeIdUtf8[ManagedAbi.NodeIdMaxUtf8Bytes];
+        public uint EntryFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct ManagedServerStubOwnershipSync
+    {
+        public uint StructSize;
+        public uint StatusFlags;
+        public ulong AssignmentEpoch;
+        public ulong ServerNowUnixMs;
+        public uint AssignmentCount;
+        public uint Reserved0;
+        public ManagedServerStubOwnershipEntry* Assignments;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct ManagedServerStubReadyEntry
+    {
+        public uint StructSize;
+        public uint EntityTypeLength;
+        public fixed byte EntityTypeUtf8[ManagedAbi.ServerStubEntityTypeMaxUtf8Bytes];
+        public uint EntityIdLength;
+        public fixed byte EntityIdUtf8[ManagedAbi.ServerStubEntityIdMaxUtf8Bytes];
+        public byte Ready;
+        public fixed byte Reserved0[3];
+        public uint EntryFlags;
     }
 }

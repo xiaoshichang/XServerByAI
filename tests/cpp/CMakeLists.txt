@@ -263,12 +263,17 @@ function(xs_add_managed_runtime_asset asset_name project_path output_dir)
                 DOTNET_CLI_HOME=${CMAKE_BINARY_DIR}/dotnet-cli-home
                 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
                 DOTNET_NOLOGO=1
+                DOTNET_ADD_GLOBAL_TOOLS_TO_PATH=0
+                DOTNET_GENERATE_ASPNET_CERTIFICATE=0
+                MSBuildEnableWorkloadResolver=false
                 "${DOTNET_EXECUTABLE}"
                 build
                 "${project_path}"
                 -c
                 Debug
                 --nologo
+                --no-restore
+                -m:1
                 -p:GenerateRuntimeConfigurationFiles=true
                 "-p:OutDir=${${asset_name}_OUTPUT_DIR_CMAKE}/"
         DEPENDS

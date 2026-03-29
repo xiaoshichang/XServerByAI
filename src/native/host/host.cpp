@@ -49,10 +49,19 @@ static_assert(
         decltype(&xs::host::ManagedRuntimeHost::GetServerStubCatalogExports),
         xs::host::ManagedHostErrorCode (xs::host::ManagedRuntimeHost::*)(xs::host::ManagedServerStubCatalogExports&) const noexcept>,
     "ManagedRuntimeHost::GetServerStubCatalogExports must return only ManagedHostErrorCode plus output exports.");
-static_assert(xs::host::XS_MANAGED_ABI_VERSION == 1u, "Managed ABI version must remain aligned with docs/MANAGED_INTEROP.md.");
+static_assert(xs::host::XS_MANAGED_ABI_VERSION == 3u, "Managed ABI version must remain aligned with docs/MANAGED_INTEROP.md.");
 static_assert(
     offsetof(xs::host::ManagedInitArgs, abi_version) == 4,
     "ManagedInitArgs::abi_version offset must remain ABI compatible.");
+static_assert(
+    sizeof(xs::host::ManagedNativeCallbacks) == 24u,
+    "ManagedNativeCallbacks must remain ABI compatible with managed interop.");
+static_assert(
+    sizeof(xs::host::ManagedInitArgs) == 72u,
+    "ManagedInitArgs must remain ABI compatible with managed interop.");
+static_assert(
+    offsetof(xs::host::ManagedInitArgs, native_callbacks) > offsetof(xs::host::ManagedInitArgs, config_path_length),
+    "ManagedInitArgs native callbacks order must remain ABI compatible.");
 static_assert(
     offsetof(xs::host::ManagedMessageView, payload) > offsetof(xs::host::ManagedMessageView, player_id),
     "ManagedMessageView payload field order must remain ABI compatible.");
@@ -63,6 +72,24 @@ static_assert(
     offsetof(xs::host::ManagedServerStubCatalogEntry, entity_id_utf8) >
         offsetof(xs::host::ManagedServerStubCatalogEntry, entity_id_length),
     "ManagedServerStubCatalogEntry entity ID buffer order must remain ABI compatible.");
+static_assert(
+    sizeof(xs::host::ManagedServerStubOwnershipEntry) == 404u,
+    "ManagedServerStubOwnershipEntry must remain ABI compatible with managed interop.");
+static_assert(
+    offsetof(xs::host::ManagedServerStubOwnershipEntry, owner_game_node_id_utf8) >
+        offsetof(xs::host::ManagedServerStubOwnershipEntry, owner_game_node_id_length),
+    "ManagedServerStubOwnershipEntry owner node buffer order must remain ABI compatible.");
+static_assert(
+    offsetof(xs::host::ManagedServerStubOwnershipSync, assignments) >
+        offsetof(xs::host::ManagedServerStubOwnershipSync, assignment_count),
+    "ManagedServerStubOwnershipSync assignments pointer order must remain ABI compatible.");
+static_assert(
+    sizeof(xs::host::ManagedServerStubReadyEntry) == 276u,
+    "ManagedServerStubReadyEntry must remain ABI compatible with managed interop.");
+static_assert(
+    offsetof(xs::host::ManagedServerStubReadyEntry, entry_flags) >
+        offsetof(xs::host::ManagedServerStubReadyEntry, ready),
+    "ManagedServerStubReadyEntry ready field order must remain ABI compatible.");
 static_assert(
     static_cast<std::int32_t>(xs::host::ManagedHostErrorCode::RuntimeInitializeFailed) == 4008,
     "ManagedHostErrorCode values must remain aligned with docs/ERROR_CODE.md.");
