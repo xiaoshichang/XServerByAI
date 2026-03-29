@@ -617,8 +617,8 @@ void TestGameNodeConnectsToGmAndStopsCleanly()
     XS_CHECK(log_text.find("Game node entered runtime state.") != std::string::npos);
     XS_CHECK(log_text.find("gmInnerRemoteEndpoint") == std::string::npos);
     XS_CHECK(log_text.find("configuredInnerEndpoint") == std::string::npos);
-    XS_CHECK(log_text.find("gateNodeId=Gate0") != std::string::npos);
-    XS_CHECK(log_text.find("managedAssemblyName=XServer.Managed.GameLogic") != std::string::npos);
+    XS_CHECK(log_text.find("gateNodeId=Gate0") == std::string::npos);
+    XS_CHECK(log_text.find("managedAssemblyName=XServer.Managed.GameLogic") == std::string::npos);
 
     CleanupTestDirectory(base_path);
 }

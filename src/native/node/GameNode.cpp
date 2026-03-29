@@ -27,8 +27,7 @@ constexpr std::string_view kGameBuildVersion = "dev";
 constexpr std::string_view kGmRemoteNodeId = "GM";
 constexpr std::string_view kUnknownServerEntityId = "unknown";
 constexpr std::uint16_t kResponseFlags = static_cast<std::uint16_t>(xs::net::PacketFlag::Response);
-constexpr std::uint16_t kErrorResponseFlags =
-    kResponseFlags | static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
+constexpr std::uint16_t kErrorResponseFlags = kResponseFlags | static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -62,10 +61,7 @@ xs::net::Endpoint ToNetEndpoint(const xs::core::EndpointConfig& endpoint)
     };
 }
 
-bool TryReadManagedUtf8String(
-    std::span<const std::uint8_t> utf8_buffer,
-    std::uint32_t utf8_length,
-    std::string* output)
+bool TryReadManagedUtf8String(std::span<const std::uint8_t> utf8_buffer, std::uint32_t utf8_length, std::string* output)
 {
     if (output == nullptr)
     {
@@ -77,16 +73,12 @@ bool TryReadManagedUtf8String(
         return false;
     }
 
-    output->assign(
-        reinterpret_cast<const char*>(utf8_buffer.data()),
-        static_cast<std::size_t>(utf8_length));
+    output->assign(reinterpret_cast<const char*>(utf8_buffer.data()), static_cast<std::size_t>(utf8_length));
     return true;
 }
 
-bool TryWriteManagedUtf8String(
-    std::string_view value,
-    std::span<std::uint8_t> utf8_buffer,
-    std::uint32_t* output_length)
+bool TryWriteManagedUtf8String(std::string_view value, std::span<std::uint8_t> utf8_buffer,
+                               std::uint32_t* output_length)
 {
     if (output_length == nullptr)
     {
@@ -108,9 +100,8 @@ bool TryWriteManagedUtf8String(
     return true;
 }
 
-bool HaveEquivalentOwnedAssignments(
-    const std::vector<xs::net::ServerStubOwnershipEntry>& left,
-    const std::vector<xs::net::ServerStubOwnershipEntry>& right)
+bool HaveEquivalentOwnedAssignments(const std::vector<xs::net::ServerStubOwnershipEntry>& left,
+                                    const std::vector<xs::net::ServerStubOwnershipEntry>& right)
 {
     if (left.size() != right.size())
     {
@@ -119,8 +110,7 @@ bool HaveEquivalentOwnedAssignments(
 
     for (std::size_t index = 0U; index < left.size(); ++index)
     {
-        if (left[index].entity_type != right[index].entity_type ||
-            left[index].entity_id != right[index].entity_id ||
+        if (left[index].entity_type != right[index].entity_type || left[index].entity_id != right[index].entity_id ||
             left[index].owner_game_node_id != right[index].owner_game_node_id ||
             left[index].entry_flags != right[index].entry_flags)
         {
@@ -133,17 +123,14 @@ bool HaveEquivalentOwnedAssignments(
 
 } // namespace
 
-GameNode::GameNode(NodeCommandLineArgs args)
-    : ServerNode(std::move(args))
+GameNode::GameNode(NodeCommandLineArgs args) : ServerNode(std::move(args))
 {
 }
 
 GameNode::~GameNode() = default;
 
-void GameNode::HandleManagedServerStubReadyCallback(
-    void* context,
-    std::uint64_t assignment_epoch,
-    const xs::host::ManagedServerStubReadyEntry* entry)
+void GameNode::HandleManagedServerStubReadyCallback(void* context, std::uint64_t assignment_epoch,
+                                                    const xs::host::ManagedServerStubReadyEntry* entry)
 {
     if (context == nullptr || entry == nullptr)
     {
@@ -152,9 +139,11 @@ void GameNode::HandleManagedServerStubReadyCallback(
 
     auto* game_node = static_cast<GameNode*>(context);
     const xs::host::ManagedServerStubReadyEntry entry_copy = *entry;
-    asio::post(game_node->event_loop().executor(), [game_node, assignment_epoch, entry_copy]() mutable {
-        game_node->HandleManagedServerStubReady(assignment_epoch, entry_copy);
-    });
+    asio::post(game_node->event_loop().executor(),
+               [game_node, assignment_epoch, entry_copy]() mutable
+               {
+                   game_node->HandleManagedServerStubReady(assignment_epoch, entry_copy);
+               });
 }
 
 std::string_view GameNode::managed_assembly_name() const noexcept
@@ -234,7 +223,8 @@ NodeErrorCode GameNode::OnInit()
 
     if (gm_endpoint.port == 0U)
     {
-        return SetError(NodeErrorCode::ConfigLoadFailed, "GM innerNetwork.listenEndpoint.port must be greater than zero.");
+        return SetError(NodeErrorCode::ConfigLoadFailed,
+                        "GM innerNetwork.listenEndpoint.port must be greater than zero.");
     }
 
     const xs::core::EndpointConfig& inner_endpoint = config->inner_network_listen_endpoint;
@@ -245,9 +235,8 @@ NodeErrorCode GameNode::OnInit()
 
     if (inner_endpoint.port == 0U)
     {
-        return SetError(
-            NodeErrorCode::ConfigLoadFailed,
-            "Game innerNetwork.listenEndpoint.port must be greater than zero.");
+        return SetError(NodeErrorCode::ConfigLoadFailed,
+                        "Game innerNetwork.listenEndpoint.port must be greater than zero.");
     }
 
     runtime_state_ = RuntimeState{};
@@ -273,31 +262,28 @@ NodeErrorCode GameNode::OnInit()
     }
 
     InnerNetworkOptions inner_options;
-    inner_options.connectors.push_back(
-        {
-            .id = std::string(kGmRemoteNodeId),
-            .remote_endpoint = BuildTcpEndpoint(gm_endpoint),
-            .routing_id = std::string(node_id()),
+    inner_options.connectors.push_back({
+        .id = std::string(kGmRemoteNodeId),
+        .remote_endpoint = BuildTcpEndpoint(gm_endpoint),
+        .routing_id = std::string(node_id()),
+    });
+
+    const auto register_remote_session = [this](xs::core::ProcessType process_type, std::string_view remote_node_id,
+                                                const xs::core::EndpointConfig& endpoint)
+    {
+        const InnerNetworkSessionManagerErrorCode session_result = inner_network_remote_sessions().Register({
+            .process_type = process_type,
+            .node_id = std::string(remote_node_id),
+            .inner_network_endpoint = ToNetEndpoint(endpoint),
         });
+        if (session_result != InnerNetworkSessionManagerErrorCode::None)
+        {
+            return SetError(NodeErrorCode::NodeInitFailed,
+                            std::string(InnerNetworkSessionManagerErrorMessage(session_result)));
+        }
 
-    const auto register_remote_session =
-        [this](xs::core::ProcessType process_type, std::string_view remote_node_id, const xs::core::EndpointConfig& endpoint) {
-            const InnerNetworkSessionManagerErrorCode session_result =
-                inner_network_remote_sessions().Register(
-                    {
-                        .process_type = process_type,
-                        .node_id = std::string(remote_node_id),
-                        .inner_network_endpoint = ToNetEndpoint(endpoint),
-                    });
-            if (session_result != InnerNetworkSessionManagerErrorCode::None)
-            {
-                return SetError(
-                    NodeErrorCode::NodeInitFailed,
-                    std::string(InnerNetworkSessionManagerErrorMessage(session_result)));
-            }
-
-            return NodeErrorCode::None;
-        };
+        return NodeErrorCode::None;
+    };
 
     if (register_remote_session(xs::core::ProcessType::Gm, kGmRemoteNodeId, gm_endpoint) != NodeErrorCode::None)
     {
@@ -308,33 +294,29 @@ NodeErrorCode GameNode::OnInit()
     {
         if (gate_config.inner_network_listen_endpoint.host.empty())
         {
-            return SetError(
-                NodeErrorCode::ConfigLoadFailed,
-                "Gate innerNetwork.listenEndpoint.host must not be empty for " + gate_node_id + '.');
+            return SetError(NodeErrorCode::ConfigLoadFailed,
+                            "Gate innerNetwork.listenEndpoint.host must not be empty for " + gate_node_id + '.');
         }
 
         if (gate_config.inner_network_listen_endpoint.port == 0U)
         {
-            return SetError(
-                NodeErrorCode::ConfigLoadFailed,
-                "Gate innerNetwork.listenEndpoint.port must be greater than zero for " + gate_node_id + '.');
+            return SetError(NodeErrorCode::ConfigLoadFailed,
+                            "Gate innerNetwork.listenEndpoint.port must be greater than zero for " + gate_node_id +
+                                '.');
         }
 
-        const NodeErrorCode session_result = register_remote_session(
-            xs::core::ProcessType::Gate,
-            gate_node_id,
-            gate_config.inner_network_listen_endpoint);
+        const NodeErrorCode session_result = register_remote_session(xs::core::ProcessType::Gate, gate_node_id,
+                                                                     gate_config.inner_network_listen_endpoint);
         if (session_result != NodeErrorCode::None)
         {
             return session_result;
         }
 
-        inner_options.connectors.push_back(
-            {
-                .id = gate_node_id,
-                .remote_endpoint = BuildTcpEndpoint(gate_config.inner_network_listen_endpoint),
-                .routing_id = std::string(node_id()),
-            });
+        inner_options.connectors.push_back({
+            .id = gate_node_id,
+            .remote_endpoint = BuildTcpEndpoint(gate_config.inner_network_listen_endpoint),
+            .routing_id = std::string(node_id()),
+        });
     }
 
     const NodeErrorCode init_result = InitInnerNetwork(std::move(inner_options));
@@ -347,21 +329,18 @@ NodeErrorCode GameNode::OnInit()
         return init_result;
     }
 
-    inner_network()->SetConnectorStateHandler([this](std::string_view remote_node_id, ipc::ZmqConnectionState state) {
-        HandleConnectorStateChanged(remote_node_id, state);
-    });
-    inner_network()->SetConnectorMessageHandler([this](std::string_view remote_node_id, std::vector<std::byte> payload) {
-        HandleConnectorMessage(remote_node_id, payload);
-    });
+    inner_network()->SetConnectorStateHandler(
+        [this](std::string_view remote_node_id, ipc::ZmqConnectionState state)
+        {
+            HandleConnectorStateChanged(remote_node_id, state);
+        });
+    inner_network()->SetConnectorMessageHandler(
+        [this](std::string_view remote_node_id, std::vector<std::byte> payload)
+        {
+            HandleConnectorMessage(remote_node_id, payload);
+        });
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
-        xs::core::LogContextField{"buildVersion", std::string(kGameBuildVersion)},
-        xs::core::LogContextField{"connectorCount", ToString(inner_network()->connector_count())},
-    };
-    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node configured runtime skeleton.", context);
+    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node configured runtime skeleton.");
 
     ClearError();
     return NodeErrorCode::None;
@@ -381,15 +360,7 @@ NodeErrorCode GameNode::OnRun()
         return SetError(inner_result, std::string(inner_network()->last_error_message()));
     }
 
-    const std::array<xs::core::LogContextField, 3> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{
-            "gmInnerState",
-            std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
-        },
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node entered runtime state.", context);
+    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node entered runtime state.");
 
     ClearError();
     return NodeErrorCode::None;
@@ -429,18 +400,16 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
         managed_runtime_host_.Load(BuildManagedRuntimeHostOptions(managed_config));
     if (load_result != xs::host::ManagedHostErrorCode::None)
     {
-        return SetError(
-            NodeErrorCode::NodeInitFailed,
-            "Failed to load Game managed runtime host: " + DescribeManagedHostError(load_result));
+        return SetError(NodeErrorCode::NodeInitFailed,
+                        "Failed to load Game managed runtime host: " + DescribeManagedHostError(load_result));
     }
 
     const xs::host::ManagedHostErrorCode bind_result = managed_runtime_host_.BindGameExports();
     if (bind_result != xs::host::ManagedHostErrorCode::None)
     {
         (void)managed_runtime_host_.Unload();
-        return SetError(
-            NodeErrorCode::NodeInitFailed,
-            "Failed to bind Game managed runtime exports: " + DescribeManagedHostError(bind_result));
+        return SetError(NodeErrorCode::NodeInitFailed,
+                        "Failed to bind Game managed runtime exports: " + DescribeManagedHostError(bind_result));
     }
 
     const xs::host::ManagedHostErrorCode exports_result = managed_runtime_host_.GetGameExports(managed_game_exports_);
@@ -448,9 +417,8 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
     {
         managed_game_exports_ = xs::host::ManagedGameExports{};
         (void)managed_runtime_host_.Unload();
-        return SetError(
-            NodeErrorCode::NodeInitFailed,
-            "Failed to read Game managed runtime exports: " + DescribeManagedHostError(exports_result));
+        return SetError(NodeErrorCode::NodeInitFailed,
+                        "Failed to read Game managed runtime exports: " + DescribeManagedHostError(exports_result));
     }
 
     const std::string node_id_text(node_id());
@@ -478,20 +446,13 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
     {
         managed_game_exports_ = xs::host::ManagedGameExports{};
         (void)managed_runtime_host_.Unload();
-        return SetError(
-            NodeErrorCode::NodeInitFailed,
-            "Game managed runtime initialization returned error code " + std::to_string(init_result) + '.');
+        return SetError(NodeErrorCode::NodeInitFailed,
+                        "Game managed runtime initialization returned error code " + std::to_string(init_result) + '.');
     }
 
     managed_game_exports_loaded_ = true;
 
-    const std::array<xs::core::LogContextField, 4> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        xs::core::LogContextField{"assemblyPath", managed_config.assembly_path.string()},
-        xs::core::LogContextField{"runtimeConfigPath", managed_config.runtime_config_path.string()},
-    };
-    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node loaded managed runtime host.", context);
+    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node loaded managed runtime host.");
     return NodeErrorCode::None;
 }
 
@@ -516,13 +477,7 @@ void GameNode::HandleGmConnectionStateChanged(ipc::ZmqConnectionState state)
 
     session->connection_state = state;
 
-    const std::array<xs::core::LogContextField, 4> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gmInnerState", std::string(ipc::ZmqConnectionStateName(state))},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed GM inner connection state change.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed GM inner connection state change.");
 
     if (state != ipc::ZmqConnectionState::Connected)
     {
@@ -545,12 +500,7 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
     }
 
     session->connection_state = state;
-    const std::array<xs::core::LogContextField, 3> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-        xs::core::LogContextField{"gateInnerState", std::string(ipc::ZmqConnectionStateName(state))},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed Gate inner connection state change.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed Gate inner connection state change.");
 
     if (state != ipc::ZmqConnectionState::Connected)
     {
@@ -568,8 +518,8 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
         return;
     }
 
-    if (state == ipc::ZmqConnectionState::Connected && all_nodes_online_ &&
-        !session->registered && !session->register_in_flight)
+    if (state == ipc::ZmqConnectionState::Connected && all_nodes_online_ && !session->registered &&
+        !session->register_in_flight)
     {
         (void)SendGateRegisterRequest(gate_node_id);
     }
@@ -602,32 +552,14 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
 
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
-            xs::core::LogContextField{
-                "gmInnerState",
-                std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
-            },
-            xs::core::LogContextField{"packetError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node ignored malformed GM inner packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node ignored malformed GM inner packet.");
         return;
     }
 
-    const auto log_invalid_response_envelope = [&](std::string_view protocol_error, std::string_view log_message) {
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-            xs::core::LogContextField{
-                "gmInnerState",
-                std::string(ipc::ZmqConnectionStateName(gm_inner_connection_state())),
-            },
-        };
+    const auto log_invalid_response_envelope = [&](std::string_view protocol_error, std::string_view log_message)
+    {
         session->last_protocol_error = std::string(protocol_error);
-        logger().Log(xs::core::LogLevel::Warn, "inner", log_message, context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", log_message);
     };
 
     if (packet.header.msg_id == xs::net::kInnerClusterNodesOnlineNotifyMsgId)
@@ -644,9 +576,8 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
 
     if (packet.header.seq == xs::net::kPacketSeqNone)
     {
-        log_invalid_response_envelope(
-            "GM response envelope is invalid.",
-            "Game node ignored GM response with an invalid envelope.");
+        log_invalid_response_envelope("GM response envelope is invalid.",
+                                      "Game node ignored GM response with an invalid envelope.");
         return;
     }
 
@@ -654,9 +585,8 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
     {
         if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
         {
-            log_invalid_response_envelope(
-                "GM response envelope is invalid.",
-                "Game node ignored GM response with an invalid envelope.");
+            log_invalid_response_envelope("GM response envelope is invalid.",
+                                          "Game node ignored GM response with an invalid envelope.");
             return;
         }
 
@@ -668,9 +598,8 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
     {
         if (packet.header.flags != kResponseFlags)
         {
-            log_invalid_response_envelope(
-                "GM heartbeat response envelope is invalid.",
-                "Game node ignored GM heartbeat response with an invalid envelope.");
+            log_invalid_response_envelope("GM heartbeat response envelope is invalid.",
+                                          "Game node ignored GM heartbeat response with an invalid envelope.");
             return;
         }
 
@@ -680,19 +609,12 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
 
     if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
     {
-        log_invalid_response_envelope(
-            "GM response envelope is invalid.",
-            "Game node ignored GM response with an invalid envelope.");
+        log_invalid_response_envelope("GM response envelope is invalid.",
+                                      "Game node ignored GM response with an invalid envelope.");
         return;
     }
 
-    const std::array<xs::core::LogContextField, 4> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-        xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported GM response packet.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported GM response packet.");
 }
 
 void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const std::byte> payload)
@@ -709,33 +631,20 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
 
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
-            xs::core::LogContextField{"packetError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node ignored malformed Gate inner packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node ignored malformed Gate inner packet.");
         return;
     }
 
-    const auto log_invalid_response_envelope = [&](std::string_view protocol_error, std::string_view log_message) {
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-        };
+    const auto log_invalid_response_envelope = [&](std::string_view protocol_error, std::string_view log_message)
+    {
         session->last_protocol_error = std::string(protocol_error);
-        logger().Log(xs::core::LogLevel::Warn, "inner", log_message, context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", log_message);
     };
 
     if (packet.header.seq == xs::net::kPacketSeqNone)
     {
-        log_invalid_response_envelope(
-            "Gate response envelope is invalid.",
-            "Game node ignored Gate response with an invalid envelope.");
+        log_invalid_response_envelope("Gate response envelope is invalid.",
+                                      "Game node ignored Gate response with an invalid envelope.");
         return;
     }
 
@@ -743,9 +652,8 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
     {
         if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
         {
-            log_invalid_response_envelope(
-                "Gate response envelope is invalid.",
-                "Game node ignored Gate response with an invalid envelope.");
+            log_invalid_response_envelope("Gate response envelope is invalid.",
+                                          "Game node ignored Gate response with an invalid envelope.");
             return;
         }
 
@@ -757,9 +665,8 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
     {
         if (packet.header.flags != kResponseFlags)
         {
-            log_invalid_response_envelope(
-                "Gate heartbeat response envelope is invalid.",
-                "Game node ignored Gate heartbeat response with an invalid envelope.");
+            log_invalid_response_envelope("Gate heartbeat response envelope is invalid.",
+                                          "Game node ignored Gate heartbeat response with an invalid envelope.");
             return;
         }
 
@@ -769,30 +676,18 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
 
     if (packet.header.flags != kResponseFlags && packet.header.flags != kErrorResponseFlags)
     {
-        log_invalid_response_envelope(
-            "Gate response envelope is invalid.",
-            "Game node ignored Gate response with an invalid envelope.");
+        log_invalid_response_envelope("Gate response envelope is invalid.",
+                                      "Game node ignored Gate response with an invalid envelope.");
         return;
     }
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-        xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-        xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.");
 }
 
-void GameNode::HandleManagedServerStubReady(
-    std::uint64_t assignment_epoch,
-    xs::host::ManagedServerStubReadyEntry entry)
+void GameNode::HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry)
 {
-    if (!managed_game_exports_loaded_ ||
-        assignment_epoch == 0U ||
-        assignment_epoch != ownership_state_.assignment_epoch ||
-        entry.ready == 0U)
+    if (!managed_game_exports_loaded_ || assignment_epoch == 0U ||
+        assignment_epoch != ownership_state_.assignment_epoch || entry.ready == 0U)
     {
         return;
     }
@@ -800,29 +695,14 @@ void GameNode::HandleManagedServerStubReady(
     std::string entity_type;
     std::string entity_id;
     if (!TryReadManagedUtf8String(
-            std::span<const std::uint8_t>(
-                entry.entity_type_utf8,
-                xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
-            entry.entity_type_length,
-            &entity_type) ||
-        !TryReadManagedUtf8String(
-            std::span<const std::uint8_t>(
-                entry.entity_id_utf8,
-                xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
-            entry.entity_id_length,
-            &entity_id))
+            std::span<const std::uint8_t>(entry.entity_type_utf8,
+                                          xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
+            entry.entity_type_length, &entity_type) ||
+        !TryReadManagedUtf8String(std::span<const std::uint8_t>(
+                                      entry.entity_id_utf8, xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
+                                  entry.entity_id_length, &entity_id))
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(assignment_epoch)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            xs::core::LogContextField{"ready", entry.ready != 0U ? "true" : "false"},
-        };
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "runtime",
-            "Game node failed to decode managed ready callback entry.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "runtime", "Game node failed to decode managed ready callback entry.");
         return;
     }
 
@@ -851,8 +731,7 @@ void GameNode::HandleManagedServerStubReady(
     bool replaced_existing_entry = false;
     for (xs::net::ServerStubReadyEntry& existing_entry : service_ready_state_.ready_entries)
     {
-        if (existing_entry.entity_id == ready_entry.entity_id ||
-            existing_entry.entity_type == ready_entry.entity_type)
+        if (existing_entry.entity_id == ready_entry.entity_id || existing_entry.entity_type == ready_entry.entity_type)
         {
             existing_entry = ready_entry;
             replaced_existing_entry = true;
@@ -878,34 +757,17 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
 
     if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-        };
         session->last_protocol_error = "GM clusterNodesOnline notify envelope is invalid.";
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Game node ignored GM cluster nodes online notify with an invalid envelope.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node ignored GM cluster nodes online notify with an invalid envelope.");
         return;
     }
 
     if (!session->registered)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
-        };
         session->last_protocol_error = "GM clusterNodesOnline notify arrived before Game registration completed.";
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Game node ignored GM cluster nodes online notify before registration completed.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node ignored GM cluster nodes online notify before registration completed.");
         return;
     }
 
@@ -914,16 +776,8 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
         xs::net::DecodeClusterNodesOnlineNotify(packet.payload, &notify);
     if (decode_result != xs::net::InnerClusterCodecErrorCode::None)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{
-                "codecError",
-                std::string(xs::net::InnerClusterCodecErrorMessage(decode_result)),
-            },
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-        };
         session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM cluster nodes online notify.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM cluster nodes online notify.");
         return;
     }
 
@@ -938,14 +792,7 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
 
     RefreshMeshReadyState();
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"allNodesOnline", notify.all_nodes_online ? "true" : "false"},
-        xs::core::LogContextField{"statusFlags", std::to_string(notify.status_flags)},
-        xs::core::LogContextField{"serverNowUnixMs", ToString(notify.server_now_unix_ms)},
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM cluster nodes online notify.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM cluster nodes online notify.");
 }
 
 void GameNode::HandleServerStubOwnershipSync(const xs::net::PacketView& packet)
@@ -958,79 +805,41 @@ void GameNode::HandleServerStubOwnershipSync(const xs::net::PacketView& packet)
 
     if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-        };
         session->last_protocol_error = "GM ownership sync envelope is invalid.";
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Game node ignored GM ownership sync with an invalid envelope.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node ignored GM ownership sync with an invalid envelope.");
         return;
     }
 
     if (!session->registered)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
-        };
         session->last_protocol_error = "GM ownership sync arrived before Game registration completed.";
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Game node ignored GM ownership sync before registration completed.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node ignored GM ownership sync before registration completed.");
         return;
     }
 
     if (!mesh_ready_state_.current)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"meshReady", mesh_ready_state_.current ? "true" : "false"},
-        };
         session->last_protocol_error = "GM ownership sync arrived before Game mesh ready completed.";
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Game node ignored GM ownership sync before mesh ready completed.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node ignored GM ownership sync before mesh ready completed.");
         return;
     }
 
     xs::net::ServerStubOwnershipSync sync{};
-    const xs::net::InnerClusterCodecErrorCode decode_result = xs::net::DecodeServerStubOwnershipSync(packet.payload, &sync);
+    const xs::net::InnerClusterCodecErrorCode decode_result =
+        xs::net::DecodeServerStubOwnershipSync(packet.payload, &sync);
     if (decode_result != xs::net::InnerClusterCodecErrorCode::None)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{
-                "codecError",
-                std::string(xs::net::InnerClusterCodecErrorMessage(decode_result)),
-            },
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-        };
         session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM ownership sync.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM ownership sync.");
         return;
     }
 
     if (sync.assignment_epoch < ownership_state_.assignment_epoch)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
-            xs::core::LogContextField{"currentAssignmentEpoch", ToString(ownership_state_.assignment_epoch)},
-            xs::core::LogContextField{"assignmentCount", ToString(sync.assignments.size())},
-        };
-        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM ownership sync.", context);
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM ownership sync.");
         return;
     }
 
@@ -1043,14 +852,7 @@ void GameNode::HandleServerStubOwnershipSync(const xs::net::PacketView& packet)
     RefreshLocalServiceReadyState();
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
-        xs::core::LogContextField{"assignmentCount", ToString(sync.assignments.size())},
-        xs::core::LogContextField{"ownedAssignmentCount", ToString(ownership_state_.owned_assignments.size())},
-        xs::core::LogContextField{"serverNowUnixMs", ToString(sync.server_now_unix_ms)},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM ownership sync.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM ownership sync.");
 }
 
 void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
@@ -1063,12 +865,7 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
 
     if (session->register_seq == 0U || packet.header.seq != session->register_seq)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"expectedSeq", std::to_string(session->register_seq)},
-        };
-        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM register response.", context);
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM register response.");
         return;
     }
 
@@ -1082,18 +879,9 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
             xs::net::DecodeRegisterErrorResponse(packet.payload, &response);
         if (decode_result != xs::net::RegisterCodecErrorCode::None)
         {
-            const std::array<xs::core::LogContextField, 4> context{
-                xs::core::LogContextField{"nodeId", std::string(node_id())},
-                xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-                xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-                xs::core::LogContextField{
-                    "codecError",
-                    std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
-                },
-            };
             session->registered = false;
             session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
-            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM register error response.", context);
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM register error response.");
             return;
         }
 
@@ -1101,18 +889,7 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
         session->last_protocol_error =
             "GM rejected register request with error code " + std::to_string(response.error_code) + ".";
 
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"errorCode", std::to_string(response.error_code)},
-            xs::core::LogContextField{"retryAfterMs", std::to_string(response.retry_after_ms)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Game node received GM register error response.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node received GM register error response.");
         return;
     }
 
@@ -1124,16 +901,7 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
         session->registered = false;
         session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
 
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{
-                "codecError",
-                std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
-            },
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM register success response.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM register success response.");
         return;
     }
 
@@ -1148,15 +916,7 @@ void GameNode::HandleRegisterResponse(const xs::net::PacketView& packet)
 
     StartOrResetHeartbeatTimer(response.heartbeat_interval_ms);
 
-    const std::array<xs::core::LogContextField, 6> context{
-        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
-        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
-        xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM register success response.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM register success response.");
 }
 
 void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
@@ -1169,12 +929,7 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
 
     if (session->heartbeat_seq == 0U || packet.header.seq != session->heartbeat_seq)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"expectedSeq", std::to_string(session->heartbeat_seq)},
-        };
-        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM heartbeat response.", context);
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale GM heartbeat response.");
         return;
     }
 
@@ -1185,24 +940,14 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         xs::net::DecodeHeartbeatSuccessResponse(packet.payload, &response);
     if (decode_result != xs::net::HeartbeatCodecErrorCode::None)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{
-                "codecError",
-                std::string(xs::net::HeartbeatCodecErrorMessage(decode_result)),
-            },
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
         session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM heartbeat success response.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM heartbeat success response.");
         return;
     }
 
-    const bool heartbeat_config_changed =
-        session->heartbeat_interval_ms != response.heartbeat_interval_ms ||
-        session->heartbeat_timeout_ms != response.heartbeat_timeout_ms ||
-        session->heartbeat_timer_id == 0;
+    const bool heartbeat_config_changed = session->heartbeat_interval_ms != response.heartbeat_interval_ms ||
+                                          session->heartbeat_timeout_ms != response.heartbeat_timeout_ms ||
+                                          session->heartbeat_timer_id == 0;
 
     session->heartbeat_interval_ms = response.heartbeat_interval_ms;
     session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
@@ -1216,15 +961,7 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
         StartOrResetHeartbeatTimer(response.heartbeat_interval_ms);
     }
 
-    const std::array<xs::core::LogContextField, 6> context{
-        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
-        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
-        xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted GM heartbeat success response.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted GM heartbeat success response.");
     RefreshMeshReadyState();
 }
 
@@ -1232,8 +969,7 @@ bool GameNode::SendRegisterRequest()
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr || inner_network() == nullptr ||
-        session->connection_state != ipc::ZmqConnectionState::Connected ||
-        session->register_in_flight)
+        session->connection_state != ipc::ZmqConnectionState::Connected || session->register_in_flight)
     {
         return false;
     }
@@ -1258,17 +994,11 @@ bool GameNode::SendRegisterRequest()
     };
 
     std::size_t payload_size = 0U;
-    const xs::net::RegisterCodecErrorCode size_result =
-        xs::net::GetRegisterRequestWireSize(request, &payload_size);
+    const xs::net::RegisterCodecErrorCode size_result = xs::net::GetRegisterRequestWireSize(request, &payload_size);
     if (size_result != xs::net::RegisterCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(size_result));
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(size_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size GM register request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size GM register request.");
         return false;
     }
 
@@ -1277,34 +1007,20 @@ bool GameNode::SendRegisterRequest()
     if (encode_result != xs::net::RegisterCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(encode_result));
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(encode_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode GM register request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode GM register request.");
         return false;
     }
 
     const std::uint32_t seq = ConsumeNextInnerSequence(session);
-    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kInnerRegisterMsgId,
-        seq,
-        0U,
-        static_cast<std::uint32_t>(payload.size()));
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kInnerRegisterMsgId, seq, 0U, static_cast<std::uint32_t>(payload.size()));
 
     std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload.size());
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap GM register request into a packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap GM register request into a packet.");
         return false;
     }
 
@@ -1312,13 +1028,7 @@ bool GameNode::SendRegisterRequest()
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send GM register request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send GM register request.");
         return false;
     }
 
@@ -1326,14 +1036,7 @@ bool GameNode::SendRegisterRequest()
     session->register_seq = seq;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"seq", std::to_string(seq)},
-        xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
-        xs::core::LogContextField{"buildVersion", std::string(kGameBuildVersion)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent GM register request.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent GM register request.");
     return true;
 }
 
@@ -1341,8 +1044,7 @@ bool GameNode::SendHeartbeatRequest()
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr || inner_network() == nullptr || !session->registered ||
-        session->connection_state != ipc::ZmqConnectionState::Connected ||
-        session->heartbeat_seq != 0U)
+        session->connection_state != ipc::ZmqConnectionState::Connected || session->heartbeat_seq != 0U)
     {
         return false;
     }
@@ -1358,33 +1060,19 @@ bool GameNode::SendHeartbeatRequest()
     if (encode_result != xs::net::HeartbeatCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(encode_result));
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"codecError", std::string(xs::net::HeartbeatCodecErrorMessage(encode_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode GM heartbeat request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode GM heartbeat request.");
         return false;
     }
 
     const std::uint32_t seq = ConsumeNextInnerSequence(session);
-    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kInnerHeartbeatMsgId,
-        seq,
-        0U,
-        static_cast<std::uint32_t>(payload.size()));
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kInnerHeartbeatMsgId, seq, 0U, static_cast<std::uint32_t>(payload.size()));
     std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kHeartbeatRequestSize> packet{};
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap GM heartbeat request into a packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap GM heartbeat request into a packet.");
         return false;
     }
 
@@ -1392,26 +1080,14 @@ bool GameNode::SendHeartbeatRequest()
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send GM heartbeat request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send GM heartbeat request.");
         return false;
     }
 
     session->heartbeat_seq = seq;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 4> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"seq", std::to_string(seq)},
-        xs::core::LogContextField{"sentAtUnixMs", ToString(request.sent_at_unix_ms)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node sent GM heartbeat request.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node sent GM heartbeat request.");
     return true;
 }
 
@@ -1431,38 +1107,23 @@ bool GameNode::SendMeshReadyReport(bool mesh_ready)
     };
 
     std::array<std::byte, xs::net::kGameGateMeshReadyReportSize> payload{};
-    const xs::net::InnerClusterCodecErrorCode encode_result =
-        xs::net::EncodeGameGateMeshReadyReport(report, payload);
+    const xs::net::InnerClusterCodecErrorCode encode_result = xs::net::EncodeGameGateMeshReadyReport(report, payload);
     if (encode_result != xs::net::InnerClusterCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(encode_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
-            xs::core::LogContextField{"codecError", session->last_protocol_error},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode mesh ready report.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode mesh ready report.");
         return false;
     }
 
-    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kInnerGameGateMeshReadyReportMsgId,
-        xs::net::kPacketSeqNone,
-        0U,
-        static_cast<std::uint32_t>(payload.size()));
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kInnerGameGateMeshReadyReportMsgId, xs::net::kPacketSeqNone, 0U,
+                                  static_cast<std::uint32_t>(payload.size()));
     std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kGameGateMeshReadyReportSize> packet{};
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
-            xs::core::LogContextField{"packetError", session->last_protocol_error},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap mesh ready report into a packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap mesh ready report into a packet.");
         return false;
     }
 
@@ -1470,13 +1131,7 @@ bool GameNode::SendMeshReadyReport(bool mesh_ready)
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send mesh ready report.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send mesh ready report.");
         return false;
     }
 
@@ -1485,14 +1140,7 @@ bool GameNode::SendMeshReadyReport(bool mesh_ready)
     mesh_ready_state_.last_reported_at_unix_ms = report.reported_at_unix_ms;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"meshReady", mesh_ready ? "true" : "false"},
-        xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        xs::core::LogContextField{"allNodesOnline", all_nodes_online_ ? "true" : "false"},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent mesh ready report.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent mesh ready report.");
     return true;
 }
 
@@ -1500,10 +1148,8 @@ bool GameNode::SendServiceReadyReport()
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr || inner_network() == nullptr || !session->registered ||
-        session->connection_state != ipc::ZmqConnectionState::Connected ||
-        ownership_state_.assignment_epoch == 0U ||
-        ownership_state_.owned_assignments.empty() ||
-        service_ready_state_.ready_entries.empty())
+        session->connection_state != ipc::ZmqConnectionState::Connected || ownership_state_.assignment_epoch == 0U ||
+        ownership_state_.owned_assignments.empty() || service_ready_state_.ready_entries.empty())
     {
         return false;
     }
@@ -1522,49 +1168,28 @@ bool GameNode::SendServiceReadyReport()
     if (wire_size_result != xs::net::InnerClusterCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(wire_size_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
-            xs::core::LogContextField{"codecError", session->last_protocol_error},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size service ready report.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size service ready report.");
         return false;
     }
 
     std::vector<std::byte> payload(wire_size);
-    const xs::net::InnerClusterCodecErrorCode encode_result =
-        xs::net::EncodeGameServiceReadyReport(report, payload);
+    const xs::net::InnerClusterCodecErrorCode encode_result = xs::net::EncodeGameServiceReadyReport(report, payload);
     if (encode_result != xs::net::InnerClusterCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(encode_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
-            xs::core::LogContextField{"codecError", session->last_protocol_error},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode service ready report.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode service ready report.");
         return false;
     }
 
-    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kInnerGameServiceReadyReportMsgId,
-        xs::net::kPacketSeqNone,
-        0U,
-        static_cast<std::uint32_t>(payload.size()));
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kInnerGameServiceReadyReportMsgId, xs::net::kPacketSeqNone, 0U,
+                                  static_cast<std::uint32_t>(payload.size()));
     std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload.size());
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
-            xs::core::LogContextField{"packetError", session->last_protocol_error},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap service ready report into a packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap service ready report into a packet.");
         return false;
     }
 
@@ -1572,13 +1197,7 @@ bool GameNode::SendServiceReadyReport()
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send service ready report.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send service ready report.");
         return false;
     }
 
@@ -1586,15 +1205,7 @@ bool GameNode::SendServiceReadyReport()
     service_ready_state_.last_reported_at_unix_ms = report.reported_at_unix_ms;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 6> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
-        xs::core::LogContextField{"localReady", report.local_ready ? "true" : "false"},
-        xs::core::LogContextField{"readyEntryCount", ToString(report.entries.size())},
-        xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent service ready report.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent service ready report.");
     return true;
 }
 void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const xs::net::PacketView& packet)
@@ -1607,13 +1218,7 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
 
     if (session->register_seq == 0U || packet.header.seq != session->register_seq)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"expectedSeq", std::to_string(session->register_seq)},
-        };
-        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale Gate register response.", context);
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale Gate register response.");
         return;
     }
 
@@ -1627,19 +1232,9 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
             xs::net::DecodeRegisterErrorResponse(packet.payload, &response);
         if (decode_result != xs::net::RegisterCodecErrorCode::None)
         {
-            const std::array<xs::core::LogContextField, 5> context{
-                xs::core::LogContextField{"nodeId", std::string(node_id())},
-                xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-                xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-                xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-                xs::core::LogContextField{
-                    "codecError",
-                    std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
-                },
-            };
             session->registered = false;
             session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
-            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate register error response.", context);
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate register error response.");
             return;
         }
 
@@ -1647,18 +1242,7 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
         session->last_protocol_error =
             "Gate rejected register request with error code " + std::to_string(response.error_code) + ".";
 
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"errorCode", std::to_string(response.error_code)},
-            xs::core::LogContextField{"retryAfterMs", std::to_string(response.retry_after_ms)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-        };
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "inner",
-            "Game node received Gate register error response.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node received Gate register error response.");
         return;
     }
 
@@ -1670,17 +1254,7 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
         session->registered = false;
         session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(decode_result));
 
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{
-                "codecError",
-                std::string(xs::net::RegisterCodecErrorMessage(decode_result)),
-            },
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate register success response.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate register success response.");
         return;
     }
 
@@ -1695,15 +1269,7 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
 
     StartOrResetGateHeartbeatTimer(gate_node_id, response.heartbeat_interval_ms);
 
-    const std::array<xs::core::LogContextField, 6> context{
-        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
-        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
-        xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate register success response.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate register success response.");
     RefreshMeshReadyState();
 }
 
@@ -1717,13 +1283,7 @@ void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const 
 
     if (session->heartbeat_seq == 0U || packet.header.seq != session->heartbeat_seq)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"expectedSeq", std::to_string(session->heartbeat_seq)},
-        };
-        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale Gate heartbeat response.", context);
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored a stale Gate heartbeat response.");
         return;
     }
 
@@ -1734,25 +1294,14 @@ void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const 
         xs::net::DecodeHeartbeatSuccessResponse(packet.payload, &response);
     if (decode_result != xs::net::HeartbeatCodecErrorCode::None)
     {
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{
-                "codecError",
-                std::string(xs::net::HeartbeatCodecErrorMessage(decode_result)),
-            },
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
         session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(decode_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate heartbeat success response.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate heartbeat success response.");
         return;
     }
 
-    const bool heartbeat_config_changed =
-        session->heartbeat_interval_ms != response.heartbeat_interval_ms ||
-        session->heartbeat_timeout_ms != response.heartbeat_timeout_ms ||
-        session->heartbeat_timer_id == 0;
+    const bool heartbeat_config_changed = session->heartbeat_interval_ms != response.heartbeat_interval_ms ||
+                                          session->heartbeat_timeout_ms != response.heartbeat_timeout_ms ||
+                                          session->heartbeat_timer_id == 0;
 
     session->heartbeat_interval_ms = response.heartbeat_interval_ms;
     session->heartbeat_timeout_ms = response.heartbeat_timeout_ms;
@@ -1766,15 +1315,7 @@ void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const 
         StartOrResetGateHeartbeatTimer(gate_node_id, response.heartbeat_interval_ms);
     }
 
-    const std::array<xs::core::LogContextField, 6> context{
-        xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(response.heartbeat_interval_ms)},
-        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(response.heartbeat_timeout_ms)},
-        xs::core::LogContextField{"serverNowUnixMs", ToString(response.server_now_unix_ms)},
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-    };
-    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted Gate heartbeat success response.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted Gate heartbeat success response.");
     RefreshMeshReadyState();
 }
 
@@ -1782,8 +1323,7 @@ bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
 {
     InnerNetworkSession* session = remote_session(gate_node_id);
     if (session == nullptr || inner_network() == nullptr ||
-        session->connection_state != ipc::ZmqConnectionState::Connected ||
-        session->register_in_flight)
+        session->connection_state != ipc::ZmqConnectionState::Connected || session->register_in_flight)
     {
         return false;
     }
@@ -1808,18 +1348,11 @@ bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
     };
 
     std::size_t payload_size = 0U;
-    const xs::net::RegisterCodecErrorCode size_result =
-        xs::net::GetRegisterRequestWireSize(request, &payload_size);
+    const xs::net::RegisterCodecErrorCode size_result = xs::net::GetRegisterRequestWireSize(request, &payload_size);
     if (size_result != xs::net::RegisterCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(size_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(size_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size Gate register request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size Gate register request.");
         return false;
     }
 
@@ -1828,36 +1361,21 @@ bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
     if (encode_result != xs::net::RegisterCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::RegisterCodecErrorMessage(encode_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"codecError", std::string(xs::net::RegisterCodecErrorMessage(encode_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode Gate register request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode Gate register request.");
         return false;
     }
 
     const std::uint32_t seq = ConsumeNextInnerSequence(session);
-    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kInnerRegisterMsgId,
-        seq,
-        0U,
-        static_cast<std::uint32_t>(payload.size()));
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kInnerRegisterMsgId, seq, 0U, static_cast<std::uint32_t>(payload.size()));
 
     std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload.size());
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap Gate register request into a packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node failed to wrap Gate register request into a packet.");
         return false;
     }
 
@@ -1865,14 +1383,7 @@ bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send Gate register request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send Gate register request.");
         return false;
     }
 
@@ -1880,15 +1391,7 @@ bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
     session->register_seq = seq;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 6> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-        xs::core::LogContextField{"seq", std::to_string(seq)},
-        xs::core::LogContextField{"startedAtUnixMs", ToString(runtime_state_.started_at_unix_ms)},
-        xs::core::LogContextField{"buildVersion", std::string(kGameBuildVersion)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent Gate register request.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node sent Gate register request.");
     return true;
 }
 
@@ -1896,8 +1399,7 @@ bool GameNode::SendGateHeartbeatRequest(std::string_view gate_node_id)
 {
     InnerNetworkSession* session = remote_session(gate_node_id);
     if (session == nullptr || inner_network() == nullptr || !session->registered ||
-        session->connection_state != ipc::ZmqConnectionState::Connected ||
-        session->heartbeat_seq != 0U)
+        session->connection_state != ipc::ZmqConnectionState::Connected || session->heartbeat_seq != 0U)
     {
         return false;
     }
@@ -1913,35 +1415,20 @@ bool GameNode::SendGateHeartbeatRequest(std::string_view gate_node_id)
     if (encode_result != xs::net::HeartbeatCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::HeartbeatCodecErrorMessage(encode_result));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"codecError", std::string(xs::net::HeartbeatCodecErrorMessage(encode_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode Gate heartbeat request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode Gate heartbeat request.");
         return false;
     }
 
     const std::uint32_t seq = ConsumeNextInnerSequence(session);
-    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        xs::net::kInnerHeartbeatMsgId,
-        seq,
-        0U,
-        static_cast<std::uint32_t>(payload.size()));
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kInnerHeartbeatMsgId, seq, 0U, static_cast<std::uint32_t>(payload.size()));
     std::array<std::byte, xs::net::kPacketHeaderSize + xs::net::kHeartbeatRequestSize> packet{};
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
         session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap Gate heartbeat request into a packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node failed to wrap Gate heartbeat request into a packet.");
         return false;
     }
 
@@ -1949,28 +1436,14 @@ bool GameNode::SendGateHeartbeatRequest(std::string_view gate_node_id)
     if (send_result != NodeErrorCode::None)
     {
         session->last_protocol_error = std::string(inner_network()->last_error_message());
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-            xs::core::LogContextField{"seq", std::to_string(seq)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            xs::core::LogContextField{"innerNetworkError", session->last_protocol_error},
-        };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send Gate heartbeat request.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send Gate heartbeat request.");
         return false;
     }
 
     session->heartbeat_seq = seq;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gateNodeId", std::string(gate_node_id)},
-        xs::core::LogContextField{"seq", std::to_string(seq)},
-        xs::core::LogContextField{"sentAtUnixMs", ToString(request.sent_at_unix_ms)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node sent Gate heartbeat request.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node sent Gate heartbeat request.");
     return true;
 }
 
@@ -1994,13 +1467,7 @@ void GameNode::StartGateConnectors()
                 session->last_protocol_error = std::string(inner_network()->last_error_message());
             }
 
-            const std::array<xs::core::LogContextField, 4> context{
-                xs::core::LogContextField{"nodeId", std::string(node_id())},
-                xs::core::LogContextField{"gateNodeId", gate_node_id},
-                xs::core::LogContextField{"allNodesOnline", all_nodes_online_ ? "true" : "false"},
-                xs::core::LogContextField{"innerNetworkError", std::string(inner_network()->last_error_message())},
-            };
-            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to start Gate inner connector.", context);
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to start Gate inner connector.");
             continue;
         }
 
@@ -2028,22 +1495,12 @@ void GameNode::ResetMeshReadyState() noexcept
 
 void GameNode::ResetOwnershipState()
 {
-    if (managed_game_exports_loaded_ &&
-        managed_game_exports_.reset_server_stub_ownership != nullptr)
+    if (managed_game_exports_loaded_ && managed_game_exports_.reset_server_stub_ownership != nullptr)
     {
         const std::int32_t reset_result = managed_game_exports_.reset_server_stub_ownership();
         if (reset_result != 0)
         {
-            const std::array<xs::core::LogContextField, 3> context{
-                xs::core::LogContextField{"nodeId", std::string(node_id())},
-                xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-                xs::core::LogContextField{"resetResult", std::to_string(reset_result)},
-            };
-            logger().Log(
-                xs::core::LogLevel::Warn,
-                "runtime",
-                "Game node failed to reset managed ownership state.",
-                context);
+            logger().Log(xs::core::LogLevel::Warn, "runtime", "Game node failed to reset managed ownership state.");
         }
     }
 
@@ -2126,10 +1583,8 @@ bool GameNode::AreAllGateSessionsMeshReady() const noexcept
         (void)gate_config;
 
         const InnerNetworkSession* session = remote_session(gate_node_id);
-        if (session == nullptr ||
-            session->connection_state != ipc::ZmqConnectionState::Connected ||
-            !session->registered ||
-            !session->inner_network_ready)
+        if (session == nullptr || session->connection_state != ipc::ZmqConnectionState::Connected ||
+            !session->registered || !session->inner_network_ready)
         {
             return false;
         }
@@ -2151,13 +1606,7 @@ void GameNode::RefreshMeshReadyState()
 
     if (state_changed)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"meshReady", next_mesh_ready ? "true" : "false"},
-            xs::core::LogContextField{"allNodesOnline", all_nodes_online_ ? "true" : "false"},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Info, "inner", "Game node refreshed mesh ready state.", context);
+        logger().Log(xs::core::LogLevel::Info, "inner", "Game node refreshed mesh ready state.");
     }
 
     if (next_mesh_ready != mesh_ready_state_.last_reported || !mesh_ready_state_.has_reported)
@@ -2194,19 +1643,10 @@ void GameNode::RefreshLocalServiceReadyState()
 
 bool GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
 {
-    if (!managed_game_exports_loaded_ ||
-        managed_game_exports_.apply_server_stub_ownership == nullptr)
+    if (!managed_game_exports_loaded_ || managed_game_exports_.apply_server_stub_ownership == nullptr)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "runtime",
-            "Game node cannot apply ownership before managed exports are ready.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "runtime",
+                     "Game node cannot apply ownership before managed exports are ready.");
         return false;
     }
 
@@ -2220,34 +1660,21 @@ bool GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
 
         if (!TryWriteManagedUtf8String(
                 assignment.entity_type,
-                std::span<std::uint8_t>(
-                    managed_assignment.entity_type_utf8,
-                    xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
+                std::span<std::uint8_t>(managed_assignment.entity_type_utf8,
+                                        xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
                 &managed_assignment.entity_type_length) ||
             !TryWriteManagedUtf8String(
                 assignment.entity_id,
-                std::span<std::uint8_t>(
-                    managed_assignment.entity_id_utf8,
-                    xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
+                std::span<std::uint8_t>(managed_assignment.entity_id_utf8,
+                                        xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
                 &managed_assignment.entity_id_length) ||
-            !TryWriteManagedUtf8String(
-                assignment.owner_game_node_id,
-                std::span<std::uint8_t>(
-                    managed_assignment.owner_game_node_id_utf8,
-                    xs::host::XS_MANAGED_NODE_ID_MAX_UTF8_BYTES),
-                &managed_assignment.owner_game_node_id_length))
+            !TryWriteManagedUtf8String(assignment.owner_game_node_id,
+                                       std::span<std::uint8_t>(managed_assignment.owner_game_node_id_utf8,
+                                                               xs::host::XS_MANAGED_NODE_ID_MAX_UTF8_BYTES),
+                                       &managed_assignment.owner_game_node_id_length))
         {
-            const std::array<xs::core::LogContextField, 4> context{
-                xs::core::LogContextField{"nodeId", std::string(node_id())},
-                xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
-                xs::core::LogContextField{"entityType", assignment.entity_type},
-                xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-            };
-            logger().Log(
-                xs::core::LogLevel::Warn,
-                "runtime",
-                "Game node failed to encode managed ownership assignment.",
-                context);
+            logger().Log(xs::core::LogLevel::Warn, "runtime",
+                         "Game node failed to encode managed ownership assignment.");
             return false;
         }
 
@@ -2273,18 +1700,7 @@ bool GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
     const std::int32_t apply_result = managed_game_exports_.apply_server_stub_ownership(&managed_sync);
     if (apply_result != 0)
     {
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"assignmentEpoch", ToString(sync.assignment_epoch)},
-            xs::core::LogContextField{"assignmentCount", ToString(sync.assignments.size())},
-            xs::core::LogContextField{"applyResult", std::to_string(apply_result)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(
-            xs::core::LogLevel::Warn,
-            "runtime",
-            "Game node failed to apply ownership in managed runtime.",
-            context);
+        logger().Log(xs::core::LogLevel::Warn, "runtime", "Game node failed to apply ownership in managed runtime.");
         return false;
     }
 
@@ -2312,33 +1728,23 @@ void GameNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
     CancelHeartbeatTimer();
 
     const xs::core::TimerCreateResult timer_result =
-        event_loop().timers().CreateRepeating(std::chrono::milliseconds(interval_ms), [this]() {
-            (void)SendHeartbeatRequest();
-        });
+        event_loop().timers().CreateRepeating(std::chrono::milliseconds(interval_ms),
+                                              [this]()
+                                              {
+                                                  (void)SendHeartbeatRequest();
+                                              });
     if (!xs::core::IsTimerID(timer_result))
     {
         session->last_protocol_error =
             "Failed to create GM heartbeat timer: " +
             std::string(xs::core::TimerErrorMessage(xs::core::TimerErrorFromCreateResult(timer_result)));
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
-            xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Error, "inner", "Game node failed to schedule GM heartbeat timer.", context);
+        logger().Log(xs::core::LogLevel::Error, "inner", "Game node failed to schedule GM heartbeat timer.");
         return;
     }
 
     session->heartbeat_timer_id = timer_result;
 
-    const std::array<xs::core::LogContextField, 4> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
-        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node scheduled GM heartbeat timer.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node scheduled GM heartbeat timer.");
 }
 
 void GameNode::CancelHeartbeatTimer() noexcept
@@ -2363,35 +1769,23 @@ void GameNode::StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std
 
     const std::string gate_node_id_text(gate_node_id);
     const xs::core::TimerCreateResult timer_result =
-        event_loop().timers().CreateRepeating(std::chrono::milliseconds(interval_ms), [this, gate_node_id_text]() {
-            (void)SendGateHeartbeatRequest(gate_node_id_text);
-        });
+        event_loop().timers().CreateRepeating(std::chrono::milliseconds(interval_ms),
+                                              [this, gate_node_id_text]()
+                                              {
+                                                  (void)SendGateHeartbeatRequest(gate_node_id_text);
+                                              });
     if (!xs::core::IsTimerID(timer_result))
     {
         session->last_protocol_error =
             "Failed to create Gate heartbeat timer: " +
             std::string(xs::core::TimerErrorMessage(xs::core::TimerErrorFromCreateResult(timer_result)));
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"gateNodeId", gate_node_id_text},
-            xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
-            xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
-            xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-        };
-        logger().Log(xs::core::LogLevel::Error, "inner", "Game node failed to schedule Gate heartbeat timer.", context);
+        logger().Log(xs::core::LogLevel::Error, "inner", "Game node failed to schedule Gate heartbeat timer.");
         return;
     }
 
     session->heartbeat_timer_id = timer_result;
 
-    const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"nodeId", std::string(node_id())},
-        xs::core::LogContextField{"gateNodeId", gate_node_id_text},
-        xs::core::LogContextField{"heartbeatIntervalMs", std::to_string(interval_ms)},
-        xs::core::LogContextField{"heartbeatTimeoutMs", std::to_string(session->heartbeat_timeout_ms)},
-        xs::core::LogContextField{"managedAssemblyName", runtime_state_.managed_assembly_name},
-    };
-    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node scheduled Gate heartbeat timer.", context);
+    logger().Log(xs::core::LogLevel::Debug, "inner", "Game node scheduled Gate heartbeat timer.");
 }
 
 void GameNode::CancelGateHeartbeatTimer(std::string_view gate_node_id) noexcept

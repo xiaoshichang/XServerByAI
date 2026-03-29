@@ -102,8 +102,7 @@ void* LoadDynamicLibrary(const std::filesystem::path& path) noexcept
 #endif
 }
 
-template <typename T>
-T LoadDynamicSymbol(void* library_handle, const char* symbol_name) noexcept
+template <typename T> T LoadDynamicSymbol(void* library_handle, const char* symbol_name) noexcept
 {
 #if defined(_WIN32)
     return reinterpret_cast<T>(GetProcAddress(reinterpret_cast<HMODULE>(library_handle), symbol_name));
@@ -120,8 +119,8 @@ ManagedHostErrorCode LoadHostfxrExports(void* library_handle, HostfxrExports* ex
         return ManagedHostErrorCode::HostfxrExportLoadFailed;
     }
 
-    exports->initialize_for_runtime_config =
-        LoadDynamicSymbol<hostfxr_initialize_for_runtime_config_fn>(library_handle, "hostfxr_initialize_for_runtime_config");
+    exports->initialize_for_runtime_config = LoadDynamicSymbol<hostfxr_initialize_for_runtime_config_fn>(
+        library_handle, "hostfxr_initialize_for_runtime_config");
     exports->get_runtime_delegate =
         LoadDynamicSymbol<hostfxr_get_runtime_delegate_fn>(library_handle, "hostfxr_get_runtime_delegate");
     exports->close = LoadDynamicSymbol<hostfxr_close_fn>(library_handle, "hostfxr_close");
@@ -144,9 +143,8 @@ ManagedHostErrorCode LoadHostfxrExports(void* library_handle, HostfxrExports* ex
     return ManagedHostErrorCode::None;
 }
 
-ManagedHostErrorCode ResolveHostfxrPath(
-    const std::filesystem::path& assembly_path,
-    std::filesystem::path* hostfxr_path) noexcept
+ManagedHostErrorCode ResolveHostfxrPath(const std::filesystem::path& assembly_path,
+                                        std::filesystem::path* hostfxr_path) noexcept
 {
     if (hostfxr_path == nullptr)
     {
@@ -185,9 +183,8 @@ ProcessHostfxrState& GetProcessHostfxrState()
     return state;
 }
 
-ManagedHostErrorCode EnsureProcessHostfxrLoaded(
-    const std::filesystem::path& hostfxr_path,
-    ProcessHostfxrState* state) noexcept
+ManagedHostErrorCode EnsureProcessHostfxrLoaded(const std::filesystem::path& hostfxr_path,
+                                                ProcessHostfxrState* state) noexcept
 {
     if (state == nullptr)
     {
@@ -219,12 +216,9 @@ ManagedHostErrorCode EnsureProcessHostfxrLoaded(
     return ManagedHostErrorCode::None;
 }
 
-ManagedHostErrorCode ResolveManagedEntryPoint(
-    load_assembly_and_get_function_pointer_fn load_function,
-    const std::filesystem::path& assembly_path,
-    std::string_view type_name,
-    std::string_view method_name,
-    void** delegate) noexcept
+ManagedHostErrorCode ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_fn load_function,
+                                              const std::filesystem::path& assembly_path, std::string_view type_name,
+                                              std::string_view method_name, void** delegate) noexcept
 {
     if (delegate == nullptr)
     {
@@ -242,13 +236,9 @@ ManagedHostErrorCode ResolveManagedEntryPoint(
     const auto native_type_name = Utf8ToNativeString(type_name);
     const auto native_method_name = Utf8ToNativeString(method_name);
 
-    const std::int32_t result = load_function(
-        native_assembly_path.c_str(),
-        native_type_name.c_str(),
-        native_method_name.c_str(),
-        UNMANAGEDCALLERSONLY_METHOD,
-        nullptr,
-        delegate);
+    const std::int32_t result =
+        load_function(native_assembly_path.c_str(), native_type_name.c_str(), native_method_name.c_str(),
+                      UNMANAGEDCALLERSONLY_METHOD, nullptr, delegate);
     if (result != 0)
     {
         return ManagedHostErrorCode::EntryPointResolveFailed;
@@ -316,9 +306,7 @@ class ManagedRuntimeHost::Impl final
         const auto native_runtime_config_path = PathToNativeString(runtime_config_path);
 
         const std::int32_t initialize_result = process_hostfxr_state.exports.initialize_for_runtime_config(
-            native_runtime_config_path.c_str(),
-            nullptr,
-            &host_context);
+            native_runtime_config_path.c_str(), nullptr, &host_context);
         if (initialize_result < 0)
         {
             return ManagedHostErrorCode::RuntimeInitializeFailed;
@@ -330,9 +318,7 @@ class ManagedRuntimeHost::Impl final
         }
 
         const std::int32_t delegate_result = process_hostfxr_state.exports.get_runtime_delegate(
-            host_context,
-            hdt_load_assembly_and_get_function_pointer,
-            &raw_delegate);
+            host_context, hdt_load_assembly_and_get_function_pointer, &raw_delegate);
         if (delegate_result != 0)
         {
             (void)process_hostfxr_state.exports.close(host_context);
@@ -353,7 +339,8 @@ class ManagedRuntimeHost::Impl final
         runtime_config_path_ = runtime_config_path;
         assembly_path_ = assembly_path;
         hostfxr_path_ = process_hostfxr_state.library_path;
-        load_assembly_and_get_function_pointer_ = reinterpret_cast<load_assembly_and_get_function_pointer_fn>(raw_delegate);
+        load_assembly_and_get_function_pointer_ =
+            reinterpret_cast<load_assembly_and_get_function_pointer_fn>(raw_delegate);
         abi_version_ = 0U;
         game_exports_ = ManagedGameExports{};
         game_exports_bound_ = false;
@@ -398,11 +385,8 @@ class ManagedRuntimeHost::Impl final
 
         void* raw_get_abi_version = nullptr;
         ManagedHostErrorCode result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameGetAbiVersionMethodName,
-            &raw_get_abi_version);
+            load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName,
+            kManagedGameGetAbiVersionMethodName, &raw_get_abi_version);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -412,12 +396,8 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.get_abi_version = reinterpret_cast<ManagedGetAbiVersionFn>(raw_get_abi_version);
 
         void* raw_init = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameInitMethodName,
-            &raw_init);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedGameExportsTypeName, kManagedGameInitMethodName, &raw_init);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -425,12 +405,9 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.init = reinterpret_cast<ManagedInitFn>(raw_init);
 
         void* raw_on_message = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameOnMessageMethodName,
-            &raw_on_message);
+        result =
+            ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                     kManagedGameExportsTypeName, kManagedGameOnMessageMethodName, &raw_on_message);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -438,12 +415,8 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.on_message = reinterpret_cast<ManagedOnMessageFn>(raw_on_message);
 
         void* raw_on_tick = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameOnTickMethodName,
-            &raw_on_tick);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedGameExportsTypeName, kManagedGameOnTickMethodName, &raw_on_tick);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -451,12 +424,9 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.on_tick = reinterpret_cast<ManagedOnTickFn>(raw_on_tick);
 
         void* raw_apply_server_stub_ownership = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameApplyServerStubOwnershipMethodName,
-            &raw_apply_server_stub_ownership);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedGameExportsTypeName, kManagedGameApplyServerStubOwnershipMethodName,
+                                          &raw_apply_server_stub_ownership);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -465,12 +435,9 @@ class ManagedRuntimeHost::Impl final
             reinterpret_cast<ManagedApplyServerStubOwnershipFn>(raw_apply_server_stub_ownership);
 
         void* raw_reset_server_stub_ownership = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameResetServerStubOwnershipMethodName,
-            &raw_reset_server_stub_ownership);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedGameExportsTypeName, kManagedGameResetServerStubOwnershipMethodName,
+                                          &raw_reset_server_stub_ownership);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -479,12 +446,9 @@ class ManagedRuntimeHost::Impl final
             reinterpret_cast<ManagedResetServerStubOwnershipFn>(raw_reset_server_stub_ownership);
 
         void* raw_get_ready_server_stub_count = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameGetReadyServerStubCountMethodName,
-            &raw_get_ready_server_stub_count);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedGameExportsTypeName, kManagedGameGetReadyServerStubCountMethodName,
+                                          &raw_get_ready_server_stub_count);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -493,12 +457,9 @@ class ManagedRuntimeHost::Impl final
             reinterpret_cast<ManagedGetReadyServerStubCountFn>(raw_get_ready_server_stub_count);
 
         void* raw_get_ready_server_stub_entry = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameGetReadyServerStubEntryMethodName,
-            &raw_get_ready_server_stub_entry);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedGameExportsTypeName, kManagedGameGetReadyServerStubEntryMethodName,
+                                          &raw_get_ready_server_stub_entry);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -545,11 +506,8 @@ class ManagedRuntimeHost::Impl final
 
         void* raw_get_count = nullptr;
         ManagedHostErrorCode result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameGetServerStubCatalogCountMethodName,
-            &raw_get_count);
+            load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName,
+            kManagedGameGetServerStubCatalogCountMethodName, &raw_get_count);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -557,12 +515,9 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.get_count = reinterpret_cast<ManagedGetServerStubCatalogCountFn>(raw_get_count);
 
         void* raw_get_entry = nullptr;
-        result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameGetServerStubCatalogEntryMethodName,
-            &raw_get_entry);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedGameExportsTypeName, kManagedGameGetServerStubCatalogEntryMethodName,
+                                          &raw_get_entry);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -574,7 +529,8 @@ class ManagedRuntimeHost::Impl final
         return ManagedHostErrorCode::None;
     }
 
-    [[nodiscard]] ManagedHostErrorCode GetServerStubCatalogExports(ManagedServerStubCatalogExports& exports) const noexcept
+    [[nodiscard]] ManagedHostErrorCode
+    GetServerStubCatalogExports(ManagedServerStubCatalogExports& exports) const noexcept
     {
         if (!server_stub_catalog_exports_bound_)
         {
@@ -630,11 +586,8 @@ class ManagedRuntimeHost::Impl final
 
         void* raw_get_abi_version = nullptr;
         const ManagedHostErrorCode resolve_result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_,
-            assembly_path_,
-            kManagedGameExportsTypeName,
-            kManagedGameGetAbiVersionMethodName,
-            &raw_get_abi_version);
+            load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName,
+            kManagedGameGetAbiVersionMethodName, &raw_get_abi_version);
         if (resolve_result != ManagedHostErrorCode::None)
         {
             return resolve_result;
@@ -743,8 +696,7 @@ std::string_view ManagedHostErrorMessage(ManagedHostErrorCode code) noexcept
     return "Unknown managed host error.";
 }
 
-ManagedRuntimeHost::ManagedRuntimeHost()
-    : impl_(std::make_unique<Impl>())
+ManagedRuntimeHost::ManagedRuntimeHost() : impl_(std::make_unique<Impl>())
 {
 }
 
@@ -781,7 +733,8 @@ ManagedHostErrorCode ManagedRuntimeHost::BindServerStubCatalogExports()
     return impl_->BindServerStubCatalogExports();
 }
 
-ManagedHostErrorCode ManagedRuntimeHost::GetServerStubCatalogExports(ManagedServerStubCatalogExports& exports) const noexcept
+ManagedHostErrorCode
+ManagedRuntimeHost::GetServerStubCatalogExports(ManagedServerStubCatalogExports& exports) const noexcept
 {
     return impl_->GetServerStubCatalogExports(exports);
 }

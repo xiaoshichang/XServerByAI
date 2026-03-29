@@ -128,10 +128,8 @@ bool IsCanonicalGuidText(std::string_view value)
     return true;
 }
 
-bool TryWriteManagedUtf8String(
-    std::string_view value,
-    std::span<std::uint8_t> utf8_buffer,
-    std::uint32_t* output_length)
+bool TryWriteManagedUtf8String(std::string_view value, std::span<std::uint8_t> utf8_buffer,
+                               std::uint32_t* output_length)
 {
     if (output_length == nullptr || value.size() > utf8_buffer.size())
     {
@@ -163,10 +161,8 @@ struct ReadyCallbackCapture final
     std::vector<std::string> entity_ids{};
 };
 
-void OnServerStubReady(
-    void* context,
-    std::uint64_t assignment_epoch,
-    const xs::host::ManagedServerStubReadyEntry* entry)
+void OnServerStubReady(void* context, std::uint64_t assignment_epoch,
+                       const xs::host::ManagedServerStubReadyEntry* entry)
 {
     auto* capture = static_cast<ReadyCallbackCapture*>(context);
     if (capture == nullptr || entry == nullptr)
@@ -207,29 +203,21 @@ void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
     input->args.native_callbacks.on_server_stub_ready = nullptr;
 }
 
-xs::host::ManagedServerStubOwnershipEntry MakeOwnershipEntry(
-    std::string_view entity_type,
-    std::string_view entity_id,
-    std::string_view owner_game_node_id)
+xs::host::ManagedServerStubOwnershipEntry MakeOwnershipEntry(std::string_view entity_type, std::string_view entity_id,
+                                                             std::string_view owner_game_node_id)
 {
     xs::host::ManagedServerStubOwnershipEntry entry{};
     XS_CHECK(TryWriteManagedUtf8String(
         entity_type,
-        std::span<std::uint8_t>(
-            entry.entity_type_utf8,
-            xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
+        std::span<std::uint8_t>(entry.entity_type_utf8, xs::host::XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES),
         &entry.entity_type_length));
     XS_CHECK(TryWriteManagedUtf8String(
         entity_id,
-        std::span<std::uint8_t>(
-            entry.entity_id_utf8,
-            xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
+        std::span<std::uint8_t>(entry.entity_id_utf8, xs::host::XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES),
         &entry.entity_id_length));
     XS_CHECK(TryWriteManagedUtf8String(
         owner_game_node_id,
-        std::span<std::uint8_t>(
-            entry.owner_game_node_id_utf8,
-            xs::host::XS_MANAGED_NODE_ID_MAX_UTF8_BYTES),
+        std::span<std::uint8_t>(entry.owner_game_node_id_utf8, xs::host::XS_MANAGED_NODE_ID_MAX_UTF8_BYTES),
         &entry.owner_game_node_id_length));
     return entry;
 }
@@ -239,28 +227,25 @@ void TestManagedAssetsExist()
     XS_CHECK_MSG(std::filesystem::exists(kManagedAssemblyPath), kManagedAssemblyPath.string().c_str());
     XS_CHECK_MSG(std::filesystem::exists(kManagedRuntimeConfigPath), kManagedRuntimeConfigPath.string().c_str());
     XS_CHECK_MSG(std::filesystem::exists(kAbiMismatchAssemblyPath), kAbiMismatchAssemblyPath.string().c_str());
-    XS_CHECK_MSG(std::filesystem::exists(kAbiMismatchRuntimeConfigPath), kAbiMismatchRuntimeConfigPath.string().c_str());
+    XS_CHECK_MSG(std::filesystem::exists(kAbiMismatchRuntimeConfigPath),
+                 kAbiMismatchRuntimeConfigPath.string().c_str());
     XS_CHECK_MSG(std::filesystem::exists(kMissingExportsAssemblyPath), kMissingExportsAssemblyPath.string().c_str());
-    XS_CHECK_MSG(std::filesystem::exists(kMissingExportsRuntimeConfigPath), kMissingExportsRuntimeConfigPath.string().c_str());
+    XS_CHECK_MSG(std::filesystem::exists(kMissingExportsRuntimeConfigPath),
+                 kMissingExportsRuntimeConfigPath.string().c_str());
 }
 
 void TestManagedHostErrorMetadata()
 {
-    XS_CHECK(
-        xs::host::ManagedHostErrorCanonicalName(xs::host::ManagedHostErrorCode::RuntimeInitializeFailed) ==
-        std::string_view("Interop.RuntimeInitializeFailed"));
-    XS_CHECK(
-        xs::host::ManagedHostErrorCanonicalName(xs::host::ManagedHostErrorCode::AbiVersionMismatch) ==
-        std::string_view("Interop.AbiVersionMismatch"));
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(xs::host::ManagedHostErrorCode::RuntimeDelegateLoadFailed) ==
-        std::string_view("Failed to resolve load_assembly_and_get_function_pointer from hostfxr."));
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(xs::host::ManagedHostErrorCode::RuntimeNotLoaded) ==
-        std::string_view("Managed runtime host must be loaded before binding game exports."));
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(xs::host::ManagedHostErrorCode::EntryPointNotBound) ==
-        std::string_view("Managed game entry points have not been bound successfully."));
+    XS_CHECK(xs::host::ManagedHostErrorCanonicalName(xs::host::ManagedHostErrorCode::RuntimeInitializeFailed) ==
+             std::string_view("Interop.RuntimeInitializeFailed"));
+    XS_CHECK(xs::host::ManagedHostErrorCanonicalName(xs::host::ManagedHostErrorCode::AbiVersionMismatch) ==
+             std::string_view("Interop.AbiVersionMismatch"));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(xs::host::ManagedHostErrorCode::RuntimeDelegateLoadFailed) ==
+             std::string_view("Failed to resolve load_assembly_and_get_function_pointer from hostfxr."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(xs::host::ManagedHostErrorCode::RuntimeNotLoaded) ==
+             std::string_view("Managed runtime host must be loaded before binding game exports."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(xs::host::ManagedHostErrorCode::EntryPointNotBound) ==
+             std::string_view("Managed game entry points have not been bound successfully."));
 }
 
 void TestBindRejectsRuntimeNotLoaded()
@@ -270,9 +255,8 @@ void TestBindRejectsRuntimeNotLoaded()
     const xs::host::ManagedHostErrorCode result = host.BindGameExports();
 
     XS_CHECK(result == xs::host::ManagedHostErrorCode::RuntimeNotLoaded);
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(result) ==
-        std::string_view("Managed runtime host must be loaded before binding game exports."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(result) ==
+             std::string_view("Managed runtime host must be loaded before binding game exports."));
     XS_CHECK(!host.IsLoaded());
     XS_CHECK(!host.AreGameExportsBound());
 }
@@ -285,9 +269,8 @@ void TestGetExportsRejectsUnboundHost()
     const xs::host::ManagedHostErrorCode result = host.GetGameExports(exports);
 
     XS_CHECK(result == xs::host::ManagedHostErrorCode::EntryPointNotBound);
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(result) ==
-        std::string_view("Managed game entry points have not been bound successfully."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(result) ==
+             std::string_view("Managed game entry points have not been bound successfully."));
     XS_CHECK(!host.AreGameExportsBound());
 }
 
@@ -297,16 +280,13 @@ void TestLoadRejectsMissingRuntimeConfig()
     const std::filesystem::path missing_runtime_config =
         std::filesystem::current_path() / "test-output" / "host-runtime-tests" / "missing.runtimeconfig.json";
 
-    const xs::host::ManagedHostErrorCode result = host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            missing_runtime_config,
-            kManagedAssemblyPath,
-        });
+    const xs::host::ManagedHostErrorCode result = host.Load(xs::host::ManagedRuntimeHostOptions{
+        missing_runtime_config,
+        kManagedAssemblyPath,
+    });
 
     XS_CHECK(result == xs::host::ManagedHostErrorCode::RuntimeConfigPathNotFound);
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(result) ==
-        std::string_view("Managed runtime config was not found."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(result) == std::string_view("Managed runtime config was not found."));
     XS_CHECK(!host.IsLoaded());
     XS_CHECK(!host.AreGameExportsBound());
 }
@@ -317,16 +297,13 @@ void TestLoadRejectsMissingAssembly()
     const std::filesystem::path missing_assembly =
         std::filesystem::current_path() / "test-output" / "host-runtime-tests" / "missing-assembly.dll";
 
-    const xs::host::ManagedHostErrorCode result = host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            kManagedRuntimeConfigPath,
-            missing_assembly,
-        });
+    const xs::host::ManagedHostErrorCode result = host.Load(xs::host::ManagedRuntimeHostOptions{
+        kManagedRuntimeConfigPath,
+        missing_assembly,
+    });
 
     XS_CHECK(result == xs::host::ManagedHostErrorCode::AssemblyPathNotFound);
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(result) ==
-        std::string_view("Managed root assembly was not found."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(result) == std::string_view("Managed root assembly was not found."));
     XS_CHECK(!host.IsLoaded());
     XS_CHECK(!host.AreGameExportsBound());
 }
@@ -335,11 +312,10 @@ void TestLoadAndBindGameExportsSucceed()
 {
     xs::host::ManagedRuntimeHost host;
 
-    const xs::host::ManagedHostErrorCode load_result = host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            kManagedRuntimeConfigPath,
-            kManagedAssemblyPath,
-        });
+    const xs::host::ManagedHostErrorCode load_result = host.Load(xs::host::ManagedRuntimeHostOptions{
+        kManagedRuntimeConfigPath,
+        kManagedAssemblyPath,
+    });
 
     XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
     XS_CHECK(host.IsLoaded());
@@ -363,9 +339,8 @@ void TestLoadAndBindGameExportsSucceed()
 
     xs::host::ManagedGameExports exports{};
     const xs::host::ManagedHostErrorCode get_exports_result = host.GetGameExports(exports);
-    XS_CHECK_MSG(
-        get_exports_result == xs::host::ManagedHostErrorCode::None,
-        DescribeManagedHostResult(get_exports_result).c_str());
+    XS_CHECK_MSG(get_exports_result == xs::host::ManagedHostErrorCode::None,
+                 DescribeManagedHostResult(get_exports_result).c_str());
     XS_CHECK(exports.abi_version == xs::host::XS_MANAGED_ABI_VERSION);
     XS_CHECK(exports.get_abi_version != nullptr);
     XS_CHECK(exports.init != nullptr);
@@ -430,23 +405,24 @@ void TestLoadAndBindGameExportsSucceed()
     xs::host::ManagedServerStubReadyEntry second_ready_entry{};
     XS_CHECK(exports.get_ready_server_stub_entry(0U, &first_ready_entry) == 0);
     XS_CHECK(exports.get_ready_server_stub_entry(1U, &second_ready_entry) == 0);
-    XS_CHECK(ReadManagedUtf8(first_ready_entry.entity_type_utf8, first_ready_entry.entity_type_length) == "MatchService");
-    XS_CHECK(ReadManagedUtf8(second_ready_entry.entity_type_utf8, second_ready_entry.entity_type_length) == "LeaderboardService");
-    XS_CHECK(IsCanonicalGuidText(ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length)));
-    XS_CHECK(IsCanonicalGuidText(ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length)));
+    XS_CHECK(ReadManagedUtf8(first_ready_entry.entity_type_utf8, first_ready_entry.entity_type_length) ==
+             "MatchService");
+    XS_CHECK(ReadManagedUtf8(second_ready_entry.entity_type_utf8, second_ready_entry.entity_type_length) ==
+             "LeaderboardService");
     XS_CHECK(
-        ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length) !=
-        ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
+        IsCanonicalGuidText(ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length)));
+    XS_CHECK(
+        IsCanonicalGuidText(ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length)));
+    XS_CHECK(ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length) !=
+             ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
     XS_CHECK(first_ready_entry.ready == 1U);
     XS_CHECK(second_ready_entry.ready == 1U);
     if (ready_callback_capture.entity_ids.size() == 2U)
     {
-        XS_CHECK(
-            ready_callback_capture.entity_ids[0] ==
-            ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length));
-        XS_CHECK(
-            ready_callback_capture.entity_ids[1] ==
-            ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
+        XS_CHECK(ready_callback_capture.entity_ids[0] ==
+                 ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length));
+        XS_CHECK(ready_callback_capture.entity_ids[1] ==
+                 ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
     }
 
     XS_CHECK(exports.reset_server_stub_ownership() == 0);
@@ -470,11 +446,10 @@ void TestLoadAndBindServerStubCatalogExportsSucceed()
 {
     xs::host::ManagedRuntimeHost host;
 
-    const xs::host::ManagedHostErrorCode load_result = host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            kManagedRuntimeConfigPath,
-            kManagedAssemblyPath,
-        });
+    const xs::host::ManagedHostErrorCode load_result = host.Load(xs::host::ManagedRuntimeHostOptions{
+        kManagedRuntimeConfigPath,
+        kManagedAssemblyPath,
+    });
     XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
     XS_CHECK(host.IsLoaded());
     XS_CHECK(!host.AreServerStubCatalogExportsBound());
@@ -492,9 +467,8 @@ void TestLoadAndBindServerStubCatalogExportsSucceed()
 
     xs::host::ManagedServerStubCatalogExports exports{};
     const xs::host::ManagedHostErrorCode get_exports_result = host.GetServerStubCatalogExports(exports);
-    XS_CHECK_MSG(
-        get_exports_result == xs::host::ManagedHostErrorCode::None,
-        DescribeManagedHostResult(get_exports_result).c_str());
+    XS_CHECK_MSG(get_exports_result == xs::host::ManagedHostErrorCode::None,
+                 DescribeManagedHostResult(get_exports_result).c_str());
     XS_CHECK(exports.abi_version == xs::host::XS_MANAGED_ABI_VERSION);
     XS_CHECK(exports.get_count != nullptr);
     XS_CHECK(exports.get_entry != nullptr);
@@ -519,7 +493,8 @@ void TestLoadAndBindServerStubCatalogExportsSucceed()
     {
         xs::host::ManagedServerStubCatalogEntry entry{};
         XS_CHECK(exports.get_entry(index, &entry) == 0);
-        XS_CHECK(ReadManagedUtf8(entry.entity_type_utf8, entry.entity_type_length) == expected_entries[index].entity_type);
+        XS_CHECK(ReadManagedUtf8(entry.entity_type_utf8, entry.entity_type_length) ==
+                 expected_entries[index].entity_type);
         XS_CHECK(ReadManagedUtf8(entry.entity_id_utf8, entry.entity_id_length) == expected_entries[index].entity_id);
     }
 }
@@ -528,15 +503,16 @@ void TestLoadAllowsSecondInitializationAfterUnload()
 {
     xs::host::ManagedRuntimeHost first_host;
 
-    const xs::host::ManagedHostErrorCode first_load_result = first_host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            kManagedRuntimeConfigPath,
-            kManagedAssemblyPath,
-        });
-    XS_CHECK_MSG(first_load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(first_load_result).c_str());
+    const xs::host::ManagedHostErrorCode first_load_result = first_host.Load(xs::host::ManagedRuntimeHostOptions{
+        kManagedRuntimeConfigPath,
+        kManagedAssemblyPath,
+    });
+    XS_CHECK_MSG(first_load_result == xs::host::ManagedHostErrorCode::None,
+                 DescribeManagedHostResult(first_load_result).c_str());
 
     const xs::host::ManagedHostErrorCode first_bind_result = first_host.BindGameExports();
-    XS_CHECK_MSG(first_bind_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(first_bind_result).c_str());
+    XS_CHECK_MSG(first_bind_result == xs::host::ManagedHostErrorCode::None,
+                 DescribeManagedHostResult(first_bind_result).c_str());
 
     XS_CHECK(first_host.Unload() == xs::host::ManagedHostErrorCode::None);
     XS_CHECK(!first_host.IsLoaded());
@@ -544,19 +520,18 @@ void TestLoadAllowsSecondInitializationAfterUnload()
 
     xs::host::ManagedRuntimeHost second_host;
 
-    const xs::host::ManagedHostErrorCode second_load_result = second_host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            kAbiMismatchRuntimeConfigPath,
-            kAbiMismatchAssemblyPath,
-        });
-    XS_CHECK_MSG(second_load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(second_load_result).c_str());
+    const xs::host::ManagedHostErrorCode second_load_result = second_host.Load(xs::host::ManagedRuntimeHostOptions{
+        kAbiMismatchRuntimeConfigPath,
+        kAbiMismatchAssemblyPath,
+    });
+    XS_CHECK_MSG(second_load_result == xs::host::ManagedHostErrorCode::None,
+                 DescribeManagedHostResult(second_load_result).c_str());
     XS_CHECK(second_host.IsLoaded());
 
     const xs::host::ManagedHostErrorCode second_bind_result = second_host.BindGameExports();
     XS_CHECK(second_bind_result == xs::host::ManagedHostErrorCode::AbiVersionMismatch);
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(second_bind_result) ==
-        std::string_view("Managed ABI version did not match the native host expectation."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(second_bind_result) ==
+             std::string_view("Managed ABI version did not match the native host expectation."));
     XS_CHECK(!second_host.AreGameExportsBound());
 }
 
@@ -564,18 +539,16 @@ void TestBindRejectsAbiMismatch()
 {
     xs::host::ManagedRuntimeHost host;
 
-    const xs::host::ManagedHostErrorCode load_result = host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            kAbiMismatchRuntimeConfigPath,
-            kAbiMismatchAssemblyPath,
-        });
+    const xs::host::ManagedHostErrorCode load_result = host.Load(xs::host::ManagedRuntimeHostOptions{
+        kAbiMismatchRuntimeConfigPath,
+        kAbiMismatchAssemblyPath,
+    });
     XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
 
     const xs::host::ManagedHostErrorCode bind_result = host.BindGameExports();
     XS_CHECK(bind_result == xs::host::ManagedHostErrorCode::AbiVersionMismatch);
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(bind_result) ==
-        std::string_view("Managed ABI version did not match the native host expectation."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(bind_result) ==
+             std::string_view("Managed ABI version did not match the native host expectation."));
     XS_CHECK(!host.AreGameExportsBound());
 
     xs::host::ManagedGameExports exports{};
@@ -587,18 +560,16 @@ void TestBindRejectsMissingExport()
 {
     xs::host::ManagedRuntimeHost host;
 
-    const xs::host::ManagedHostErrorCode load_result = host.Load(
-        xs::host::ManagedRuntimeHostOptions{
-            kMissingExportsRuntimeConfigPath,
-            kMissingExportsAssemblyPath,
-        });
+    const xs::host::ManagedHostErrorCode load_result = host.Load(xs::host::ManagedRuntimeHostOptions{
+        kMissingExportsRuntimeConfigPath,
+        kMissingExportsAssemblyPath,
+    });
     XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
 
     const xs::host::ManagedHostErrorCode bind_result = host.BindGameExports();
     XS_CHECK(bind_result == xs::host::ManagedHostErrorCode::EntryPointResolveFailed);
-    XS_CHECK(
-        xs::host::ManagedHostErrorMessage(bind_result) ==
-        std::string_view("Failed to resolve a required managed entry point from the GameLogic assembly."));
+    XS_CHECK(xs::host::ManagedHostErrorMessage(bind_result) ==
+             std::string_view("Failed to resolve a required managed entry point from the GameLogic assembly."));
     XS_CHECK(!host.AreGameExportsBound());
 }
 
