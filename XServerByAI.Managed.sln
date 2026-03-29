@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Framework.Tests", "src\mana
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Framework", "src\managed\Framework\Framework.csproj", "{EC0E86A5-AD58-4AA8-96C0-442099F69894}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EntityProperties.Generator", "src\managed\EntityProperties.Generator\EntityProperties.Generator.csproj", "{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -103,6 +105,18 @@ Global
 		{EC0E86A5-AD58-4AA8-96C0-442099F69894}.Release|x64.Build.0 = Release|Any CPU
 		{EC0E86A5-AD58-4AA8-96C0-442099F69894}.Release|x86.ActiveCfg = Release|Any CPU
 		{EC0E86A5-AD58-4AA8-96C0-442099F69894}.Release|x86.Build.0 = Release|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Debug|x64.Build.0 = Debug|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Debug|x86.Build.0 = Debug|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Release|x64.ActiveCfg = Release|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Release|x64.Build.0 = Release|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Release|x86.ActiveCfg = Release|Any CPU
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -116,5 +130,6 @@ Global
 		{60E8F86D-84D3-4275-BDE4-DB2F7B99EB7B} = {1C755F88-D585-B159-70B3-4DC1B3E4CD12}
 		{A79BCB11-2899-4DBB-94E0-43F1F8E65183} = {1C755F88-D585-B159-70B3-4DC1B3E4CD12}
 		{EC0E86A5-AD58-4AA8-96C0-442099F69894} = {740F2F8A-03DD-0AB5-5B09-13F1E599E4C1}
+		{3823B8B0-0DBB-4B8E-977E-AAA80C2E393D} = {740F2F8A-03DD-0AB5-5B09-13F1E599E4C1}
 	EndGlobalSection
 EndGlobal

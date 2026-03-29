@@ -2,6 +2,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Foundation\Foundation.csproj" />
+    <ProjectReference Include="..\EntityProperties.Generator\EntityProperties.Generator.csproj"
+                      OutputItemType="Analyzer"
+                      SkipGetTargetFrameworkProperties="true"
+                      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <PropertyGroup>

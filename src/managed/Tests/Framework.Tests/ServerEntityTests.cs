@@ -1,3 +1,4 @@
+using System.Reflection;
 using XServer.Managed.Framework.Entities;
 
 namespace XServer.Managed.Framework.Tests
@@ -11,17 +12,21 @@ namespace XServer.Managed.Framework.Tests
 
             Assert.Equal(nameof(MigratableEntity), entity.EntityType);
             Assert.True(entity.IsMigratable());
+            Assert.NotEqual(Guid.Empty, entity.EntityId);
             Assert.Equal(EntityLifecycleState.Constructed, entity.LifecycleState);
         }
 
         [Fact]
-        public void ServerEntity_EntityId_IsMarkedAsEntityProperty()
+        public void ServerEntity_EntityIdField_IsMarkedAsEntityProperty()
         {
+            FieldInfo? entityIdField =
+                typeof(ServerEntity).GetField("__EntityId", BindingFlags.Instance | BindingFlags.NonPublic);
             EntityPropertyAttribute? entityIdAttribute =
-                typeof(ServerEntity).GetProperty(nameof(ServerEntity.EntityId))?
-                    .GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: true)
+                entityIdField?.GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: false)
                     .SingleOrDefault() as EntityPropertyAttribute;
 
+            Assert.NotNull(entityIdField);
+            Assert.True(entityIdField.IsFamily);
             Assert.NotNull(entityIdAttribute);
             Assert.Equal(
                 EntityPropertyFlags.AllClients | EntityPropertyFlags.Persistent,
@@ -38,28 +43,42 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
+        public void EntityPropertySourceGenerator_GeneratesPropertyAccessInterfaces()
+        {
+            var entity = new DerivedPropertyEntity();
+
+            IServerEntityProperties serverEntityProperties = entity;
+            IBasePropertyEntityProperties baseProperties = entity;
+            IDerivedPropertyEntityProperties derivedProperties = entity;
+
+            Guid reassignedEntityId = Guid.NewGuid();
+            serverEntityProperties.EntityId = reassignedEntityId;
+            baseProperties.BaseScore = 42;
+            derivedProperties.DisplayName = "display-name";
+            derivedProperties.ServerSequence = 7;
+            derivedProperties.MigrationOnlySequence = 11;
+            derivedProperties.PersistenceOnlySnapshot = "snapshot";
+
+            Assert.Equal(reassignedEntityId, entity.EntityId);
+            Assert.Equal(42, entity.BaseScore);
+            Assert.Equal("display-name", entity.DisplayName);
+            Assert.Equal(7L, entity.ServerSequence);
+            Assert.Equal(11, entity.MigrationOnlySequence);
+            Assert.Equal("snapshot", entity.PersistenceOnlySnapshot);
+        }
+
+        [Fact]
         public void EntityPropertyAttribute_CanMarkEntityMembers()
         {
-            EntityPropertyAttribute? baseAttribute =
-                typeof(BasePropertyEntity).GetProperty(nameof(BasePropertyEntity.BaseScore))?
-                    .GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: true)
-                    .SingleOrDefault() as EntityPropertyAttribute;
+            EntityPropertyAttribute? baseAttribute = GetEntityPropertyAttribute(typeof(BasePropertyEntity), "__BaseScore");
             EntityPropertyAttribute? serverOnlyAttribute =
-                typeof(DerivedPropertyEntity).GetProperty(nameof(DerivedPropertyEntity.ServerSequence))?
-                    .GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: true)
-                    .SingleOrDefault() as EntityPropertyAttribute;
+                GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__ServerSequence");
             EntityPropertyAttribute? clientServerAttribute =
-                typeof(DerivedPropertyEntity).GetProperty(nameof(DerivedPropertyEntity.DisplayName))?
-                    .GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: true)
-                    .SingleOrDefault() as EntityPropertyAttribute;
+                GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__DisplayName");
             EntityPropertyAttribute? migrationOnlyAttribute =
-                typeof(DerivedPropertyEntity).GetProperty(nameof(DerivedPropertyEntity.MigrationOnlySequence))?
-                    .GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: true)
-                    .SingleOrDefault() as EntityPropertyAttribute;
+                GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__MigrationOnlySequence");
             EntityPropertyAttribute? persistenceOnlyAttribute =
-                typeof(DerivedPropertyEntity).GetProperty(nameof(DerivedPropertyEntity.PersistenceOnlySnapshot))?
-                    .GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: true)
-                    .SingleOrDefault() as EntityPropertyAttribute;
+                GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__PersistenceOnlySnapshot");
 
             Assert.NotNull(baseAttribute);
             Assert.Equal(
@@ -143,72 +162,81 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(EntityLifecycleState.Active, entity.LifecycleState);
         }
 
-        private class BasePropertyEntity : ServerEntity
+        private static EntityPropertyAttribute? GetEntityPropertyAttribute(Type declaringType, string fieldName)
         {
-            [EntityProperty(EntityPropertyFlags.AllClients | EntityPropertyFlags.Persistent)]
-            public int BaseScore { get; set; }
+            FieldInfo? field =
+                declaringType.GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            return field?.GetCustomAttributes(typeof(EntityPropertyAttribute), inherit: false)
+                .SingleOrDefault() as EntityPropertyAttribute;
+        }
+    }
+
+    internal partial class BasePropertyEntity : ServerEntity
+    {
+        [EntityProperty(EntityPropertyFlags.AllClients | EntityPropertyFlags.Persistent)]
+        protected int __BaseScore;
+    }
+
+    internal partial class DerivedPropertyEntity : BasePropertyEntity
+    {
+        public int RuntimeOnlyCounter { get; set; }
+
+        [EntityProperty(EntityPropertyFlags.ClientServer)]
+        protected string __DisplayName = string.Empty;
+
+        [EntityProperty(EntityPropertyFlags.ServerOnly)]
+        protected long __ServerSequence;
+
+        [EntityProperty(EntityPropertyFlags.AllClients)]
+        protected int __MigrationOnlySequence;
+
+        [EntityProperty(EntityPropertyFlags.Persistent)]
+        protected string __PersistenceOnlySnapshot = string.Empty;
+    }
+
+    internal sealed class MigratableEntity : ServerEntity
+    {
+    }
+
+    internal sealed class StubEntity : ServerStubEntity
+    {
+    }
+
+    internal sealed class HookTrackingEntity : ServerEntity
+    {
+        private readonly List<string> _hooks = [];
+
+        public IReadOnlyList<string> Hooks => _hooks;
+
+        protected override void OnActivated()
+        {
+            _hooks.Add("Activated");
         }
 
-        private sealed class DerivedPropertyEntity : BasePropertyEntity
+        protected override void OnMigrationStarted()
         {
-            public int RuntimeOnlyCounter { get; set; }
-
-            [EntityProperty(EntityPropertyFlags.ClientServer)]
-            public string DisplayName { get; set; } = string.Empty;
-
-            [EntityProperty(EntityPropertyFlags.ServerOnly)]
-            public long ServerSequence { get; set; }
-
-            [EntityProperty(EntityPropertyFlags.AllClients)]
-            public int MigrationOnlySequence { get; set; }
-
-            [EntityProperty(EntityPropertyFlags.Persistent)]
-            public string PersistenceOnlySnapshot { get; set; } = string.Empty;
+            _hooks.Add("MigrationStarted");
         }
 
-        private sealed class MigratableEntity : ServerEntity
+        protected override void OnMigrationCompleted()
         {
+            _hooks.Add("MigrationCompleted");
         }
 
-        private sealed class StubEntity : ServerStubEntity
+        protected override void OnMigrationCancelled()
         {
+            _hooks.Add("MigrationCancelled");
         }
 
-        private sealed class HookTrackingEntity : ServerEntity
+        protected override void OnDeactivated()
         {
-            private readonly List<string> _hooks = [];
+            _hooks.Add("Deactivated");
+        }
 
-            public IReadOnlyList<string> Hooks => _hooks;
-
-            protected override void OnActivated()
-            {
-                _hooks.Add("Activated");
-            }
-
-            protected override void OnMigrationStarted()
-            {
-                _hooks.Add("MigrationStarted");
-            }
-
-            protected override void OnMigrationCompleted()
-            {
-                _hooks.Add("MigrationCompleted");
-            }
-
-            protected override void OnMigrationCancelled()
-            {
-                _hooks.Add("MigrationCancelled");
-            }
-
-            protected override void OnDeactivated()
-            {
-                _hooks.Add("Deactivated");
-            }
-
-            protected override void OnDestroyed()
-            {
-                _hooks.Add("Destroyed");
-            }
+        protected override void OnDestroyed()
+        {
+            _hooks.Add("Destroyed");
         }
     }
 }

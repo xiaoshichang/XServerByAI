@@ -6,12 +6,12 @@ namespace XServer.Managed.Framework.Entities
     {
         protected ServerEntity()
         {
-            EntityId = Guid.NewGuid();
+            ((IServerEntityProperties)this).EntityId = Guid.NewGuid();
             LifecycleState = EntityLifecycleState.Constructed;
         }
 
         [EntityProperty(EntityPropertyFlags.AllClients | EntityPropertyFlags.Persistent)]
-        public Guid EntityId { get; }
+        protected Guid __EntityId;
 
         public string EntityType => GetType().Name;
 
