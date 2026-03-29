@@ -744,7 +744,7 @@ void GameNode::HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::
         service_ready_state_.ready_entries.push_back(ready_entry);
     }
 
-    RefreshLocalServiceReadyState();
+    CheckAllLocalStubsReady();
 }
 
 void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
@@ -843,13 +843,13 @@ void GameNode::HandleServerStubOwnershipSync(const xs::net::PacketView& packet)
         return;
     }
 
-    if (!ApplyStubOwnership(sync))
+    if (!CreateAllLocalStubs(sync))
     {
         session->last_protocol_error = "Game node failed to apply managed ownership sync.";
         return;
     }
 
-    RefreshLocalServiceReadyState();
+    CheckAllLocalStubsReady();
     session->last_protocol_error.clear();
 
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM ownership sync.");
@@ -1595,11 +1595,11 @@ bool GameNode::AreAllGateSessionsMeshReady() const noexcept
 
 void GameNode::RefreshMeshReadyState()
 {
-    const bool next_mesh_ready = all_nodes_online_ && AreAllGateSessionsMeshReady();
-    const bool state_changed = mesh_ready_state_.current != next_mesh_ready;
-    mesh_ready_state_.current = next_mesh_ready;
+    const bool all_gate_connected = all_nodes_online_ && AreAllGateSessionsMeshReady();
+    const bool state_changed = mesh_ready_state_.current != all_gate_connected;
+    mesh_ready_state_.current = all_gate_connected;
 
-    if (!next_mesh_ready)
+    if (!all_gate_connected)
     {
         ResetOwnershipState();
     }
@@ -1609,18 +1609,18 @@ void GameNode::RefreshMeshReadyState()
         logger().Log(xs::core::LogLevel::Info, "inner", "Game node refreshed mesh ready state.");
     }
 
-    if (next_mesh_ready != mesh_ready_state_.last_reported || !mesh_ready_state_.has_reported)
+    if (all_gate_connected != mesh_ready_state_.last_reported || !mesh_ready_state_.has_reported)
     {
-        (void)SendMeshReadyReport(next_mesh_ready);
+        (void)SendMeshReadyReport(all_gate_connected);
     }
 
-    if (next_mesh_ready)
+    if (all_gate_connected)
     {
-        RefreshLocalServiceReadyState();
+        CheckAllLocalStubsReady();
     }
 }
 
-void GameNode::RefreshLocalServiceReadyState()
+void GameNode::CheckAllLocalStubsReady()
 {
     if (!mesh_ready_state_.current || ownership_state_.assignment_epoch == 0U)
     {
@@ -1641,7 +1641,7 @@ void GameNode::RefreshLocalServiceReadyState()
     (void)SendServiceReadyReport();
 }
 
-bool GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
+bool GameNode::CreateAllLocalStubs(const xs::net::ServerStubOwnershipSync& sync)
 {
     if (!managed_game_exports_loaded_ || managed_game_exports_.apply_server_stub_ownership == nullptr)
     {
@@ -1673,8 +1673,7 @@ bool GameNode::ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync)
                                                                xs::host::XS_MANAGED_NODE_ID_MAX_UTF8_BYTES),
                                        &managed_assignment.owner_game_node_id_length))
         {
-            logger().Log(xs::core::LogLevel::Warn, "runtime",
-                         "Game node failed to encode managed ownership assignment.");
+            logger().Log(xs::core::LogLevel::Warn, "runtime", "Game node failed to encode managed ownership assignment.");
             return false;
         }
 

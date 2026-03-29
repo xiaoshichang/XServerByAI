@@ -100,8 +100,8 @@ class GameNode final : public ServerNode
     void ResetGmSessionState();
     void ResetGateSessionStates();
     void RefreshMeshReadyState();
-    void RefreshLocalServiceReadyState();
-    [[nodiscard]] bool ApplyStubOwnership(const xs::net::ServerStubOwnershipSync& sync);
+    void CheckAllLocalStubsReady();
+    [[nodiscard]] bool CreateAllLocalStubs(const xs::net::ServerStubOwnershipSync& sync);
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;
