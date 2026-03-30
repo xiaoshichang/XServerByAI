@@ -44,7 +44,7 @@ class GameNode final : public ServerNode
     struct RuntimeState final
     {
         std::uint64_t started_at_unix_ms{0U};
-        std::string managed_assembly_name{"XServer.Managed.GameLogic"};
+        std::string managed_assembly_name{"XServer.Managed.Framework"};
     };
 
     struct MeshReadyState final

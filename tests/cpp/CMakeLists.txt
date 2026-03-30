@@ -239,7 +239,7 @@ add_test(
 ###############################
 find_program(DOTNET_EXECUTABLE dotnet REQUIRED)
 
-function(xs_add_managed_runtime_asset asset_name project_path output_dir)
+function(xs_add_managed_runtime_asset asset_name project_path output_dir assembly_name)
     get_filename_component(project_directory "${project_path}" DIRECTORY)
 
     file(GLOB_RECURSE ${asset_name}_SOURCES CONFIGURE_DEPENDS
@@ -249,9 +249,9 @@ function(xs_add_managed_runtime_asset asset_name project_path output_dir)
     set(${asset_name}_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/managed/${output_dir}")
     file(TO_CMAKE_PATH "${${asset_name}_OUTPUT_DIR}" ${asset_name}_OUTPUT_DIR_CMAKE)
     set(${asset_name}_ASSEMBLY_PATH
-        "${${asset_name}_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.dll")
+        "${${asset_name}_OUTPUT_DIR_CMAKE}/${assembly_name}.dll")
     set(${asset_name}_RUNTIMECONFIG_PATH
-        "${${asset_name}_OUTPUT_DIR_CMAKE}/XServer.Managed.GameLogic.runtimeconfig.json")
+        "${${asset_name}_OUTPUT_DIR_CMAKE}/${assembly_name}.runtimeconfig.json")
 
     add_custom_command(
         OUTPUT
@@ -293,29 +293,93 @@ function(xs_add_managed_runtime_asset asset_name project_path output_dir)
     set(${asset_name}_RUNTIMECONFIG_PATH "${${asset_name}_RUNTIMECONFIG_PATH}" PARENT_SCOPE)
 endfunction()
 
+function(xs_add_managed_library_asset asset_name project_path output_dir assembly_name)
+    get_filename_component(project_directory "${project_path}" DIRECTORY)
+
+    file(GLOB_RECURSE ${asset_name}_SOURCES CONFIGURE_DEPENDS
+        "${project_directory}/*.cs"
+    )
+
+    set(${asset_name}_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/managed/${output_dir}")
+    file(TO_CMAKE_PATH "${${asset_name}_OUTPUT_DIR}" ${asset_name}_OUTPUT_DIR_CMAKE)
+    set(${asset_name}_ASSEMBLY_PATH
+        "${${asset_name}_OUTPUT_DIR_CMAKE}/${assembly_name}.dll")
+
+    add_custom_command(
+        OUTPUT
+            "${${asset_name}_ASSEMBLY_PATH}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dotnet-cli-home"
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+                DOTNET_CLI_HOME=${CMAKE_BINARY_DIR}/dotnet-cli-home
+                DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
+                DOTNET_NOLOGO=1
+                DOTNET_ADD_GLOBAL_TOOLS_TO_PATH=0
+                DOTNET_GENERATE_ASPNET_CERTIFICATE=0
+                MSBuildEnableWorkloadResolver=false
+                "${DOTNET_EXECUTABLE}"
+                build
+                "${project_path}"
+                -c
+                Debug
+                --nologo
+                --no-restore
+                -m:1
+                -p:GenerateRuntimeConfigurationFiles=false
+                "-p:OutDir=${${asset_name}_OUTPUT_DIR_CMAKE}/"
+        DEPENDS
+            "${CMAKE_SOURCE_DIR}/XServerByAI.Managed.sln"
+            "${project_path}"
+            ${${asset_name}_SOURCES}
+        VERBATIM
+    )
+
+    add_custom_target(${asset_name}
+        DEPENDS
+            "${${asset_name}_ASSEMBLY_PATH}"
+    )
+
+    set(${asset_name}_ASSEMBLY_PATH "${${asset_name}_ASSEMBLY_PATH}" PARENT_SCOPE)
+endfunction()
+
 xs_add_managed_runtime_asset(
-    xs_managed_gamelogic_runtime_assets
+    xs_managed_framework_runtime_assets
+    "${CMAKE_SOURCE_DIR}/src/managed/Framework/Framework.csproj"
+    "Framework"
+    "XServer.Managed.Framework"
+)
+
+xs_add_managed_library_asset(
+    xs_managed_gamelogic_discovery_assets
     "${CMAKE_SOURCE_DIR}/src/managed/GameLogic/GameLogic.csproj"
-    "GameLogic"
+    "Framework"
+    "XServer.Managed.GameLogic"
 )
 
 xs_add_managed_runtime_asset(
     xs_managed_interop_abi_mismatch_runtime_assets
     "${CMAKE_SOURCE_DIR}/src/managed/Tests/ManagedInteropAbiMismatch.Tests/ManagedInteropAbiMismatch.Tests.csproj"
     "InteropAbiMismatch"
+    "XServer.Managed.Framework"
 )
 
 xs_add_managed_runtime_asset(
     xs_managed_interop_missing_exports_runtime_assets
     "${CMAKE_SOURCE_DIR}/src/managed/Tests/ManagedInteropMissingExports.Tests/ManagedInteropMissingExports.Tests.csproj"
     "InteropMissingExports"
+    "XServer.Managed.Framework"
 )
 
-function(xs_use_gamelogic_runtime_assets target_name)
-    add_dependencies(${target_name} xs_managed_gamelogic_runtime_assets)
+function(xs_use_managed_runtime_assets target_name)
+    add_dependencies(
+        ${target_name}
+        xs_managed_framework_runtime_assets
+        xs_managed_gamelogic_discovery_assets
+    )
     target_compile_definitions(${target_name} PRIVATE
-        XS_TEST_GAMELOGIC_ASSEMBLY_PATH="${xs_managed_gamelogic_runtime_assets_ASSEMBLY_PATH}"
-        XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH="${xs_managed_gamelogic_runtime_assets_RUNTIMECONFIG_PATH}"
+        XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH="${xs_managed_framework_runtime_assets_ASSEMBLY_PATH}"
+        XS_TEST_MANAGED_FRAMEWORK_RUNTIMECONFIG_PATH="${xs_managed_framework_runtime_assets_RUNTIMECONFIG_PATH}"
+        XS_TEST_MANAGED_GAMELOGIC_ASSEMBLY_PATH="${xs_managed_gamelogic_discovery_assets_ASSEMBLY_PATH}"
     )
 endfunction()
 
@@ -338,7 +402,8 @@ add_executable(xs_host_runtime_tests
 
 add_dependencies(
     xs_host_runtime_tests
-    xs_managed_gamelogic_runtime_assets
+    xs_managed_framework_runtime_assets
+    xs_managed_gamelogic_discovery_assets
     xs_managed_interop_abi_mismatch_runtime_assets
     xs_managed_interop_missing_exports_runtime_assets
 )
@@ -346,25 +411,26 @@ add_dependencies(
 target_link_libraries(xs_host_runtime_tests PRIVATE host)
 
 target_compile_definitions(xs_host_runtime_tests PRIVATE
-    XS_TEST_GAMELOGIC_ASSEMBLY_PATH="${xs_managed_gamelogic_runtime_assets_ASSEMBLY_PATH}"
-    XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH="${xs_managed_gamelogic_runtime_assets_RUNTIMECONFIG_PATH}"
-    XS_TEST_GAMELOGIC_ABI_MISMATCH_ASSEMBLY_PATH="${xs_managed_interop_abi_mismatch_runtime_assets_ASSEMBLY_PATH}"
-    XS_TEST_GAMELOGIC_ABI_MISMATCH_RUNTIMECONFIG_PATH="${xs_managed_interop_abi_mismatch_runtime_assets_RUNTIMECONFIG_PATH}"
-    XS_TEST_GAMELOGIC_MISSING_EXPORTS_ASSEMBLY_PATH="${xs_managed_interop_missing_exports_runtime_assets_ASSEMBLY_PATH}"
-    XS_TEST_GAMELOGIC_MISSING_EXPORTS_RUNTIMECONFIG_PATH="${xs_managed_interop_missing_exports_runtime_assets_RUNTIMECONFIG_PATH}"
+    XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH="${xs_managed_framework_runtime_assets_ASSEMBLY_PATH}"
+    XS_TEST_MANAGED_FRAMEWORK_RUNTIMECONFIG_PATH="${xs_managed_framework_runtime_assets_RUNTIMECONFIG_PATH}"
+    XS_TEST_MANAGED_GAMELOGIC_ASSEMBLY_PATH="${xs_managed_gamelogic_discovery_assets_ASSEMBLY_PATH}"
+    XS_TEST_MANAGED_ABI_MISMATCH_ASSEMBLY_PATH="${xs_managed_interop_abi_mismatch_runtime_assets_ASSEMBLY_PATH}"
+    XS_TEST_MANAGED_ABI_MISMATCH_RUNTIMECONFIG_PATH="${xs_managed_interop_abi_mismatch_runtime_assets_RUNTIMECONFIG_PATH}"
+    XS_TEST_MANAGED_MISSING_EXPORTS_ASSEMBLY_PATH="${xs_managed_interop_missing_exports_runtime_assets_ASSEMBLY_PATH}"
+    XS_TEST_MANAGED_MISSING_EXPORTS_RUNTIMECONFIG_PATH="${xs_managed_interop_missing_exports_runtime_assets_RUNTIMECONFIG_PATH}"
 )
 
 xs_copy_windows_nethost_dll(xs_host_runtime_tests)
 add_test(NAME xs_host_runtime_tests COMMAND xs_host_runtime_tests)
 
-xs_use_gamelogic_runtime_assets(xs_core_json_tests)
-xs_use_gamelogic_runtime_assets(xs_node_create_helper_tests)
-xs_use_gamelogic_runtime_assets(xs_node_gm_node_tests)
-xs_use_gamelogic_runtime_assets(xs_node_gm_register_tests)
-xs_use_gamelogic_runtime_assets(xs_node_game_node_tests)
-xs_use_gamelogic_runtime_assets(xs_node_gate_node_tests)
-xs_use_gamelogic_runtime_assets(xs_node_gate_gm_session_tests)
-xs_use_gamelogic_runtime_assets(xs_node_game_gm_session_tests)
+xs_use_managed_runtime_assets(xs_core_json_tests)
+xs_use_managed_runtime_assets(xs_node_create_helper_tests)
+xs_use_managed_runtime_assets(xs_node_gm_node_tests)
+xs_use_managed_runtime_assets(xs_node_gm_register_tests)
+xs_use_managed_runtime_assets(xs_node_game_node_tests)
+xs_use_managed_runtime_assets(xs_node_gate_node_tests)
+xs_use_managed_runtime_assets(xs_node_gate_gm_session_tests)
+xs_use_managed_runtime_assets(xs_node_game_gm_session_tests)
 
 xs_copy_windows_nethost_dll(xs_node_create_helper_tests)
 xs_copy_windows_nethost_dll(xs_node_gm_node_tests)

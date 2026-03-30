@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace XServer.Managed.GameLogic.Interop
+namespace XServer.Managed.Framework.Interop
 {
     public static class ManagedAbi
     {

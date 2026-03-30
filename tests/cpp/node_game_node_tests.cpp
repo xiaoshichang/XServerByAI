@@ -590,7 +590,7 @@ void TestGameNodeConnectsToGmAndStopsCleanly()
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     XS_CHECK(!game_node.run_completed());
-    XS_CHECK(game_node.node().managed_assembly_name() == "XServer.Managed.GameLogic");
+    XS_CHECK(game_node.node().managed_assembly_name() == "XServer.Managed.Framework");
     XS_CHECK(game_node.node().inner_connection_state("Gate0") == xs::ipc::ZmqConnectionState::Connected);
 
     game_node.StopAndJoin();
@@ -618,7 +618,7 @@ void TestGameNodeConnectsToGmAndStopsCleanly()
     XS_CHECK(log_text.find("gmInnerRemoteEndpoint") == std::string::npos);
     XS_CHECK(log_text.find("configuredInnerEndpoint") == std::string::npos);
     XS_CHECK(log_text.find("gateNodeId=Gate0") == std::string::npos);
-    XS_CHECK(log_text.find("managedAssemblyName=XServer.Managed.GameLogic") == std::string::npos);
+    XS_CHECK(log_text.find("managedAssemblyName=XServer.Managed.Framework") == std::string::npos);
 
     CleanupTestDirectory(base_path);
 }

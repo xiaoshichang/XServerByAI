@@ -385,13 +385,20 @@ void TestLoadNodeConfigForGame()
     {
         XS_CHECK(game_node_config->inner_network_listen_endpoint.host == "127.0.0.1");
         XS_CHECK(game_node_config->inner_network_listen_endpoint.port == 7100);
-        XS_CHECK(game_node_config->managed.assembly_name == "XServer.Managed.GameLogic");
+        XS_CHECK(game_node_config->managed.assembly_name == "XServer.Managed.Framework");
         XS_CHECK(
             game_node_config->managed.assembly_path ==
-            std::filesystem::path{XS_TEST_GAMELOGIC_ASSEMBLY_PATH}.lexically_normal());
+            std::filesystem::path{XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH}.lexically_normal());
         XS_CHECK(
             game_node_config->managed.runtime_config_path ==
-            std::filesystem::path{XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH}.lexically_normal());
+            std::filesystem::path{XS_TEST_MANAGED_FRAMEWORK_RUNTIMECONFIG_PATH}.lexically_normal());
+        XS_CHECK(game_node_config->managed.search_assembly_paths.size() == 2U);
+        XS_CHECK(
+            game_node_config->managed.search_assembly_paths[0] ==
+            std::filesystem::path{XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH}.lexically_normal());
+        XS_CHECK(
+            game_node_config->managed.search_assembly_paths[1] ==
+            std::filesystem::path{XS_TEST_MANAGED_GAMELOGIC_ASSEMBLY_PATH}.lexically_normal());
     }
 
     CleanupTestDirectory(base_path);

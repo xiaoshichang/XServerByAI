@@ -823,10 +823,11 @@ bool ParseManagedConfig(
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 3> kAllowedFields{
+    static constexpr std::array<std::string_view, 4> kAllowedFields{
         "assemblyName",
         "assemblyPath",
         "runtimeConfigPath",
+        "searchAssemblyPaths",
     };
 
     if (output == nullptr)
@@ -876,6 +877,28 @@ bool ParseManagedConfig(
         !parse_asset_path("runtimeConfigPath", &config.runtime_config_path))
     {
         return false;
+    }
+
+    const Json* search_assembly_paths = nullptr;
+    if (TryGetMember(value, "searchAssemblyPaths", &search_assembly_paths))
+    {
+        if (!search_assembly_paths->is_array())
+        {
+            return SetError(std::string(JoinPath(path, "searchAssemblyPaths")) + " must be an array.", error_message);
+        }
+
+        config.search_assembly_paths.clear();
+        for (std::size_t index = 0U; index < search_assembly_paths->size(); ++index)
+        {
+            std::string raw_path;
+            const std::string entry_path = JoinPath(JoinPath(path, "searchAssemblyPaths"), std::to_string(index));
+            if (!ParseNonEmptyString((*search_assembly_paths)[index], entry_path, &raw_path, error_message))
+            {
+                return false;
+            }
+
+            config.search_assembly_paths.push_back(ResolveConfigRelativePath(config_base_path, raw_path));
+        }
     }
 
     *output = std::move(config);

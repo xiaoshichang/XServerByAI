@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ManagedInterop.h"
 
@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include <vector>
 
 #include <coreclr_delegates.h>
 
@@ -36,6 +37,7 @@ struct ManagedRuntimeHostOptions
 {
     std::filesystem::path runtime_config_path{};
     std::filesystem::path assembly_path{};
+    std::vector<std::filesystem::path> discovery_assembly_paths{};
 };
 
 class ManagedRuntimeHost final

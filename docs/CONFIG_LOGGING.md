@@ -39,7 +39,7 @@
 3. `gate.<NodeID>.innerNetwork.listenEndpoint` 蹇呭～锛岃〃绀鸿 Gate 鐨?`InnerNetwork` 鐩戝惉鍦板潃銆?
 4. `gate.<NodeID>.clientNetwork.listenEndpoint` 蹇呭～锛岃〃绀鸿 Gate 鐨?`ClientNetwork` 鐩戝惉鍦板潃銆?
 5. `game.<NodeID>.innerNetwork.listenEndpoint` 蹇呭～锛岃〃绀鸿 Game 鐨?`InnerNetwork` 鐩戝惉鍦板潃銆?
-6. `managed.assemblyName` 默认为 `XServer.Managed.GameLogic`；`managed.assemblyPath` 与 `managed.runtimeConfigPath` 由顶层共享提供。
+6. `managed.assemblyName` 默认为 `XServer.Managed.Framework`；`managed.assemblyPath`、`managed.runtimeConfigPath` 与 `managed.searchAssemblyPaths` 由顶层共享提供。
 7. `logging` 涓?`kcp` 宸茬Щ鍔ㄥ埌闆嗙兢灞傦紱涓嶅啀鍦?`NodeConfig` 鍐呴噸澶嶅瓨鏀捐繖浜涘叕鍏卞瓧娈点€?
 8. `NodeConfig` 涓嶅啀鏄惧紡淇濆瓨鍘嗗彶鐨勮繘绋嬬被鍨嬪瓧娈典笌鑺傜偣鏍囪瘑瀛楁锛涜妭鐐硅鑹茬敱娲剧敓绫诲瀷浣撶幇锛屽疄渚嬬敱 `ClusterConfig` 涓?`gm` / `gate` / `game` 鐨勯敭鍊间綋鐜般€?
 
@@ -117,7 +117,13 @@
         }
       },
       "managed": {
-        "assemblyName": "XServer.Managed.GameLogic"
+        "assemblyName": "XServer.Managed.Framework",
+        "assemblyPath": "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.dll",
+        "runtimeConfigPath": "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.runtimeconfig.json",
+        "searchAssemblyPaths": [
+          "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.dll",
+          "../src/managed/GameLogic/bin/Debug/net10.0/XServer.Managed.GameLogic.dll"
+        ]
       }
     }
   }
@@ -169,6 +175,6 @@
 
 **M3-17 补充：顶层 managed**
 1. 顶层新增 `managed` 配置块，当前由 `GM` 与全部 `Game` 共用；`game.<NodeID>` 不再内嵌 `managed`。
-2. `managed` 当前包含 `assemblyName`、`assemblyPath` 与 `runtimeConfigPath` 三个字段；`assemblyPath` 与 `runtimeConfigPath` 支持相对配置文件所在目录解析。
+2. `managed` 当前包含 `assemblyName`、`assemblyPath`、`runtimeConfigPath` 与 `searchAssemblyPaths` 四个字段；路径字段都支持相对配置文件所在目录解析。
 3. `GM` 通过顶层 `managed` 加载托管程序集并读取 ServerStub catalog；`Game` 仍复用同一块配置初始化托管运行时。
 4. 配置校验会对顶层 `managed` 做显式字段检查，未知字段与缺失必需路径都会按配置错误处理。

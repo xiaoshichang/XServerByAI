@@ -1,4 +1,4 @@
-namespace XServer.Managed.GameLogic.Runtime
+namespace XServer.Managed.Framework.Runtime
 {
     public enum GameNodeRuntimeStateErrorCode
     {
@@ -18,7 +18,7 @@ namespace XServer.Managed.GameLogic.Runtime
                 GameNodeRuntimeStateErrorCode.None => "No error.",
                 GameNodeRuntimeStateErrorCode.InvalidArgument => "Game node runtime state argument is invalid.",
                 GameNodeRuntimeStateErrorCode.UnknownStubType =>
-                    "Game node runtime state could not resolve the requested stub type.",
+                    "Game node runtime state could not resolve the requested stub.",
                 GameNodeRuntimeStateErrorCode.StubInstantiationFailed =>
                     "Game node runtime state failed to instantiate the requested stub.",
                 GameNodeRuntimeStateErrorCode.DuplicateEntityId =>

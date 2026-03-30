@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace XServer.Managed.GameLogic.Interop
+namespace XServer.Managed.Framework.Interop
 {
     public static unsafe class NativeLoggerBridge
     {

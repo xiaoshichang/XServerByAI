@@ -1,7 +1,6 @@
-using System;
 using System.Text;
 
-namespace XServer.Managed.GameLogic.Catalog
+namespace XServer.Managed.Framework.Catalog
 {
     public sealed class ServerStubCatalogEntry
     {

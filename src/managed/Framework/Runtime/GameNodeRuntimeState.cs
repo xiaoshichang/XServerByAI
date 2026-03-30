@@ -1,7 +1,7 @@
+using XServer.Managed.Framework.Catalog;
 using XServer.Managed.Framework.Entities;
-using XServer.Managed.GameLogic.Catalog;
 
-namespace XServer.Managed.GameLogic.Runtime
+namespace XServer.Managed.Framework.Runtime
 {
     public delegate void ServerStubReadyCallback(ulong assignmentEpoch, ServerStubEntity stub);
 
@@ -63,7 +63,7 @@ namespace XServer.Managed.GameLogic.Runtime
 
             foreach (ServerStubOwnershipAssignment assignment in nextOwnedAssignments)
             {
-                if (!ServerStubCatalog.TryResolveStubType(assignment.EntityType, out Type? stubType) || stubType == null)
+                if (!ServerEntityCatalog.TryResolveStubType(assignment.EntityType, out Type? stubType) || stubType == null)
                 {
                     DestroyEntities(createdStubs);
                     return GameNodeRuntimeStateErrorCode.UnknownStubType;

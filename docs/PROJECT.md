@@ -58,7 +58,7 @@
 3. `gm.innerNetwork.listenEndpoint` 表示 `GM` 的内部监听地址。
 4. `gm.controlNetwork.listenEndpoint` 表示 `GM` 的本地 HTTP 管理接口监听地址。
 5. `gate.<NodeID>` 同时包含 `innerNetwork.listenEndpoint` 与 `clientNetwork.listenEndpoint`。
-6. `managed` 包含 `assemblyName`、`assemblyPath` 与 `runtimeConfigPath`，由 `GM` 与全部 `Game` 共用；`game.<NodeID>` 只包含实例级 `innerNetwork.listenEndpoint`。
+6. `managed` 包含 `assemblyName`、`assemblyPath`、`runtimeConfigPath` 与 `searchAssemblyPaths`，由 `GM` 与全部 `Game` 共用；`game.<NodeID>` 只包含实例级 `innerNetwork.listenEndpoint`。
 7. 当前仓库样例配置位于 `configs/local-dev.json`。
 
 **协议与运行时**
@@ -68,8 +68,8 @@
 4. `Gate` 的客户端路由语义见 `docs/SESSION_ROUTING.md` 与 `docs/GATE_GAME_ENVELOPE.md`。
 
 **托管互操作**
-1. 当前阶段 `Game` 进程承载 CLR 业务入口；`GM` 会在启动编排阶段短暂加载 `GameLogic` 程序集读取 ServerStub catalog，但不会运行 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 业务循环。
-2. 默认托管程序集名为 `XServer.Managed.GameLogic`。
+1. 当前阶段 `Game` 进程承载 CLR 业务入口；`GM` 会在启动编排阶段短暂加载 `Framework` 程序集，并结合 `managed.searchAssemblyPaths` 读取 ServerStub catalog，但不会运行 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 业务循环。
+2. 默认托管程序集名为 `XServer.Managed.Framework`。
 3. `src/managed/Foundation` 承载通用契约与互操作共享类型，`src/managed/Framework` 承载 `ServerEntity` / `ServerStubEntity` 等分布式实体框架公共抽象，`src/managed/GameLogic` 承载业务逻辑并依赖 `Framework`。
 4. ABI 与导出函数约定见 `docs/MANAGED_INTEROP.md`。
 

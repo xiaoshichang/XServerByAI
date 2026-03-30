@@ -1,11 +1,11 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using XServer.Managed.Framework.Catalog;
 using XServer.Managed.Framework.Entities;
-using XServer.Managed.GameLogic.Catalog;
-using XServer.Managed.GameLogic.Runtime;
+using XServer.Managed.Framework.Runtime;
 
-namespace XServer.Managed.GameLogic.Interop
+namespace XServer.Managed.Framework.Interop
 {
     public static unsafe class GameNativeExports
     {

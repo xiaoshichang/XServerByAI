@@ -1,5 +1,5 @@
 using XServer.Managed.Framework.Entities;
-using XServer.Managed.GameLogic.Runtime;
+using XServer.Managed.Framework.Runtime;
 using XServer.Managed.GameLogic.Services;
 
 namespace XServer.Managed.Framework.Tests

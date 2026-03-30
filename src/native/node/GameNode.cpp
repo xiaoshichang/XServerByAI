@@ -72,6 +72,7 @@ xs::host::ManagedRuntimeHostOptions BuildManagedRuntimeHostOptions(const xs::cor
     return xs::host::ManagedRuntimeHostOptions{
         .runtime_config_path = managed_config.runtime_config_path,
         .assembly_path = managed_config.assembly_path,
+        .discovery_assembly_paths = managed_config.search_assembly_paths,
     };
 }
 

@@ -1,8 +1,7 @@
 using System.Linq;
-using XServer.Managed.Framework;
+using XServer.Managed.Framework.Catalog;
 using XServer.Managed.Framework.Entities;
-using XServer.Managed.GameLogic;
-using XServer.Managed.GameLogic.Catalog;
+using XServer.Managed.GameLogic.Services;
 
 namespace XServer.Managed.Framework.Tests
 {
@@ -51,12 +50,6 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
-        public void GameLogicAssemblyMarker_DependsOnFramework()
-        {
-            Assert.Equal(FrameworkAssemblyMarker.Name, GameLogicAssemblyMarker.DependencyName);
-        }
-
-        [Fact]
         public void ServerEntity_AssignsUniqueGuidIds()
         {
             var first = new TestEntity();
@@ -68,6 +61,20 @@ namespace XServer.Managed.Framework.Tests
             Assert.NotEqual(Guid.Empty, stub.EntityId);
             Assert.NotEqual(first.EntityId, second.EntityId);
             Assert.NotEqual(first.EntityId, stub.EntityId);
+        }
+
+        [Fact]
+        public void ServerEntityCatalog_ReturnsConcreteEntityTypesAcrossFrameworkAndGameLogicAssemblies()
+        {
+            var entityTypeNames = ServerEntityCatalog.EntityTypes
+                .Select(static type => type.Name)
+                .ToArray();
+
+            Assert.Contains(nameof(ChatService), entityTypeNames);
+            Assert.Contains(nameof(LeaderboardService), entityTypeNames);
+            Assert.Contains(nameof(MatchService), entityTypeNames);
+            Assert.DoesNotContain(nameof(ServerEntity), entityTypeNames);
+            Assert.DoesNotContain(nameof(ServerStubEntity), entityTypeNames);
         }
 
         [Fact]

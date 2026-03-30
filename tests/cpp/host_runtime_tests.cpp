@@ -11,28 +11,32 @@
 #include <string_view>
 #include <vector>
 
-#ifndef XS_TEST_GAMELOGIC_ASSEMBLY_PATH
-#error XS_TEST_GAMELOGIC_ASSEMBLY_PATH must be defined.
+#ifndef XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH
+#error XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH must be defined.
 #endif
 
-#ifndef XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH
-#error XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH must be defined.
+#ifndef XS_TEST_MANAGED_FRAMEWORK_RUNTIMECONFIG_PATH
+#error XS_TEST_MANAGED_FRAMEWORK_RUNTIMECONFIG_PATH must be defined.
 #endif
 
-#ifndef XS_TEST_GAMELOGIC_ABI_MISMATCH_ASSEMBLY_PATH
-#error XS_TEST_GAMELOGIC_ABI_MISMATCH_ASSEMBLY_PATH must be defined.
+#ifndef XS_TEST_MANAGED_GAMELOGIC_ASSEMBLY_PATH
+#error XS_TEST_MANAGED_GAMELOGIC_ASSEMBLY_PATH must be defined.
 #endif
 
-#ifndef XS_TEST_GAMELOGIC_ABI_MISMATCH_RUNTIMECONFIG_PATH
-#error XS_TEST_GAMELOGIC_ABI_MISMATCH_RUNTIMECONFIG_PATH must be defined.
+#ifndef XS_TEST_MANAGED_ABI_MISMATCH_ASSEMBLY_PATH
+#error XS_TEST_MANAGED_ABI_MISMATCH_ASSEMBLY_PATH must be defined.
 #endif
 
-#ifndef XS_TEST_GAMELOGIC_MISSING_EXPORTS_ASSEMBLY_PATH
-#error XS_TEST_GAMELOGIC_MISSING_EXPORTS_ASSEMBLY_PATH must be defined.
+#ifndef XS_TEST_MANAGED_ABI_MISMATCH_RUNTIMECONFIG_PATH
+#error XS_TEST_MANAGED_ABI_MISMATCH_RUNTIMECONFIG_PATH must be defined.
 #endif
 
-#ifndef XS_TEST_GAMELOGIC_MISSING_EXPORTS_RUNTIMECONFIG_PATH
-#error XS_TEST_GAMELOGIC_MISSING_EXPORTS_RUNTIMECONFIG_PATH must be defined.
+#ifndef XS_TEST_MANAGED_MISSING_EXPORTS_ASSEMBLY_PATH
+#error XS_TEST_MANAGED_MISSING_EXPORTS_ASSEMBLY_PATH must be defined.
+#endif
+
+#ifndef XS_TEST_MANAGED_MISSING_EXPORTS_RUNTIMECONFIG_PATH
+#error XS_TEST_MANAGED_MISSING_EXPORTS_RUNTIMECONFIG_PATH must be defined.
 #endif
 
 namespace
@@ -59,12 +63,13 @@ void Check(bool condition, const char* expression, const char* message = nullptr
 #define XS_CHECK(expr) Check((expr), #expr)
 #define XS_CHECK_MSG(expr, message) Check((expr), #expr, (message))
 
-const std::filesystem::path kManagedAssemblyPath{XS_TEST_GAMELOGIC_ASSEMBLY_PATH};
-const std::filesystem::path kManagedRuntimeConfigPath{XS_TEST_GAMELOGIC_RUNTIMECONFIG_PATH};
-const std::filesystem::path kAbiMismatchAssemblyPath{XS_TEST_GAMELOGIC_ABI_MISMATCH_ASSEMBLY_PATH};
-const std::filesystem::path kAbiMismatchRuntimeConfigPath{XS_TEST_GAMELOGIC_ABI_MISMATCH_RUNTIMECONFIG_PATH};
-const std::filesystem::path kMissingExportsAssemblyPath{XS_TEST_GAMELOGIC_MISSING_EXPORTS_ASSEMBLY_PATH};
-const std::filesystem::path kMissingExportsRuntimeConfigPath{XS_TEST_GAMELOGIC_MISSING_EXPORTS_RUNTIMECONFIG_PATH};
+const std::filesystem::path kManagedAssemblyPath{XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH};
+const std::filesystem::path kManagedRuntimeConfigPath{XS_TEST_MANAGED_FRAMEWORK_RUNTIMECONFIG_PATH};
+const std::filesystem::path kManagedGameLogicAssemblyPath{XS_TEST_MANAGED_GAMELOGIC_ASSEMBLY_PATH};
+const std::filesystem::path kAbiMismatchAssemblyPath{XS_TEST_MANAGED_ABI_MISMATCH_ASSEMBLY_PATH};
+const std::filesystem::path kAbiMismatchRuntimeConfigPath{XS_TEST_MANAGED_ABI_MISMATCH_RUNTIMECONFIG_PATH};
+const std::filesystem::path kMissingExportsAssemblyPath{XS_TEST_MANAGED_MISSING_EXPORTS_ASSEMBLY_PATH};
+const std::filesystem::path kMissingExportsRuntimeConfigPath{XS_TEST_MANAGED_MISSING_EXPORTS_RUNTIMECONFIG_PATH};
 
 std::string DescribeManagedHostResult(xs::host::ManagedHostErrorCode code)
 {
@@ -88,6 +93,18 @@ std::filesystem::path NormalizePath(const std::filesystem::path& path)
     }
 
     return path;
+}
+
+xs::host::ManagedRuntimeHostOptions MakePrimaryManagedRuntimeHostOptions()
+{
+    return xs::host::ManagedRuntimeHostOptions{
+        kManagedRuntimeConfigPath,
+        kManagedAssemblyPath,
+        {
+            kManagedAssemblyPath,
+            kManagedGameLogicAssemblyPath,
+        },
+    };
 }
 
 std::string ReadManagedUtf8(const std::uint8_t* buffer, std::uint32_t length)
@@ -274,6 +291,7 @@ void TestManagedAssetsExist()
 {
     XS_CHECK_MSG(std::filesystem::exists(kManagedAssemblyPath), kManagedAssemblyPath.string().c_str());
     XS_CHECK_MSG(std::filesystem::exists(kManagedRuntimeConfigPath), kManagedRuntimeConfigPath.string().c_str());
+    XS_CHECK_MSG(std::filesystem::exists(kManagedGameLogicAssemblyPath), kManagedGameLogicAssemblyPath.string().c_str());
     XS_CHECK_MSG(std::filesystem::exists(kAbiMismatchAssemblyPath), kAbiMismatchAssemblyPath.string().c_str());
     XS_CHECK_MSG(std::filesystem::exists(kAbiMismatchRuntimeConfigPath),
                  kAbiMismatchRuntimeConfigPath.string().c_str());
@@ -360,10 +378,7 @@ void TestLoadAndBindGameExportsSucceed()
 {
     xs::host::ManagedRuntimeHost host;
 
-    const xs::host::ManagedHostErrorCode load_result = host.Load(xs::host::ManagedRuntimeHostOptions{
-        kManagedRuntimeConfigPath,
-        kManagedAssemblyPath,
-    });
+    const xs::host::ManagedHostErrorCode load_result = host.Load(MakePrimaryManagedRuntimeHostOptions());
 
     XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
     XS_CHECK(host.IsLoaded());
@@ -508,10 +523,7 @@ void TestLoadAndBindServerStubCatalogExportsSucceed()
 {
     xs::host::ManagedRuntimeHost host;
 
-    const xs::host::ManagedHostErrorCode load_result = host.Load(xs::host::ManagedRuntimeHostOptions{
-        kManagedRuntimeConfigPath,
-        kManagedAssemblyPath,
-    });
+    const xs::host::ManagedHostErrorCode load_result = host.Load(MakePrimaryManagedRuntimeHostOptions());
     XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
     XS_CHECK(host.IsLoaded());
     XS_CHECK(!host.AreServerStubCatalogExportsBound());
@@ -565,10 +577,7 @@ void TestLoadAllowsSecondInitializationAfterUnload()
 {
     xs::host::ManagedRuntimeHost first_host;
 
-    const xs::host::ManagedHostErrorCode first_load_result = first_host.Load(xs::host::ManagedRuntimeHostOptions{
-        kManagedRuntimeConfigPath,
-        kManagedAssemblyPath,
-    });
+    const xs::host::ManagedHostErrorCode first_load_result = first_host.Load(MakePrimaryManagedRuntimeHostOptions());
     XS_CHECK_MSG(first_load_result == xs::host::ManagedHostErrorCode::None,
                  DescribeManagedHostResult(first_load_result).c_str());
 
@@ -631,7 +640,7 @@ void TestBindRejectsMissingExport()
     const xs::host::ManagedHostErrorCode bind_result = host.BindGameExports();
     XS_CHECK(bind_result == xs::host::ManagedHostErrorCode::EntryPointResolveFailed);
     XS_CHECK(xs::host::ManagedHostErrorMessage(bind_result) ==
-             std::string_view("Failed to resolve a required managed entry point from the GameLogic assembly."));
+             std::string_view("Failed to resolve a required managed entry point from the managed runtime assembly."));
     XS_CHECK(!host.AreGameExportsBound());
 }
 

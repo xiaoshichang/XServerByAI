@@ -15,7 +15,7 @@ namespace xs::host
 
 inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 4;
 inline constexpr std::string_view kManagedGameExportsTypeName =
-    "XServer.Managed.GameLogic.Interop.GameNativeExports, XServer.Managed.GameLogic";
+    "XServer.Managed.Framework.Interop.GameNativeExports, XServer.Managed.Framework";
 inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNativeGetAbiVersion";
 inline constexpr std::string_view kManagedGameInitMethodName = "GameNativeInit";
 inline constexpr std::string_view kManagedGameOnMessageMethodName = "GameNativeOnMessage";

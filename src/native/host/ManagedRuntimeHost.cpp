@@ -1,8 +1,9 @@
-﻿#include "ManagedRuntimeHost.h"
+#include "ManagedRuntimeHost.h"
 
 #include <hostfxr.h>
 #include <nethost.h>
 
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -67,6 +68,57 @@ std::basic_string<char_t> PathToNativeString(const std::filesystem::path& path)
 std::basic_string<char_t> Utf8ToNativeString(std::string_view value)
 {
     return std::basic_string<char_t>(value.begin(), value.end());
+}
+
+inline constexpr std::string_view kManagedDiscoveryAssemblyPathsEnvironmentVariable =
+    "XS_MANAGED_DISCOVERY_ASSEMBLY_PATHS";
+
+std::string BuildDiscoveryAssemblyPathsEnvironmentValue(
+    const std::vector<std::filesystem::path>& discovery_assembly_paths)
+{
+    std::string value;
+    for (const std::filesystem::path& discovery_path : discovery_assembly_paths)
+    {
+        if (discovery_path.empty())
+        {
+            continue;
+        }
+
+        if (!value.empty())
+        {
+            value.push_back(';');
+        }
+
+        value.append(discovery_path.string());
+    }
+
+    return value;
+}
+
+void SetProcessEnvironmentVariable(std::string_view name, std::string_view value)
+{
+#if defined(_WIN32)
+    const std::wstring wide_name(name.begin(), name.end());
+    if (value.empty())
+    {
+        (void)_wputenv_s(wide_name.c_str(), L"");
+        return;
+    }
+
+    const std::wstring wide_value(value.begin(), value.end());
+    (void)_wputenv_s(wide_name.c_str(), wide_value.c_str());
+    (void)SetEnvironmentVariableW(wide_name.c_str(), wide_value.c_str());
+#else
+    const std::string name_text(name);
+    if (value.empty())
+    {
+        (void)unsetenv(name_text.c_str());
+        return;
+    }
+
+    const std::string value_text(value);
+    (void)setenv(name_text.c_str(), value_text.c_str(), 1);
+#endif
 }
 
 std::filesystem::path NativeStringToPath(const std::basic_string<char_t>& value)
@@ -276,6 +328,17 @@ class ManagedRuntimeHost::Impl final
 
         const std::filesystem::path runtime_config_path = AbsolutePath(options.runtime_config_path);
         const std::filesystem::path assembly_path = AbsolutePath(options.assembly_path);
+        std::vector<std::filesystem::path> discovery_assembly_paths;
+        discovery_assembly_paths.reserve(options.discovery_assembly_paths.size());
+        for (const std::filesystem::path& discovery_path : options.discovery_assembly_paths)
+        {
+            if (discovery_path.empty())
+            {
+                continue;
+            }
+
+            discovery_assembly_paths.push_back(AbsolutePath(discovery_path));
+        }
         if (!FileExists(runtime_config_path))
         {
             return ManagedHostErrorCode::RuntimeConfigPathNotFound;
@@ -285,6 +348,10 @@ class ManagedRuntimeHost::Impl final
         {
             return ManagedHostErrorCode::AssemblyPathNotFound;
         }
+
+        SetProcessEnvironmentVariable(
+            kManagedDiscoveryAssemblyPathsEnvironmentVariable,
+            BuildDiscoveryAssemblyPathsEnvironmentValue(discovery_assembly_paths));
 
         std::filesystem::path hostfxr_path;
         const ManagedHostErrorCode resolve_result = ResolveHostfxrPath(assembly_path, &hostfxr_path);
@@ -686,7 +753,7 @@ std::string_view ManagedHostErrorMessage(ManagedHostErrorCode code) noexcept
     case ManagedHostErrorCode::RuntimeNotLoaded:
         return "Managed runtime host must be loaded before binding game exports.";
     case ManagedHostErrorCode::EntryPointResolveFailed:
-        return "Failed to resolve a required managed entry point from the GameLogic assembly.";
+        return "Failed to resolve a required managed entry point from the managed runtime assembly.";
     case ManagedHostErrorCode::AbiVersionMismatch:
         return "Managed ABI version did not match the native host expectation.";
     case ManagedHostErrorCode::EntryPointNotBound:

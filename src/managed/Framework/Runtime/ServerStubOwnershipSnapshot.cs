@@ -1,4 +1,4 @@
-namespace XServer.Managed.GameLogic.Runtime
+namespace XServer.Managed.Framework.Runtime
 {
     public sealed class ServerStubOwnershipSnapshot
     {

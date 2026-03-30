@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Logging.h"
 
@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace xs::core
 {
@@ -62,9 +63,10 @@ struct KcpConfig
 
 struct ManagedConfig
 {
-    std::string assembly_name{"XServer.Managed.GameLogic"};
+    std::string assembly_name{"XServer.Managed.Framework"};
     std::filesystem::path assembly_path{};
     std::filesystem::path runtime_config_path{};
+    std::vector<std::filesystem::path> search_assembly_paths{};
 };
 
 struct GmConfig

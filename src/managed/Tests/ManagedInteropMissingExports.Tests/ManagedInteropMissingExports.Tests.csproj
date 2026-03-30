@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
-    <AssemblyName>XServer.Managed.GameLogic</AssemblyName>
-    <RootNamespace>XServer.Managed.GameLogic</RootNamespace>
+    <AssemblyName>XServer.Managed.Framework</AssemblyName>
+    <RootNamespace>XServer.Managed.Framework</RootNamespace>
   </PropertyGroup>
 
 </Project>

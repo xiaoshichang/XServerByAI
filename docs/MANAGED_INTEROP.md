@@ -1,18 +1,18 @@
 # MANAGED_INTEROP
 
-本文档定义 XServerByAI 当前阶段 native `Game` 宿主与 managed `GameLogic` 程序集之间的互操作入口签名、ABI 版本与调用约定。后续 `M5-01`、`M5-02`、`M6-01` 与 `M6-02` 在实现 `nethost` 加载、函数指针绑定、blittable 封送与 `Game` 进程调用 managed 入口时，应以本文件作为统一基线。
+本文档定义 XServerByAI 当前阶段 native `Game` 宿主与 managed `Framework` 程序集之间的互操作入口签名、ABI 版本与调用约定。后续 `M5-01`、`M5-02`、`M6-01` 与 `M6-02` 在实现 `nethost` 加载、函数指针绑定、blittable 封送与 `Game` 进程调用 managed 入口时，应以本文件作为统一基线。
 
 **适用范围**
-1. 当前阶段 `Game` 进程宿主 CLR 业务入口；`GM` 会按需加载同一 `GameLogic` 程序集读取 ServerStub catalog，但不会运行 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 业务循环；`Gate` 不直接调用 managed 业务程序集。
+1. 当前阶段 `Game` 进程宿主 CLR 业务入口；`GM` 会按需加载同一 `Framework` 程序集读取 ServerStub catalog，但不会运行 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 业务循环；`Gate` 不直接调用 managed 业务程序集。
 2. 当前只定义 native 与 managed 的入口 ABI，不定义 managed 到 native 的回调表；后续如需日志桥接、主动回传或持久化回调，应在兼容 ABI 的前提下扩展。
 3. 当前 contract 覆盖程序集身份、导出类型名、函数签名、结构布局、字符串编码、错误返回与调用时序。
 4. 业务消息编号、会话/实体路由与错误码责任域分别复用 `docs/MSG_ID.md`、`docs/SESSION_ROUTING.md`、`docs/DISTRIBUTED_ENTITY.md` 与 `docs/ERROR_CODE.md`，本文件不重复定义业务语义。
 
 **装载模型**
 1. native 侧通过 `nethost` 定位 `hostfxr`，再通过 `hostfxr` 获取 `load_assembly_and_get_function_pointer`，不得依赖平台私有的 CLR 启动捷径。
-2. 目标 runtime config 固定为 `XServer.Managed.GameLogic.runtimeconfig.json`；根程序集固定为 `XServer.Managed.GameLogic.dll`。
-3. `XServer.Managed.Foundation` 作为 `GameLogic` 的项目引用依赖被一并加载，但不作为 native 直接解析导出入口的目标程序集。
-4. 导出类型名固定为 `XServer.Managed.GameLogic.Interop.GameNativeExports, XServer.Managed.GameLogic`。
+2. 目标 runtime config 固定为 `XServer.Managed.Framework.runtimeconfig.json`；根程序集固定为 `XServer.Managed.Framework.dll`。
+3. `XServer.Managed.Foundation` 作为 `Framework` 的项目引用依赖被一并加载；`XServer.Managed.GameLogic` 可通过 `managed.searchAssemblyPaths` 参与实体与 Stub 发现，但不作为 native 直接解析导出入口的目标程序集。
+4. 导出类型名固定为 `XServer.Managed.Framework.Interop.GameNativeExports, XServer.Managed.Framework`。
 5. native 在解析任何业务入口前，必须先解析 `GameNativeGetAbiVersion` 并验证 ABI 版本号；若不匹配，应按互操作错误处理并终止托管业务初始化。
 
 **ABI 总约定**
@@ -117,7 +117,7 @@ managed 侧等价导出形式应如下：
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace XServer.Managed.GameLogic.Interop;
+namespace XServer.Managed.Framework.Interop;
 
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct ManagedInitArgs
