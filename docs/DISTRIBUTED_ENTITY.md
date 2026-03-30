@@ -27,7 +27,7 @@
 
 | 类型 | 典型示例 | 所属进程 | 主要职责 |
 | --- | --- | --- | --- |
-| `ServerEntity` | `PlayerEntity`、`SpaceEntity`、`NpcEntity` | `Game` | 承载业务权威状态，维护属性、生命周期、同步与持久化边界。 |
+| `ServerEntity` | `AvatarEntity`、`SpaceEntity`、`NpcEntity` | `Game` | 承载业务权威状态，维护属性、生命周期、同步与持久化边界。 |
 | `ServerStubEntity` | `MatchService`、`ChatService`、`LeaderboardService` | `Game` | 承载集群内全局服务语义；其 owner 由 `GM` 在启动阶段统一分配，运行期默认不迁移。 |
 
 `ServerStubEntity` 继承自 `ServerEntity`，但它不是“普通工具单例”，而是可被消息寻址、可参与生命周期管理、可参与 ready 判定的正式业务实体。启动编排阶段，`GM` 先以 `entityId = unknown` 分配 Stub owner；真实 GUID ID 由 `Game` 创建本地实体实例后生成，并在 ready 上报时回填给 `GM`。
@@ -43,7 +43,7 @@
 8. `Gate` 只有在收到最新 `clusterReady = true` 后，才允许真正打开 `ClientNetwork`；它不能因为本地配置齐全、已连接 `GM`、已拿到部分目录或局部链路健康，就提前开放客户端入口。
 
 **迁移性分类**
-1. `IsMigratable()` 返回 `true` 的 `ServerEntity` 允许显式迁移到新的 `OwnerGameNodeId`，典型示例是 `PlayerEntity`。
+1. `IsMigratable()` 返回 `true` 的 `ServerEntity` 允许显式迁移到新的 `OwnerGameNodeId`，典型示例是 `AvatarEntity`。
 2. `IsMigratable()` 返回 `false` 的 `ServerEntity` 在其生命周期内不发生 owner 切换，典型示例是 `SpaceEntity`。
 3. `ServerStubEntity` 当前默认通过覆写 `IsMigratable()` 返回 `false`，但其 owner 并非静态写死，而是由 `GM` 在启动阶段统一分配。
 4. 迁移是业务层的显式语义，不是网络层或会话层的隐式副作用。
@@ -56,7 +56,7 @@
 5. 任何共享可变业务状态都应归属于某个实体实例，禁止把权威状态散落在进程级全局单例或 `Gate` 连接对象中。
 
 **路由与消息分发**
-1. 默认业务链路为 `client session -> Gate -> PlayerEntity Proxy -> 当前 owner Game -> SpaceEntity / ServerStubEntity`。
+1. 默认业务链路为 `client session -> Gate -> AvatarEntity Proxy -> 当前 owner Game -> SpaceEntity / ServerStubEntity`。
 2. 调用侧无论持有 `Mailbox` 还是 `Proxy`，都必须先检查目标实体是否在本地；本地命中时优先短路调用，否则统一经 `Gate` 转发。
 3. `Mailbox` 适用于静态 owner 的实体。对 `ServerStubEntity` 来说，`Mailbox` 中的目标 `GameNodeId` 来自 `GM` 下发的 ownership，而不是本地硬编码。
 4. `Proxy` 适用于可迁移实体。调用方不得把某次解析出的 owner 当作长期真值，必须允许 `Gate` 基于最新路由重新解析。

@@ -1,4 +1,4 @@
-﻿# SESSION_ROUTING
+# SESSION_ROUTING
 
 本文档定义 XServerByAI 当前阶段 `Gate` 的会话与路由数据模型。它描述客户端会话、`Gate` 本地路由目录、`Game` 目标绑定以及与分布式实体寻址的关系。实体 ownership、`Mailbox` / `Proxy` 语义仍以 `docs/DISTRIBUTED_ENTITY.md` 为准。
 
@@ -101,7 +101,7 @@
 3. `Game` 处理 `Relay.ForwardToGame` 时，应验证自己是否仍是该会话的预期目标；否则应返回路由失配错误，而不是静默消费。
 
 **与分布式实体的关系**
-1. `PlayerEntity` 这类可迁移实体通过 `Proxy` 间接依赖 `SessionRecord` 与当前路由目录。
+1. `AvatarEntity` 这类可迁移实体通过 `Proxy` 间接依赖 `SessionRecord` 与当前路由目录。
 2. `SpaceEntity`、`ServerStubEntity` 这类静态寻址实体通过 `Mailbox` 直接引用目标 `GameNodeId`，仍然由 `Gate` 根据本地目录完成转发。
 3. 会话路由与实体 ownership 是两套相关但不等价的状态：会话绑定的是“当前客户端入口该发往哪个 `Game`”，实体 ownership 表达的是“哪个 `Game` 持有该逻辑实体的权威活动实例”。
 

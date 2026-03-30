@@ -35,7 +35,7 @@
 | `3000-3999` | Inner 网络 / 路由 | GM 注册、心跳、集群就绪状态下发、路由与内部 RPC 相关失败 |
 | `4000-4999` | 运行时 / 互操作 | `nethost`、CLR 加载、函数绑定、宿主生命周期与跨语言互操作失败 |
 | `5000-5999` | 基础设施 | 配置、日志、持久化、资源、依赖服务与其他基础设施失败 |
-| `10000-19999` | Player 业务 | 玩家实体与玩家域业务失败 |
+| `10000-19999` | Avatar 业务 | 玩家角色实体与角色域业务失败 |
 | `20000-29999` | Space 业务 | 场景实体与场景域业务失败 |
 | `30000-34999` | Stub / 全局服务 | 匹配、聊天、排行榜等 `ServerStubEntity` 业务失败 |
 | `35000-39999` | 共享业务 | 跨实体复用的业务公共失败 |
@@ -59,8 +59,8 @@
 | `4000-4099` | 托管运行时 | `nethost` 初始化、CLR 加载、ABI 版本校验或导出入口绑定失败 | `M1-15`, `M5-01`, `M5-02` |
 | `5000-5099` | 配置与日志 | 配置缺失、配置非法、日志输出初始化失败 | `M1-16`, `M2-01`, `M2-02` |
 | `5100-5199` | 持久化与资源 | 存储不可用、保存失败、资源不存在、依赖未就绪 | `M5-12`, `M5-13` |
-| `10000-10999` | Player 实体核心 | 玩家不存在、状态非法、属性同步失败 | `M5-07`, `M5-09`, `M5-16` |
-| `20000-20999` | Space 实体核心 | 场景不存在、场景已满、状态不允许操作 | `M5-07`, `M5-09`, `M5-16` |
+| `10000-10999` | Avatar 实体核心 | 角色不存在、状态非法、属性同步失败 | `M5-07`, `M5-08`, `M5-09`, `M5-16` |
+| `20000-20999` | Space 实体核心 | 场景不存在、场景已满、状态不允许操作 | `M5-07`, `M5-08`, `M5-09`, `M5-16` |
 | `30000-30499` | MatchService | 排队失败、队列冲突、匹配上下文非法 | `M5-14`, `M5-16` |
 | `30500-30999` | ChatService | 频道不存在、禁言、消息投递失败 | `M5-15`, `M5-16` |
 
@@ -68,7 +68,7 @@
 
 其中会话与路由相关失败在分配具体错误码时，应复用 `docs/SESSION_ROUTING.md` 对 `sessionId`、`routeState`、`gameNodeId` 与 `routeEpoch` 的语义约束，避免把“节点目录版本变化或链路失效”误编码为普通参数错误。
 
-其中 `10000-34999` 业务错误码的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Player` / `Space` 等状态型失败属于 `ServerEntity` 领域，匹配、聊天等 `Stub / 全局服务` 失败属于 `ServerStubEntity` 领域，避免用基础设施错误码承载实体业务语义。
+其中 `10000-34999` 业务错误码的责任域划分应与 `docs/DISTRIBUTED_ENTITY.md` 保持一致：`Avatar` / `Space` 等状态型失败属于 `ServerEntity` 领域，匹配、聊天等 `Stub / 全局服务` 失败属于 `ServerStubEntity` 领域，避免用基础设施错误码承载实体业务语义。
 
 `Mailbox` / `Proxy` 的寻址结果也应服从这一分层：实体内部业务拒绝、状态冲突或领域校验失败进入对应业务号段；而 `Mailbox` 指定的目标 `GameNodeId` 无效 / 不可达、`Proxy` 无法解析当前 owner、Gate 二次寻址失败或路由元数据失效，则应优先归入 `3000-3999` 的Inner 网络 / 路由错误，而不是误登记为玩家或场景业务错误。
 
@@ -115,7 +115,7 @@
 **命名规范**
 1. 每个错误码都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Reason>` 或 `<Area>.<Subject>.<Reason>`。
 2. 公共错误优先使用 `Common` 作为域名，例如 `Common.InvalidArgument`、`Common.Timeout`、`Common.RateLimited`。
-3. 模块专属错误应使用与责任域一致的前缀，例如 `Protocol.BadMagic`、`Relay.RouteNotFound`、`Interop.RuntimeLoadFailed`、`Player.NotFound`、`Space.Full`。
+3. 模块专属错误应使用与责任域一致的前缀，例如 `Protocol.BadMagic`、`Relay.RouteNotFound`、`Interop.RuntimeLoadFailed`、`Avatar.NotFound`、`Space.Full`。
 4. 规范英文名直接映射为代码常量名，去掉 `.` 后保持 `PascalCase`，例如 `Protocol.BadMagic` → `ProtocolBadMagic`。
 5. 避免使用 `UnknownError`、`Failed` 这类信息量过低的宽泛命名；优先使用能够直接定位根因或责任域的名词短语。
 
