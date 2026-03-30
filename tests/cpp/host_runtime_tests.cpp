@@ -161,20 +161,67 @@ struct ReadyCallbackCapture final
     std::vector<std::string> entity_ids{};
 };
 
+struct ManagedLogCapture final
+{
+    std::uint32_t call_count{0U};
+    std::vector<std::uint32_t> levels{};
+    std::vector<std::string> categories{};
+    std::vector<std::string> messages{};
+};
+
+struct ManagedCallbackCapture final
+{
+    ReadyCallbackCapture ready{};
+    ManagedLogCapture logs{};
+};
+
 void OnServerStubReady(void* context, std::uint64_t assignment_epoch,
                        const xs::host::ManagedServerStubReadyEntry* entry)
 {
-    auto* capture = static_cast<ReadyCallbackCapture*>(context);
+    auto* capture = static_cast<ManagedCallbackCapture*>(context);
     if (capture == nullptr || entry == nullptr)
     {
         XS_CHECK(false);
         return;
     }
 
-    ++capture->call_count;
-    capture->assignment_epochs.push_back(assignment_epoch);
-    capture->entity_types.push_back(ReadManagedUtf8(entry->entity_type_utf8, entry->entity_type_length));
-    capture->entity_ids.push_back(ReadManagedUtf8(entry->entity_id_utf8, entry->entity_id_length));
+    ++capture->ready.call_count;
+    capture->ready.assignment_epochs.push_back(assignment_epoch);
+    capture->ready.entity_types.push_back(ReadManagedUtf8(entry->entity_type_utf8, entry->entity_type_length));
+    capture->ready.entity_ids.push_back(ReadManagedUtf8(entry->entity_id_utf8, entry->entity_id_length));
+}
+
+void OnManagedLog(void* context, std::uint32_t level, const std::uint8_t* category_utf8,
+                  std::uint32_t category_length, const std::uint8_t* message_utf8, std::uint32_t message_length)
+{
+    auto* capture = static_cast<ManagedCallbackCapture*>(context);
+    if (capture == nullptr)
+    {
+        XS_CHECK(false);
+        return;
+    }
+
+    ++capture->logs.call_count;
+    capture->logs.levels.push_back(level);
+    capture->logs.categories.push_back(ReadManagedUtf8(category_utf8, category_length));
+    capture->logs.messages.push_back(ReadManagedUtf8(message_utf8, message_length));
+}
+
+std::size_t CountManagedLogs(const ManagedLogCapture& capture, std::uint32_t level, std::string_view category,
+                             std::string_view message)
+{
+    std::size_t count = 0U;
+    for (std::size_t index = 0U; index < capture.levels.size() && index < capture.categories.size() &&
+                                index < capture.messages.size();
+         ++index)
+    {
+        if (capture.levels[index] == level && capture.categories[index] == category && capture.messages[index] == message)
+        {
+            ++count;
+        }
+    }
+
+    return count;
 }
 
 void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
@@ -201,6 +248,7 @@ void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
     input->args.native_callbacks.reserved0 = 0U;
     input->args.native_callbacks.context = nullptr;
     input->args.native_callbacks.on_server_stub_ready = nullptr;
+    input->args.native_callbacks.on_log = nullptr;
 }
 
 xs::host::ManagedServerStubOwnershipEntry MakeOwnershipEntry(std::string_view entity_type, std::string_view entity_id,
@@ -354,9 +402,10 @@ void TestLoadAndBindGameExportsSucceed()
 
     ManagedInitInput init_input{};
     PopulateManagedInitInput(&init_input, "Game0");
-    ReadyCallbackCapture ready_callback_capture{};
-    init_input.args.native_callbacks.context = &ready_callback_capture;
+    ManagedCallbackCapture callback_capture{};
+    init_input.args.native_callbacks.context = &callback_capture;
     init_input.args.native_callbacks.on_server_stub_ready = &OnServerStubReady;
+    init_input.args.native_callbacks.on_log = &OnManagedLog;
     XS_CHECK(exports.init(&init_input.args) == 0);
     XS_CHECK(exports.on_message(nullptr) == 0);
     XS_CHECK(exports.on_tick(1234, 16) == 0);
@@ -378,25 +427,25 @@ void TestLoadAndBindGameExportsSucceed()
     ownership_sync.assignments = assignments.data();
 
     XS_CHECK(exports.apply_server_stub_ownership(&ownership_sync) == 0);
-    XS_CHECK(ready_callback_capture.call_count == 2U);
-    XS_CHECK(ready_callback_capture.assignment_epochs.size() == 2U);
-    XS_CHECK(ready_callback_capture.entity_types.size() == 2U);
-    XS_CHECK(ready_callback_capture.entity_ids.size() == 2U);
-    if (ready_callback_capture.assignment_epochs.size() == 2U)
+    XS_CHECK(callback_capture.ready.call_count == 2U);
+    XS_CHECK(callback_capture.ready.assignment_epochs.size() == 2U);
+    XS_CHECK(callback_capture.ready.entity_types.size() == 2U);
+    XS_CHECK(callback_capture.ready.entity_ids.size() == 2U);
+    if (callback_capture.ready.assignment_epochs.size() == 2U)
     {
-        XS_CHECK(ready_callback_capture.assignment_epochs[0] == 7U);
-        XS_CHECK(ready_callback_capture.assignment_epochs[1] == 7U);
+        XS_CHECK(callback_capture.ready.assignment_epochs[0] == 7U);
+        XS_CHECK(callback_capture.ready.assignment_epochs[1] == 7U);
     }
-    if (ready_callback_capture.entity_types.size() == 2U)
+    if (callback_capture.ready.entity_types.size() == 2U)
     {
-        XS_CHECK(ready_callback_capture.entity_types[0] == "MatchService");
-        XS_CHECK(ready_callback_capture.entity_types[1] == "LeaderboardService");
+        XS_CHECK(callback_capture.ready.entity_types[0] == "MatchService");
+        XS_CHECK(callback_capture.ready.entity_types[1] == "LeaderboardService");
     }
-    if (ready_callback_capture.entity_ids.size() == 2U)
+    if (callback_capture.ready.entity_ids.size() == 2U)
     {
-        XS_CHECK(IsCanonicalGuidText(ready_callback_capture.entity_ids[0]));
-        XS_CHECK(IsCanonicalGuidText(ready_callback_capture.entity_ids[1]));
-        XS_CHECK(ready_callback_capture.entity_ids[0] != ready_callback_capture.entity_ids[1]);
+        XS_CHECK(IsCanonicalGuidText(callback_capture.ready.entity_ids[0]));
+        XS_CHECK(IsCanonicalGuidText(callback_capture.ready.entity_ids[1]));
+        XS_CHECK(callback_capture.ready.entity_ids[0] != callback_capture.ready.entity_ids[1]);
     }
     XS_CHECK(exports.get_ready_server_stub_count(&ready_count) == 0);
     XS_CHECK(ready_count == 2U);
@@ -417,17 +466,30 @@ void TestLoadAndBindGameExportsSucceed()
              ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
     XS_CHECK(first_ready_entry.ready == 1U);
     XS_CHECK(second_ready_entry.ready == 1U);
-    if (ready_callback_capture.entity_ids.size() == 2U)
+    if (callback_capture.ready.entity_ids.size() == 2U)
     {
-        XS_CHECK(ready_callback_capture.entity_ids[0] ==
+        XS_CHECK(callback_capture.ready.entity_ids[0] ==
                  ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length));
-        XS_CHECK(ready_callback_capture.entity_ids[1] ==
+        XS_CHECK(callback_capture.ready.entity_ids[1] ==
                  ReadManagedUtf8(second_ready_entry.entity_id_utf8, second_ready_entry.entity_id_length));
     }
 
     XS_CHECK(exports.reset_server_stub_ownership() == 0);
     XS_CHECK(exports.get_ready_server_stub_count(&ready_count) == 0);
     XS_CHECK(ready_count == 0U);
+
+    XS_CHECK(callback_capture.logs.call_count == 6U);
+    XS_CHECK(callback_capture.logs.levels.size() == 6U);
+    XS_CHECK(callback_capture.logs.categories.size() == 6U);
+    XS_CHECK(callback_capture.logs.messages.size() == 6U);
+    XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Info),
+                              "managed.runtime", "Game managed runtime initialized.") == 1U);
+    XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Info),
+                              "managed.runtime", "Game managed runtime applied server stub ownership.") == 1U);
+    XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Info),
+                              "managed.runtime", "Game managed runtime reset server stub ownership state.") == 2U);
+    XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Debug),
+                              "managed.runtime", "Game managed runtime published server stub ready.") == 2U);
 
     XS_CHECK(host.Unload() == xs::host::ManagedHostErrorCode::None);
     XS_CHECK(!host.IsLoaded());

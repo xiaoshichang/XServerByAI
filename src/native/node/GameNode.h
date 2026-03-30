@@ -78,7 +78,11 @@ class GameNode final : public ServerNode
     void HandleGateMessage(std::string_view gate_node_id, std::span<const std::byte> payload);
     static void HandleManagedServerStubReadyCallback(void* context, std::uint64_t assignment_epoch,
                                                      const xs::host::ManagedServerStubReadyEntry* entry);
+    static void HandleManagedLogCallback(void* context, std::uint32_t level, const std::uint8_t* category_utf8,
+                                         std::uint32_t category_length, const std::uint8_t* message_utf8,
+                                         std::uint32_t message_length);
     void HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry);
+    void HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message);
     void HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet);
     void HandleServerStubOwnershipSync(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);

@@ -4,10 +4,20 @@ namespace XServer.Managed.GameLogic.Interop
 {
     public static class ManagedAbi
     {
-        public const uint Version = 3;
+        public const uint Version = 4;
         public const int NodeIdMaxUtf8Bytes = 128;
         public const int ServerStubEntityTypeMaxUtf8Bytes = 128;
         public const int ServerStubEntityIdMaxUtf8Bytes = 128;
+    }
+
+    public enum ManagedLogLevel : uint
+    {
+        Trace = 0,
+        Debug = 1,
+        Info = 2,
+        Warn = 3,
+        Error = 4,
+        Fatal = 5,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -17,6 +27,7 @@ namespace XServer.Managed.GameLogic.Interop
         public uint Reserved0;
         public void* Context;
         public delegate* unmanaged[Cdecl]<void*, ulong, ManagedServerStubReadyEntry*, void> OnServerStubReady;
+        public delegate* unmanaged[Cdecl]<void*, uint, byte*, uint, byte*, uint, void> OnLog;
     }
 
     [StructLayout(LayoutKind.Sequential)]

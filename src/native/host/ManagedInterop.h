@@ -13,7 +13,7 @@
 namespace xs::host
 {
 
-inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 3;
+inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 4;
 inline constexpr std::string_view kManagedGameExportsTypeName =
     "XServer.Managed.GameLogic.Interop.GameNativeExports, XServer.Managed.GameLogic";
 inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNativeGetAbiVersion";
@@ -34,8 +34,23 @@ inline constexpr std::size_t XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES = 1
 
 struct ManagedServerStubReadyEntry;
 
+enum class ManagedLogLevel : std::uint32_t
+{
+    Trace = 0u,
+    Debug = 1u,
+    Info = 2u,
+    Warn = 3u,
+    Error = 4u,
+    Fatal = 5u,
+};
+
 using ManagedOnServerStubReadyCallbackFn = void(XS_MANAGED_CALLTYPE*)(void* context, std::uint64_t assignment_epoch,
                                                                       const ManagedServerStubReadyEntry* entry);
+using ManagedOnLogCallbackFn = void(XS_MANAGED_CALLTYPE*)(void* context, std::uint32_t level,
+                                                          const std::uint8_t* category_utf8,
+                                                          std::uint32_t category_length,
+                                                          const std::uint8_t* message_utf8,
+                                                          std::uint32_t message_length);
 
 struct ManagedNativeCallbacks
 {
@@ -43,6 +58,7 @@ struct ManagedNativeCallbacks
     std::uint32_t reserved0{0u};
     void* context{nullptr};
     ManagedOnServerStubReadyCallbackFn on_server_stub_ready{nullptr};
+    ManagedOnLogCallbackFn on_log{nullptr};
 };
 
 struct ManagedInitArgs

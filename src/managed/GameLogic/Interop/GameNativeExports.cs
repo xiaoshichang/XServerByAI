@@ -14,6 +14,7 @@ namespace XServer.Managed.GameLogic.Interop
         private const int IndexOutOfRange = -3;
         private const int BufferTooSmall = -4;
         private const int OwnershipApplyErrorOffset = 1000;
+        private const string RuntimeLogCategory = "managed.runtime";
         private static ManagedNativeCallbacks s_nativeCallbacks;
         private static GameNodeRuntimeState? s_runtimeState;
 
@@ -34,13 +35,16 @@ namespace XServer.Managed.GameLogic.Interop
             try
             {
                 s_nativeCallbacks = args->NativeCallbacks;
+                NativeLoggerBridge.Configure(s_nativeCallbacks);
                 string nodeId = ReadUtf8(args->NodeIdUtf8, args->NodeIdLength);
                 _ = ReadUtf8(args->ConfigPathUtf8, args->ConfigPathLength);
                 s_runtimeState = new GameNodeRuntimeState(nodeId, NotifyNativeServerStubReady);
+                NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime initialized.");
                 return 0;
             }
             catch
             {
+                NativeLoggerBridge.Reset();
                 s_nativeCallbacks = default;
                 s_runtimeState = null;
                 return InvalidArgument;
@@ -74,12 +78,18 @@ namespace XServer.Managed.GameLogic.Interop
             {
                 ServerStubOwnershipSnapshot snapshot = BuildOwnershipSnapshot(sync);
                 GameNodeRuntimeStateErrorCode result = s_runtimeState.ApplyOwnership(snapshot);
-                return result == GameNodeRuntimeStateErrorCode.None
-                    ? 0
-                    : OwnershipApplyErrorOffset + (int)result;
+                if (result == GameNodeRuntimeStateErrorCode.None)
+                {
+                    NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime applied server stub ownership.");
+                    return 0;
+                }
+
+                NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime rejected server stub ownership.");
+                return OwnershipApplyErrorOffset + (int)result;
             }
             catch
             {
+                NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode server stub ownership.");
                 return InvalidArgument;
             }
         }
@@ -93,6 +103,7 @@ namespace XServer.Managed.GameLogic.Interop
             }
 
             s_runtimeState.ResetOwnership();
+            NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime reset server stub ownership state.");
             return 0;
         }
 
@@ -340,6 +351,7 @@ namespace XServer.Managed.GameLogic.Interop
                     return;
                 }
 
+                NativeLoggerBridge.Debug(RuntimeLogCategory, "Game managed runtime published server stub ready.");
                 s_nativeCallbacks.OnServerStubReady(
                     s_nativeCallbacks.Context,
                     assignmentEpoch,

@@ -4,7 +4,7 @@ namespace XServer.Managed.GameLogic.Interop
 {
     public static class ManagedAbi
     {
-        public const uint Version = 3;
+        public const uint Version = 4;
     }
 
     [StructLayout(LayoutKind.Sequential)]

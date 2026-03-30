@@ -26,6 +26,7 @@ namespace
 constexpr std::string_view kGameBuildVersion = "dev";
 constexpr std::string_view kGmRemoteNodeId = "GM";
 constexpr std::string_view kUnknownServerEntityId = "unknown";
+constexpr std::string_view kManagedRuntimeLogCategory = "managed.runtime";
 constexpr std::uint16_t kResponseFlags = static_cast<std::uint16_t>(xs::net::PacketFlag::Response);
 constexpr std::uint16_t kErrorResponseFlags = kResponseFlags | static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
 
@@ -45,6 +46,27 @@ std::string DescribeManagedHostError(xs::host::ManagedHostErrorCode code)
            std::string(xs::host::ManagedHostErrorMessage(code));
 }
 
+xs::core::LogLevel ToNativeLogLevel(std::uint32_t value) noexcept
+{
+    switch (static_cast<xs::host::ManagedLogLevel>(value))
+    {
+    case xs::host::ManagedLogLevel::Trace:
+        return xs::core::LogLevel::Trace;
+    case xs::host::ManagedLogLevel::Debug:
+        return xs::core::LogLevel::Debug;
+    case xs::host::ManagedLogLevel::Info:
+        return xs::core::LogLevel::Info;
+    case xs::host::ManagedLogLevel::Warn:
+        return xs::core::LogLevel::Warn;
+    case xs::host::ManagedLogLevel::Error:
+        return xs::core::LogLevel::Error;
+    case xs::host::ManagedLogLevel::Fatal:
+        return xs::core::LogLevel::Fatal;
+    }
+
+    return xs::core::LogLevel::Info;
+}
+
 xs::host::ManagedRuntimeHostOptions BuildManagedRuntimeHostOptions(const xs::core::ManagedConfig& managed_config)
 {
     return xs::host::ManagedRuntimeHostOptions{
@@ -59,6 +81,28 @@ xs::net::Endpoint ToNetEndpoint(const xs::core::EndpointConfig& endpoint)
         .host = endpoint.host,
         .port = endpoint.port,
     };
+}
+
+bool TryReadManagedUtf8View(const std::uint8_t* utf8_buffer, std::uint32_t utf8_length, std::string_view* output)
+{
+    if (output == nullptr)
+    {
+        return false;
+    }
+
+    if (utf8_buffer == nullptr)
+    {
+        if (utf8_length != 0U)
+        {
+            return false;
+        }
+
+        *output = std::string_view{};
+        return true;
+    }
+
+    *output = std::string_view(reinterpret_cast<const char*>(utf8_buffer), static_cast<std::size_t>(utf8_length));
+    return true;
 }
 
 bool TryReadManagedUtf8String(std::span<const std::uint8_t> utf8_buffer, std::uint32_t utf8_length, std::string* output)
@@ -144,6 +188,35 @@ void GameNode::HandleManagedServerStubReadyCallback(void* context, std::uint64_t
                {
                    game_node->HandleManagedServerStubReady(assignment_epoch, entry_copy);
                });
+}
+
+void GameNode::HandleManagedLogCallback(void* context, std::uint32_t level, const std::uint8_t* category_utf8,
+                                        std::uint32_t category_length, const std::uint8_t* message_utf8,
+                                        std::uint32_t message_length)
+{
+    if (context == nullptr)
+    {
+        return;
+    }
+
+    auto* game_node = static_cast<GameNode*>(context);
+    std::string_view category;
+    std::string_view message;
+    if (!TryReadManagedUtf8View(category_utf8, category_length, &category) ||
+        !TryReadManagedUtf8View(message_utf8, message_length, &message))
+    {
+        game_node->logger().Log(xs::core::LogLevel::Warn, "runtime",
+                                "Game node ignored managed log callback with an invalid payload.");
+        return;
+    }
+
+    game_node->HandleManagedLog(level, category, message);
+}
+
+void GameNode::HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message)
+{
+    const std::string_view resolved_category = category.empty() ? kManagedRuntimeLogCategory : category;
+    logger().Log(ToNativeLogLevel(level), resolved_category, message);
 }
 
 std::string_view GameNode::managed_assembly_name() const noexcept
@@ -428,6 +501,7 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
         .reserved0 = 0U,
         .context = this,
         .on_server_stub_ready = &GameNode::HandleManagedServerStubReadyCallback,
+        .on_log = &GameNode::HandleManagedLogCallback,
     };
     const xs::host::ManagedInitArgs init_args{
         .struct_size = sizeof(xs::host::ManagedInitArgs),

@@ -40,13 +40,15 @@ static_assert(
                    xs::host::ManagedHostErrorCode (xs::host::ManagedRuntimeHost::*)(
                        xs::host::ManagedServerStubCatalogExports&) const noexcept>,
     "ManagedRuntimeHost::GetServerStubCatalogExports must return only ManagedHostErrorCode plus output exports.");
-static_assert(xs::host::XS_MANAGED_ABI_VERSION == 3u,
-              "Managed ABI version must remain aligned with docs/MANAGED_INTEROP.md.");
+static_assert(xs::host::XS_MANAGED_ABI_VERSION == 4u,
+              "Managed ABI version must remain aligned with current managed interop docs.");
 static_assert(offsetof(xs::host::ManagedInitArgs, abi_version) == 4,
               "ManagedInitArgs::abi_version offset must remain ABI compatible.");
-static_assert(sizeof(xs::host::ManagedNativeCallbacks) == 24u,
+static_assert(sizeof(xs::host::ManagedLogLevel) == 4u,
+              "ManagedLogLevel must remain ABI compatible with managed interop.");
+static_assert(sizeof(xs::host::ManagedNativeCallbacks) == 32u,
               "ManagedNativeCallbacks must remain ABI compatible with managed interop.");
-static_assert(sizeof(xs::host::ManagedInitArgs) == 72u,
+static_assert(sizeof(xs::host::ManagedInitArgs) == 80u,
               "ManagedInitArgs must remain ABI compatible with managed interop.");
 static_assert(offsetof(xs::host::ManagedInitArgs, native_callbacks) >
                   offsetof(xs::host::ManagedInitArgs, config_path_length),
