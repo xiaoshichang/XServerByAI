@@ -876,6 +876,10 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
     {
         StartGateConnectors();
     }
+    else
+    {
+        ResetOwnershipState();
+    }
 
     RefreshMeshReadyState();
 

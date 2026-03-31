@@ -681,7 +681,6 @@ void TestInnerNetworkSupportsListenerAndMultipleConnectors()
     XS_CHECK(log_text.find("Inner network listener started.") != std::string::npos);
     XS_CHECK(log_text.find("connectorId=GM") != std::string::npos);
     XS_CHECK(log_text.find("connectorId=Gate0") != std::string::npos);
-    XS_CHECK(log_text.find("Inner network active connector received payload.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }

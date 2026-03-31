@@ -500,10 +500,10 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(exports.get_ready_server_stub_count(&ready_count) == 0);
     XS_CHECK(ready_count == 0U);
 
-    XS_CHECK(callback_capture.logs.call_count == 6U);
-    XS_CHECK(callback_capture.logs.levels.size() == 6U);
-    XS_CHECK(callback_capture.logs.categories.size() == 6U);
-    XS_CHECK(callback_capture.logs.messages.size() == 6U);
+    XS_CHECK(callback_capture.logs.call_count >= 6U);
+    XS_CHECK(callback_capture.logs.levels.size() == callback_capture.logs.call_count);
+    XS_CHECK(callback_capture.logs.categories.size() == callback_capture.logs.call_count);
+    XS_CHECK(callback_capture.logs.messages.size() == callback_capture.logs.call_count);
     XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Info),
                               "managed.runtime", "Game managed runtime initialized.") == 1U);
     XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Info),

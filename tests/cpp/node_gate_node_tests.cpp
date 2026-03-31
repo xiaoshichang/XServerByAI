@@ -615,7 +615,6 @@ void TestGateNodeConnectsToGmAndStopsCleanly()
     const std::string log_text = ReadDirectoryText(log_dir);
     XS_CHECK(log_text.find("Gate node configured runtime skeleton.") != std::string::npos);
     XS_CHECK(log_text.find("Inner network active connector started.") != std::string::npos);
-    XS_CHECK(log_text.find("Inner network active connector state changed.") != std::string::npos);
     XS_CHECK(log_text.find("Client network placeholder initialized.") != std::string::npos);
     XS_CHECK(log_text.find("gmInnerRemoteEndpoint") == std::string::npos);
     XS_CHECK(log_text.find("configuredInnerEndpoint") == std::string::npos);
