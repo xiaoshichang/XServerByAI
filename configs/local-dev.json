@@ -50,7 +50,7 @@
     "Gate0": {
       "innerNetwork": {
         "listenEndpoint": {
-          "host": "0.0.0.0",
+          "host": "127.0.0.1",
           "port": 7000
         }
       },
@@ -64,7 +64,7 @@
     "Gate1": {
       "innerNetwork": {
         "listenEndpoint": {
-          "host": "0.0.0.0",
+          "host": "127.0.0.1",
           "port": 7001
         }
       },

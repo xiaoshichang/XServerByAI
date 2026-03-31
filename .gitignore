@@ -21,6 +21,7 @@
 /logs/
 /.dotnet-cli-home/
 /.cache/
+/test-output/
 
 # Python cache
 **/__pycache__/

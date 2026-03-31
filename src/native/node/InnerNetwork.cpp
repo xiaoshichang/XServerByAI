@@ -613,9 +613,7 @@ class InnerNetwork::Impl final
         return NodeErrorCode::None;
     }
 
-    void StopStartedComponents(
-        bool listener_started,
-        const std::vector<std::string>& started_connectors) noexcept
+    void StopStartedComponents(bool listener_started, const std::vector<std::string>& started_connectors) noexcept
     {
         for (auto iterator = started_connectors.rbegin(); iterator != started_connectors.rend(); ++iterator)
         {
@@ -651,29 +649,10 @@ class InnerNetwork::Impl final
         {
             bound_endpoint_ = std::string(listener_->bound_endpoint());
         }
-
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"state", std::string(ipc::ZmqListenerStateName(state))},
-            xs::core::LogContextField{"configuredEndpoint", options_.local_endpoint},
-            xs::core::LogContextField{"boundEndpoint", bound_endpoint_},
-        };
-        LogInfo("Inner network listener state changed.", context);
     }
 
-    void HandleListenerMessage(
-        std::vector<std::byte> routing_id,
-        std::vector<std::byte> payload)
+    void HandleListenerMessage(std::vector<std::byte> routing_id, std::vector<std::byte> payload)
     {
-        const ipc::ZmqListenerMetricsSnapshot snapshot = metrics();
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
-            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
-            xs::core::LogContextField{"receivedMessages", ToString(snapshot.received_message_count)},
-            xs::core::LogContextField{"activeConnections", ToString(snapshot.active_connection_count)},
-            xs::core::LogContextField{"boundEndpoint", bound_endpoint_},
-        };
-        LogInfo("Inner network listener received payload.", context);
-
         if (listener_message_handler_)
         {
             listener_message_handler_(std::move(routing_id), std::move(payload));
@@ -682,19 +661,6 @@ class InnerNetwork::Impl final
 
     void HandleConnectionStateChange(std::string_view connector_id, ipc::ZmqConnectionState state)
     {
-        const auto iterator = connectors_.find(connector_id);
-        const std::string remote_endpoint =
-            iterator != connectors_.end() ? iterator->second.options.remote_endpoint : std::string{};
-        const std::string routing_id =
-            iterator != connectors_.end() ? iterator->second.options.routing_id : std::string{};
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"connectorId", std::string(connector_id)},
-            xs::core::LogContextField{"state", std::string(ipc::ZmqConnectionStateName(state))},
-            xs::core::LogContextField{"remoteEndpoint", remote_endpoint},
-            xs::core::LogContextField{"routingId", routing_id},
-        };
-        LogInfo("Inner network active connector state changed.", context);
-
         if (connector_state_handler_)
         {
             connector_state_handler_(connector_id, state);
@@ -703,20 +669,6 @@ class InnerNetwork::Impl final
 
     void HandleConnectorMessage(std::string_view connector_id, std::vector<std::byte> payload)
     {
-        const auto iterator = connectors_.find(connector_id);
-        const std::string remote_endpoint =
-            iterator != connectors_.end() ? iterator->second.options.remote_endpoint : std::string{};
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"connectorId", std::string(connector_id)},
-            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
-            xs::core::LogContextField{"remoteEndpoint", remote_endpoint},
-            xs::core::LogContextField{
-                "state",
-                std::string(ipc::ZmqConnectionStateName(connection_state(connector_id))),
-            },
-        };
-        LogInfo("Inner network active connector received payload.", context);
-
         if (connector_message_handler_)
         {
             connector_message_handler_(connector_id, std::move(payload));

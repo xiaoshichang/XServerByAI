@@ -1,4 +1,5 @@
 using System;
+using XServer.Managed.Framework.Interop;
 
 namespace XServer.Managed.Framework.Entities
 {
@@ -34,6 +35,7 @@ namespace XServer.Managed.Framework.Entities
 
         protected virtual void OnReady()
         {
+            NativeLoggerBridge.Log(ManagedLogLevel.Info, "ServerStubEntity", $"Stub {GetType()} is ready.");
         }
     }
 }

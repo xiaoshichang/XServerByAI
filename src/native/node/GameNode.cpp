@@ -349,10 +349,6 @@ NodeErrorCode GameNode::OnInit()
     const NodeErrorCode managed_runtime_result = InitializeManagedRuntime(config->managed);
     if (managed_runtime_result != NodeErrorCode::None)
     {
-        ResetRuntimeState();
-        ResetGmSessionState();
-        ResetGateSessionStates();
-        inner_network_remote_sessions().Clear();
         return managed_runtime_result;
     }
 
@@ -417,10 +413,6 @@ NodeErrorCode GameNode::OnInit()
     const NodeErrorCode init_result = InitInnerNetwork(std::move(inner_options));
     if (init_result != NodeErrorCode::None)
     {
-        inner_network_remote_sessions().Clear();
-        ResetRuntimeState();
-        ResetGmSessionState();
-        ResetGateSessionStates();
         return init_result;
     }
 
@@ -429,6 +421,7 @@ NodeErrorCode GameNode::OnInit()
         {
             HandleConnectorStateChanged(remote_node_id, state);
         });
+
     inner_network()->SetConnectorMessageHandler(
         [this](std::string_view remote_node_id, std::vector<std::byte> payload)
         {
@@ -1679,8 +1672,10 @@ bool GameNode::AreAllGateSessionsMeshReady() const noexcept
         (void)gate_config;
 
         const InnerNetworkSession* session = remote_session(gate_node_id);
-        if (session == nullptr || session->connection_state != ipc::ZmqConnectionState::Connected ||
-            !session->registered || !session->inner_network_ready)
+        if (session == nullptr || 
+            session->connection_state != ipc::ZmqConnectionState::Connected ||
+            !session->registered || 
+            !session->inner_network_ready)
         {
             return false;
         }
@@ -1698,11 +1693,6 @@ void GameNode::RefreshMeshReadyState()
     if (!all_gate_connected)
     {
         ResetOwnershipState();
-    }
-
-    if (state_changed)
-    {
-        logger().Log(xs::core::LogLevel::Info, "inner", "Game node refreshed mesh ready state.");
     }
 
     if (all_gate_connected != mesh_ready_state_.last_reported || !mesh_ready_state_.has_reported)
