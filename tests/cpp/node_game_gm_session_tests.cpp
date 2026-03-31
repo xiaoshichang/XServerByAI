@@ -1355,19 +1355,19 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
         .status_flags = 0U,
         .assignments = {
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "MatchService",
+                .entity_type = "MatchStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "ChatService",
+                .entity_type = "ChatStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "LeaderboardService",
+                .entity_type = "LeaderboardStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
@@ -1380,13 +1380,13 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
         .status_flags = 0U,
         .assignments = {
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "MatchService",
+                .entity_type = "MatchStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "ChatService",
+                .entity_type = "ChatStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game0",
                 .entry_flags = 0U,
@@ -1609,11 +1609,11 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
     XS_CHECK(assignments.size() == accepted_sync.assignments.size());
     if (assignments.size() == accepted_sync.assignments.size())
     {
-        XS_CHECK(assignments[0].entity_type == "MatchService");
+        XS_CHECK(assignments[0].entity_type == "MatchStub");
         XS_CHECK(assignments[0].owner_game_node_id == "Game0");
-        XS_CHECK(assignments[1].entity_type == "ChatService");
+        XS_CHECK(assignments[1].entity_type == "ChatStub");
         XS_CHECK(assignments[1].owner_game_node_id == "Game9");
-        XS_CHECK(assignments[2].entity_type == "LeaderboardService");
+        XS_CHECK(assignments[2].entity_type == "LeaderboardStub");
         XS_CHECK(assignments[2].owner_game_node_id == "Game0");
     }
 
@@ -1621,8 +1621,8 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
     XS_CHECK(owned_assignments.size() == 2U);
     if (owned_assignments.size() == 2U)
     {
-        XS_CHECK(owned_assignments[0].entity_type == "MatchService");
-        XS_CHECK(owned_assignments[1].entity_type == "LeaderboardService");
+        XS_CHECK(owned_assignments[0].entity_type == "MatchStub");
+        XS_CHECK(owned_assignments[1].entity_type == "LeaderboardStub");
     }
 
     XS_CHECK(service_ready_reported);
@@ -1633,11 +1633,11 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
     XS_CHECK(service_ready_report.entries.size() == 2U);
     if (service_ready_report.entries.size() == 2U)
     {
-        XS_CHECK(service_ready_report.entries[0].entity_type == "MatchService");
+        XS_CHECK(service_ready_report.entries[0].entity_type == "MatchStub");
         XS_CHECK(IsCanonicalGuidText(service_ready_report.entries[0].entity_id));
         XS_CHECK(service_ready_report.entries[0].ready);
         XS_CHECK(service_ready_report.entries[0].entry_flags == 0U);
-        XS_CHECK(service_ready_report.entries[1].entity_type == "LeaderboardService");
+        XS_CHECK(service_ready_report.entries[1].entity_type == "LeaderboardStub");
         XS_CHECK(IsCanonicalGuidText(service_ready_report.entries[1].entity_id));
         XS_CHECK(service_ready_report.entries[0].entity_id != service_ready_report.entries[1].entity_id);
         XS_CHECK(service_ready_report.entries[1].ready);
@@ -1730,19 +1730,19 @@ void TestGameNodeSkipsServiceReadyReportWhenNoStubIsOwned()
         .status_flags = 0U,
         .assignments = {
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "MatchService",
+                .entity_type = "MatchStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "ChatService",
+                .entity_type = "ChatStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
             },
             xs::net::ServerStubOwnershipEntry{
-                .entity_type = "LeaderboardService",
+                .entity_type = "LeaderboardStub",
                 .entity_id = "unknown",
                 .owner_game_node_id = "Game9",
                 .entry_flags = 0U,
@@ -2074,8 +2074,3 @@ int main()
 
     return EXIT_SUCCESS;
 }
-
-
-
-
-

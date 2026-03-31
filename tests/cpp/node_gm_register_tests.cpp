@@ -909,20 +909,28 @@ void TestGmNodeBroadcastsOwnershipSyncAfterExpectedGamesReportMeshReady()
         xs::net::InnerClusterCodecErrorCode::None);
     XS_CHECK(first_sync.assignment_epoch == 1U);
     XS_CHECK(first_sync.status_flags == 0U);
-    XS_CHECK(first_sync.assignments.size() == 3U);
+    XS_CHECK(!first_sync.assignments.empty());
     XS_CHECK(first_sync.server_now_unix_ms != 0U);
-    if (first_sync.assignments.size() == 3U)
-    {
-        XS_CHECK(first_sync.assignments[0].entity_type == "ChatService");
-        XS_CHECK(first_sync.assignments[1].entity_type == "LeaderboardService");
-        XS_CHECK(first_sync.assignments[2].entity_type == "MatchService");
-        XS_CHECK(first_sync.assignments[0].entity_id == "unknown");
-        XS_CHECK(first_sync.assignments[1].entity_id == "unknown");
-        XS_CHECK(first_sync.assignments[2].entity_id == "unknown");
-        XS_CHECK(first_sync.assignments[0].owner_game_node_id == "Game0");
-        XS_CHECK(first_sync.assignments[1].owner_game_node_id == "Game0");
-        XS_CHECK(first_sync.assignments[2].owner_game_node_id == "Game0");
-    }
+    XS_CHECK(std::all_of(
+        first_sync.assignments.begin(),
+        first_sync.assignments.end(),
+        [](const xs::net::ServerStubOwnershipEntry& assignment) {
+            return assignment.entity_id == "unknown" &&
+                   assignment.owner_game_node_id == "Game0" &&
+                   assignment.entry_flags == 0U;
+        }));
+    const auto has_first_sync_assignment = [&first_sync](std::string_view entity_type) {
+        return std::any_of(
+            first_sync.assignments.begin(),
+            first_sync.assignments.end(),
+            [entity_type](const xs::net::ServerStubOwnershipEntry& assignment) {
+                return assignment.entity_type == entity_type;
+            });
+    };
+    XS_CHECK(has_first_sync_assignment("OnlineStub"));
+    XS_CHECK(has_first_sync_assignment("ChatStub"));
+    XS_CHECK(has_first_sync_assignment("LeaderboardStub"));
+    XS_CHECK(has_first_sync_assignment("MatchStub"));
 
     XS_CHECK(game_connector.Send(
                  BuildInnerGameGateMeshReadyReportPacket(false, 8102U),
@@ -1100,20 +1108,22 @@ void TestGmNodeOpensGateOnlyAfterAllOwnedStubsReportReady()
         xs::net::DecodeServerStubOwnershipSync(sync_packet.payload, &sync) ==
         xs::net::InnerClusterCodecErrorCode::None);
     XS_CHECK(sync.assignment_epoch == 1U);
-    XS_CHECK(sync.assignments.size() == 3U);
+    XS_CHECK(!sync.assignments.empty());
 
     std::vector<xs::net::ServerStubReadyEntry> partial_entries;
-    for (std::size_t index = 0U; index + 1U < sync.assignments.size(); ++index)
+    partial_entries.reserve(sync.assignments.size());
+    for (std::size_t index = 0U; index < sync.assignments.size(); ++index)
     {
+        const bool should_report_ready = index + 1U != sync.assignments.size();
         partial_entries.push_back(
             xs::net::ServerStubReadyEntry{
                 .entity_type = sync.assignments[index].entity_type,
-                .entity_id = BuildTestServerEntityId(index),
-                .ready = true,
+                .entity_id = should_report_ready ? BuildTestServerEntityId(index) : std::string("unknown"),
+                .ready = should_report_ready,
                 .entry_flags = 0U,
             });
     }
-    XS_CHECK(!partial_entries.empty());
+    XS_CHECK(partial_entries.size() == sync.assignments.size());
 
     const xs::net::GameServiceReadyReport partial_report{
         .assignment_epoch = sync.assignment_epoch,

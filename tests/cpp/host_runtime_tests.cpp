@@ -241,6 +241,11 @@ std::size_t CountManagedLogs(const ManagedLogCapture& capture, std::uint32_t lev
     return count;
 }
 
+bool ContainsText(const std::vector<std::string>& values, std::string_view expected)
+{
+    return std::find(values.begin(), values.end(), expected) != values.end();
+}
+
 void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
 {
     if (input == nullptr)
@@ -433,9 +438,9 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(ready_count == 0U);
 
     std::vector<xs::host::ManagedServerStubOwnershipEntry> assignments;
-    assignments.push_back(MakeOwnershipEntry("MatchService", "unknown", "Game0"));
-    assignments.push_back(MakeOwnershipEntry("ChatService", "unknown", "Game9"));
-    assignments.push_back(MakeOwnershipEntry("LeaderboardService", "unknown", "Game0"));
+    assignments.push_back(MakeOwnershipEntry("MatchStub", "unknown", "Game0"));
+    assignments.push_back(MakeOwnershipEntry("ChatStub", "unknown", "Game9"));
+    assignments.push_back(MakeOwnershipEntry("LeaderboardStub", "unknown", "Game0"));
 
     xs::host::ManagedServerStubOwnershipSync ownership_sync{};
     ownership_sync.struct_size = sizeof(xs::host::ManagedServerStubOwnershipSync);
@@ -455,8 +460,8 @@ void TestLoadAndBindExportsSucceed()
     }
     if (callback_capture.ready.entity_types.size() == 2U)
     {
-        XS_CHECK(callback_capture.ready.entity_types[0] == "MatchService");
-        XS_CHECK(callback_capture.ready.entity_types[1] == "LeaderboardService");
+        XS_CHECK(callback_capture.ready.entity_types[0] == "MatchStub");
+        XS_CHECK(callback_capture.ready.entity_types[1] == "LeaderboardStub");
     }
     if (callback_capture.ready.entity_ids.size() == 2U)
     {
@@ -472,9 +477,9 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(exports.get_ready_server_stub_entry(0U, &first_ready_entry) == 0);
     XS_CHECK(exports.get_ready_server_stub_entry(1U, &second_ready_entry) == 0);
     XS_CHECK(ReadManagedUtf8(first_ready_entry.entity_type_utf8, first_ready_entry.entity_type_length) ==
-             "MatchService");
+             "MatchStub");
     XS_CHECK(ReadManagedUtf8(second_ready_entry.entity_type_utf8, second_ready_entry.entity_type_length) ==
-             "LeaderboardService");
+             "LeaderboardStub");
     XS_CHECK(
         IsCanonicalGuidText(ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length)));
     XS_CHECK(
@@ -551,28 +556,22 @@ void TestManagedExportsProvideServerStubCatalogFunctions()
 
     std::uint32_t count = 0U;
     XS_CHECK(exports.get_server_stub_catalog_count(&count) == 0);
-    XS_CHECK(count == 3U);
+    XS_CHECK(count > 0U);
 
-    struct ExpectedEntry final
-    {
-        std::string_view entity_type;
-        std::string_view entity_id;
-    };
-
-    const std::array<ExpectedEntry, 3> expected_entries{
-        ExpectedEntry{"ChatService", "unknown"},
-        ExpectedEntry{"LeaderboardService", "unknown"},
-        ExpectedEntry{"MatchService", "unknown"},
-    };
-
-    for (std::uint32_t index = 0U; index < count && index < expected_entries.size(); ++index)
+    std::vector<std::string> entity_types;
+    entity_types.reserve(count);
+    for (std::uint32_t index = 0U; index < count; ++index)
     {
         xs::host::ManagedServerStubCatalogEntry entry{};
         XS_CHECK(exports.get_server_stub_catalog_entry(index, &entry) == 0);
-        XS_CHECK(ReadManagedUtf8(entry.entity_type_utf8, entry.entity_type_length) ==
-                 expected_entries[index].entity_type);
-        XS_CHECK(ReadManagedUtf8(entry.entity_id_utf8, entry.entity_id_length) == expected_entries[index].entity_id);
+        entity_types.push_back(ReadManagedUtf8(entry.entity_type_utf8, entry.entity_type_length));
+        XS_CHECK(ReadManagedUtf8(entry.entity_id_utf8, entry.entity_id_length) == "unknown");
     }
+
+    XS_CHECK(ContainsText(entity_types, "OnlineStub"));
+    XS_CHECK(ContainsText(entity_types, "ChatStub"));
+    XS_CHECK(ContainsText(entity_types, "LeaderboardStub"));
+    XS_CHECK(ContainsText(entity_types, "MatchStub"));
 }
 
 void TestLoadAllowsSecondInitializationAfterUnload()

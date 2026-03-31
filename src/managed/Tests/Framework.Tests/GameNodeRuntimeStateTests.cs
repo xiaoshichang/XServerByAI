@@ -18,9 +18,9 @@ namespace XServer.Managed.Framework.Tests
             ServerStubOwnershipSnapshot snapshot = new(
                 7,
                 [
-                    new ServerStubOwnershipAssignment("MatchService", "unknown", "Game0"),
-                    new ServerStubOwnershipAssignment("ChatService", "unknown", "Game9"),
-                    new ServerStubOwnershipAssignment("LeaderboardService", "unknown", "Game0"),
+                    new ServerStubOwnershipAssignment("MatchStub", "unknown", "Game0"),
+                    new ServerStubOwnershipAssignment("ChatStub", "unknown", "Game9"),
+                    new ServerStubOwnershipAssignment("LeaderboardStub", "unknown", "Game0"),
                 ]);
 
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(snapshot));
@@ -45,21 +45,21 @@ namespace XServer.Managed.Framework.Tests
                 });
             Assert.Collection(
                 runtimeState.ReadyServerStubs,
-                stub => Assert.Equal("MatchService", stub.EntityType),
-                stub => Assert.Equal("LeaderboardService", stub.EntityType));
+                stub => Assert.Equal("MatchStub", stub.EntityType),
+                stub => Assert.Equal("LeaderboardStub", stub.EntityType));
             Assert.Collection(
                 readyNotifications,
                 notification =>
                 {
                     Assert.Equal((ulong)7, notification.AssignmentEpoch);
-                    Assert.Equal("MatchService", notification.EntityType);
+                    Assert.Equal("MatchStub", notification.EntityType);
                     Assert.NotEqual(Guid.Empty, notification.EntityId);
                     Assert.True(notification.IsReady);
                 },
                 notification =>
                 {
                     Assert.Equal((ulong)7, notification.AssignmentEpoch);
-                    Assert.Equal("LeaderboardService", notification.EntityType);
+                    Assert.Equal("LeaderboardStub", notification.EntityType);
                     Assert.NotEqual(Guid.Empty, notification.EntityId);
                     Assert.True(notification.IsReady);
                 });
@@ -77,8 +77,8 @@ namespace XServer.Managed.Framework.Tests
             ServerStubOwnershipSnapshot firstSnapshot = new(
                 11,
                 [
-                    new ServerStubOwnershipAssignment("MatchService", "unknown", "Game0"),
-                    new ServerStubOwnershipAssignment("LeaderboardService", "unknown", "Game0"),
+                    new ServerStubOwnershipAssignment("MatchStub", "unknown", "Game0"),
+                    new ServerStubOwnershipAssignment("LeaderboardStub", "unknown", "Game0"),
                 ]);
 
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(firstSnapshot));
@@ -91,8 +91,8 @@ namespace XServer.Managed.Framework.Tests
             ServerStubOwnershipSnapshot replaySnapshot = new(
                 11,
                 [
-                    new ServerStubOwnershipAssignment("MatchService", firstMatchId.ToString(), "Game0"),
-                    new ServerStubOwnershipAssignment("LeaderboardService", firstLeaderboardId.ToString(), "Game0"),
+                    new ServerStubOwnershipAssignment("MatchStub", firstMatchId.ToString(), "Game0"),
+                    new ServerStubOwnershipAssignment("LeaderboardStub", firstLeaderboardId.ToString(), "Game0"),
                 ]);
 
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(replaySnapshot));
@@ -102,7 +102,7 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(firstMatchId, runtimeState.OwnedServerStubs[0].EntityId);
             Assert.Equal(firstLeaderboardId, runtimeState.OwnedServerStubs[1].EntityId);
             Assert.Equal(2, runtimeState.EntityManager.Count);
-            Assert.Equal(["MatchService", "LeaderboardService"], readyNotifications);
+            Assert.Equal(["MatchStub", "LeaderboardStub"], readyNotifications);
         }
 
         [Fact]
@@ -116,7 +116,7 @@ namespace XServer.Managed.Framework.Tests
             ServerStubOwnershipSnapshot firstSnapshot = new(
                 1,
                 [
-                    new ServerStubOwnershipAssignment("MatchService", "unknown", "Game0"),
+                    new ServerStubOwnershipAssignment("MatchStub", "unknown", "Game0"),
                 ]);
 
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(firstSnapshot));
@@ -126,7 +126,7 @@ namespace XServer.Managed.Framework.Tests
             ServerStubOwnershipSnapshot secondSnapshot = new(
                 2,
                 [
-                    new ServerStubOwnershipAssignment("ChatService", "unknown", "Game0"),
+                    new ServerStubOwnershipAssignment("ChatStub", "unknown", "Game0"),
                 ]);
 
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(secondSnapshot));
@@ -148,7 +148,7 @@ namespace XServer.Managed.Framework.Tests
             ServerStubOwnershipSnapshot validSnapshot = new(
                 3,
                 [
-                    new ServerStubOwnershipAssignment("MatchService", "unknown", "Game0"),
+                    new ServerStubOwnershipAssignment("MatchStub", "unknown", "Game0"),
                 ]);
 
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(validSnapshot));
