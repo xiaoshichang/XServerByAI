@@ -710,12 +710,90 @@ class GmControlHttpService::Impl final
             }
 
             const GmControlHttpStatusSnapshot snapshot = options_.status_provider();
+            xs::core::Json nodes = xs::core::Json::array();
+            for (const GmControlHttpStatusSnapshot::NodeSnapshot& node : snapshot.nodes)
+            {
+                nodes.push_back(
+                    xs::core::Json{
+                        {"nodeId", node.node_id},
+                        {"processType", node.process_type},
+                        {"pid", node.pid},
+                        {"innerNetworkEndpoint", node.inner_network_endpoint},
+                        {"lastHeartbeatAtUnixMs", node.last_heartbeat_at_unix_ms},
+                        {"lastServerNowUnixMs", node.last_server_now_unix_ms},
+                        {"lastProtocolError", node.last_protocol_error},
+                        {"registered", node.registered},
+                        {"heartbeatTimedOut", node.heartbeat_timed_out},
+                        {"online", node.online},
+                        {"innerNetworkReady", node.inner_network_ready},
+                    });
+            }
+
+            xs::core::Json game_mesh_ready = xs::core::Json::array();
+            for (const GmControlHttpStatusSnapshot::GameMeshReadySnapshot& entry : snapshot.game_mesh_ready)
+            {
+                game_mesh_ready.push_back(
+                    xs::core::Json{
+                        {"nodeId", entry.node_id},
+                        {"meshReady", entry.mesh_ready},
+                        {"reportedAtUnixMs", entry.reported_at_unix_ms},
+                    });
+            }
+
+            xs::core::Json stub_distribution = xs::core::Json::array();
+            for (const GmControlHttpStatusSnapshot::StubOwnerSnapshot& owner : snapshot.stub_distribution)
+            {
+                xs::core::Json stubs = xs::core::Json::array();
+                for (const GmControlHttpStatusSnapshot::StubSnapshot& stub : owner.stubs)
+                {
+                    stubs.push_back(
+                        xs::core::Json{
+                            {"entityType", stub.entity_type},
+                            {"entityId", stub.entity_id},
+                            {"state", stub.state},
+                        });
+                }
+
+                stub_distribution.push_back(
+                    xs::core::Json{
+                        {"nodeId", owner.node_id},
+                        {"ownedStubCount", owner.owned_stub_count},
+                        {"readyStubCount", owner.ready_stub_count},
+                        {"stubs", std::move(stubs)},
+                    });
+            }
+
             xs::core::Json payload{
                 {"nodeId", options_.node_id},
                 {"innerNetworkEndpoint", snapshot.inner_network_endpoint},
                 {"controlNetworkEndpoint", bound_endpoint_},
                 {"registeredProcessCount", snapshot.registered_process_count},
                 {"running", snapshot.running},
+                {"startupFlow",
+                 xs::core::Json{
+                     {"expectedGameCount", snapshot.startup_flow.expected_game_count},
+                     {"expectedGateCount", snapshot.startup_flow.expected_gate_count},
+                     {"registeredGameCount", snapshot.startup_flow.registered_game_count},
+                     {"registeredGateCount", snapshot.startup_flow.registered_gate_count},
+                     {"allNodesOnline", snapshot.startup_flow.all_nodes_online},
+                     {"lastAllNodesOnlineServerNowUnixMs",
+                      snapshot.startup_flow.last_all_nodes_online_server_now_unix_ms},
+                     {"allExpectedGamesMeshReady", snapshot.startup_flow.all_expected_games_mesh_ready},
+                     {"catalogLoaded", snapshot.startup_flow.catalog_loaded},
+                     {"catalogLoadFailed", snapshot.startup_flow.catalog_load_failed},
+                     {"ownershipActive", snapshot.startup_flow.ownership_active},
+                     {"assignmentEpoch", snapshot.startup_flow.assignment_epoch},
+                     {"totalStubCount", snapshot.startup_flow.total_stub_count},
+                     {"assignedStubCount", snapshot.startup_flow.assigned_stub_count},
+                     {"readyStubCount", snapshot.startup_flow.ready_stub_count},
+                     {"readyEpoch", snapshot.startup_flow.ready_epoch},
+                     {"clusterReady", snapshot.startup_flow.cluster_ready},
+                     {"lastClusterReadyServerNowUnixMs",
+                      snapshot.startup_flow.last_cluster_ready_server_now_unix_ms},
+                 }},
+                {"nodes", std::move(nodes)},
+                {"gameMeshReady", std::move(game_mesh_ready)},
+                {"stubDistribution", std::move(stub_distribution)},
             };
 
             GmControlHttpResponse response;

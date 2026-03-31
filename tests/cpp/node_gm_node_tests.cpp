@@ -660,6 +660,16 @@ void TestGmNodeServesHealthStatusAndShutdownOverHttp()
     XS_CHECK(status_response.status_code == 200);
     XS_CHECK(status_response.body.find("\"registeredProcessCount\":0") != std::string::npos);
     XS_CHECK(status_response.body.find("\"running\":true") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"startupFlow\"") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"expectedGameCount\":1") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"expectedGateCount\":1") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"ownershipActive\":false") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"nodes\"") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"nodeId\":\"Game0\"") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"nodeId\":\"Gate0\"") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"gameMeshReady\"") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"stubDistribution\"") != std::string::npos);
+    XS_CHECK(status_response.body.find("\"ownedStubCount\":0") != std::string::npos);
     XS_CHECK(status_response.body.find("tcp://127.0.0.1:" + std::to_string(inner_port)) != std::string::npos);
     XS_CHECK(status_response.body.find("127.0.0.1:" + std::to_string(control_port)) != std::string::npos);
 

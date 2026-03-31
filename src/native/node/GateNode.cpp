@@ -49,6 +49,27 @@ std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
     return "tcp://" + endpoint.host + ":" + std::to_string(endpoint.port);
 }
 
+std::string NormalizeConnectorHost(std::string_view host)
+{
+    // Wildcard bind hosts are valid for listeners, but peers cannot connect to them directly.
+    if (host == "0.0.0.0")
+    {
+        return "127.0.0.1";
+    }
+
+    if (host == "::" || host == "[::]")
+    {
+        return "[::1]";
+    }
+
+    return std::string(host);
+}
+
+std::string BuildConnectorTcpEndpoint(const xs::core::EndpointConfig& endpoint)
+{
+    return "tcp://" + NormalizeConnectorHost(endpoint.host) + ":" + std::to_string(endpoint.port);
+}
+
 std::string ToString(std::uint64_t value)
 {
     return std::to_string(value);
@@ -304,7 +325,7 @@ NodeErrorCode GateNode::OnInit()
     inner_options.connectors.push_back(
         {
             .id = std::string(kGmRemoteNodeId),
-            .remote_endpoint = BuildTcpEndpoint(gm_endpoint),
+            .remote_endpoint = BuildConnectorTcpEndpoint(gm_endpoint),
             .routing_id = std::string(node_id()),
         });
 

@@ -43,6 +43,8 @@ class ClusterPlan:
     config_path: Path
     control_url_base: str
     node_ids: tuple[str, ...]
+    game_ids: tuple[str, ...]
+    gate_ids: tuple[str, ...]
     start_order: tuple[str, ...]
     expected_registered_process_count: int
 
@@ -151,6 +153,8 @@ def load_cluster_plan(config_path: Path, *, repo_root: Path) -> ClusterPlan:
         config_path=absolute_config_path,
         control_url_base=control_url_base,
         node_ids=node_ids,
+        game_ids=tuple(game_ids),
+        gate_ids=tuple(gate_ids),
         start_order=start_order,
         expected_registered_process_count=len(game_ids) + len(gate_ids),
     )
@@ -246,7 +250,7 @@ def start_cluster(
             started_processes.append(process)
 
             if node_id == "GM":
-                wait_for_gm_health(
+                health_payload = wait_for_gm_health(
                     plan.control_url_base,
                     deadline=deadline,
                     poll_interval_seconds=poll_interval_seconds,
@@ -254,10 +258,16 @@ def start_cluster(
                     clock=clock,
                     sleep=sleep,
                 )
+                print(build_confirmation_line(
+                    1,
+                    7,
+                    "GM control endpoint",
+                    build_health_confirmation_detail(plan.control_url_base, health_payload),
+                ))
 
-        wait_for_registered_processes(
+        status_payload = wait_for_startup_flow(
+            plan,
             plan.control_url_base,
-            expected_count=plan.expected_registered_process_count,
             deadline=deadline,
             poll_interval_seconds=poll_interval_seconds,
             http_get_json=http_get_json,
@@ -276,10 +286,7 @@ def start_cluster(
             print(f"cluster_ctl cleanup warning: {cleanup_exc}", file=sys.stderr)
         raise
 
-    print(
-        "Cluster startup completed. "
-        f"GM registeredProcessCount reached {plan.expected_registered_process_count}."
-    )
+    print(f"Cluster startup completed. {build_startup_completion_summary(plan, status_payload)}")
 
 
 def spawn_node(
@@ -314,7 +321,7 @@ def wait_for_gm_health(
     http_get_json: Callable[[str, float], dict[str, object]],
     clock: Callable[[], float],
     sleep: Callable[[float], None],
-) -> None:
+) -> dict[str, object]:
     health_url = f"{control_url_base}/healthz"
     last_problem = "GM control endpoint is not ready yet."
 
@@ -322,8 +329,7 @@ def wait_for_gm_health(
         try:
             payload = http_get_json(health_url, DEFAULT_HTTP_TIMEOUT_SECONDS)
             if payload.get("status") == "ok":
-                print("GM control endpoint is healthy.")
-                return
+                return payload
             last_problem = f"Unexpected /healthz payload: {payload!r}"
         except Exception as exc:
             last_problem = str(exc)
@@ -365,6 +371,627 @@ def wait_for_registered_processes(
         sleep(poll_interval_seconds)
 
     raise ClusterCtlError(f"Timed out waiting for GM /status: {last_problem}")
+
+
+def wait_for_startup_flow(
+    plan: ClusterPlan,
+    control_url_base: str,
+    *,
+    deadline: float,
+    poll_interval_seconds: float,
+    http_get_json: Callable[[str, float], dict[str, object]],
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> dict[str, object]:
+    status_url = f"{control_url_base}/status"
+    last_problem = "GM /status has not reached the expected startup state."
+    emitted_steps: set[int] = set()
+    last_waiting_lines: tuple[str, ...] | None = None
+
+    while clock() <= deadline:
+        try:
+            payload = http_get_json(status_url, DEFAULT_HTTP_TIMEOUT_SECONDS)
+            for line in collect_startup_step_confirmations(plan, payload, emitted_steps=emitted_steps):
+                print(line)
+                last_waiting_lines = None
+
+            waiting_lines = tuple(describe_current_waiting_step(plan, payload, emitted_steps=emitted_steps))
+            if waiting_lines and waiting_lines != last_waiting_lines:
+                for line in waiting_lines:
+                    print(line)
+                last_waiting_lines = waiting_lines
+
+            if is_startup_complete(plan, payload):
+                return payload
+
+            last_problem = describe_startup_problem(plan, payload)
+        except Exception as exc:
+            last_problem = str(exc)
+
+        sleep(poll_interval_seconds)
+
+    raise ClusterCtlError(f"Timed out waiting for GM /status: {last_problem}")
+
+
+def build_startup_completion_summary(plan: ClusterPlan, payload: dict[str, object]) -> str:
+    if not has_enhanced_startup_status(payload):
+        registered = coerce_int(payload.get("registeredProcessCount"), default=-1)
+        return f"GM registeredProcessCount reached {registered}/{plan.expected_registered_process_count}."
+
+    startup_flow = get_object_field(payload, "startupFlow")
+    ready_epoch = coerce_int(startup_flow.get("readyEpoch"))
+    ready_stub_count = coerce_int(startup_flow.get("readyStubCount"))
+    total_stub_count = coerce_int(startup_flow.get("totalStubCount"))
+    return (
+        f"clusterReady=true, readyEpoch={ready_epoch}, "
+        f"readyStubs={ready_stub_count}/{total_stub_count}."
+    )
+
+
+def build_health_confirmation_detail(control_url_base: str, payload: dict[str, object]) -> str:
+    node_id = coerce_text(payload.get("nodeId"), default="GM")
+    return f"{node_id} /healthz=ok at {control_url_base}"
+
+
+def collect_startup_step_confirmations(
+    plan: ClusterPlan,
+    payload: dict[str, object],
+    *,
+    emitted_steps: set[int],
+) -> list[str]:
+    if not has_enhanced_startup_status(payload):
+        registered = coerce_int(payload.get("registeredProcessCount"), default=-1)
+        if registered >= plan.expected_registered_process_count and 2 not in emitted_steps:
+            emitted_steps.add(2)
+            return [
+                build_confirmation_line(
+                    2,
+                    7,
+                    "Legacy GM registration probe",
+                    f"registeredProcessCount={registered}/{plan.expected_registered_process_count}",
+                )
+            ]
+        return []
+
+    startup_flow = get_object_field(payload, "startupFlow")
+    nodes_by_id = get_status_entries_by_id(payload, "nodes")
+    mesh_by_id = get_status_entries_by_id(payload, "gameMeshReady")
+    stub_distribution_by_id = get_status_entries_by_id(payload, "stubDistribution")
+
+    expected_games = coerce_int(startup_flow.get("expectedGameCount"), default=len(plan.game_ids))
+    expected_gates = coerce_int(startup_flow.get("expectedGateCount"), default=len(plan.gate_ids))
+    registered_games = coerce_int(startup_flow.get("registeredGameCount"))
+    registered_gates = coerce_int(startup_flow.get("registeredGateCount"))
+    all_nodes_online = coerce_bool(startup_flow.get("allNodesOnline"))
+    all_expected_games_mesh_ready = coerce_bool(startup_flow.get("allExpectedGamesMeshReady"))
+    ownership_active = coerce_bool(startup_flow.get("ownershipActive"))
+    assignment_epoch = coerce_int(startup_flow.get("assignmentEpoch"))
+    total_stub_count = coerce_int(startup_flow.get("totalStubCount"))
+    assigned_stub_count = coerce_int(startup_flow.get("assignedStubCount"))
+    ready_stub_count = coerce_int(startup_flow.get("readyStubCount"))
+    ready_epoch = coerce_int(startup_flow.get("readyEpoch"))
+    cluster_ready = coerce_bool(startup_flow.get("clusterReady"))
+
+    registered_nodes = [
+        node_name
+        for node_name in (*plan.game_ids, *plan.gate_ids)
+        if coerce_bool(nodes_by_id.get(node_name, {}).get("registered"))
+    ]
+    online_nodes = [
+        node_name
+        for node_name in (*plan.game_ids, *plan.gate_ids)
+        if coerce_bool(nodes_by_id.get(node_name, {}).get("online"))
+    ]
+    mesh_ready_nodes = [
+        node_name
+        for node_name in plan.game_ids
+        if coerce_bool(mesh_by_id.get(node_name, {}).get("meshReady"))
+    ]
+
+    lines: list[str] = []
+    if registered_games >= expected_games and registered_gates >= expected_gates and 2 not in emitted_steps:
+        emitted_steps.add(2)
+        lines.append(
+            build_confirmation_line(
+                2,
+                7,
+                "Game/Gate -> GM register and heartbeat",
+                build_registration_detail(
+                    plan,
+                    registered_games,
+                    expected_games,
+                    registered_gates,
+                    expected_gates,
+                    registered_nodes,
+                ),
+            )
+        )
+
+    if all_nodes_online and 3 not in emitted_steps:
+        emitted_steps.add(3)
+        lines.append(
+            build_confirmation_line(
+                3,
+                7,
+                "GM -> Game allNodesOnline",
+                build_online_detail(plan, online_nodes, all_nodes_online),
+            )
+        )
+
+    if all_expected_games_mesh_ready and 4 not in emitted_steps:
+        emitted_steps.add(4)
+        lines.append(
+            build_confirmation_line(
+                4,
+                7,
+                "Game -> GM mesh ready",
+                build_mesh_ready_detail(plan, mesh_ready_nodes),
+            )
+        )
+
+    if ownership_active and 5 not in emitted_steps:
+        emitted_steps.add(5)
+        lines.append(
+            build_confirmation_line(
+                5,
+                7,
+                "GM -> Game ServerStubOwnershipSync",
+                f"assignmentEpoch={assignment_epoch}, assigned={assigned_stub_count}/{total_stub_count}",
+            )
+        )
+
+    if total_stub_count > 0 and ready_stub_count >= total_stub_count and 6 not in emitted_steps:
+        emitted_steps.add(6)
+        lines.append(
+            build_confirmation_line(
+                6,
+                7,
+                "Game -> GM GameServiceReadyReport",
+                f"ready stubs {ready_stub_count}/{total_stub_count}",
+            )
+        )
+        lines.extend(render_stub_distribution_lines(plan, stub_distribution_by_id, indent="    "))
+
+    if cluster_ready and 7 not in emitted_steps:
+        emitted_steps.add(7)
+        lines.append(
+            build_confirmation_line(
+                7,
+                7,
+                "GM -> Gate ClusterReadyNotify",
+                f"clusterReady=true, readyEpoch={ready_epoch}",
+            )
+        )
+
+    return lines
+
+
+def build_confirmation_line(index: int, total: int, title: str, detail: str) -> str:
+    return f"[{index}/{total}] Confirmed {title}: {detail}"
+
+
+def build_waiting_line(index: int, total: int, title: str, detail: str) -> str:
+    return f"[{index}/{total}] Waiting {title}: {detail}"
+
+
+def describe_current_waiting_step(
+    plan: ClusterPlan,
+    payload: dict[str, object],
+    *,
+    emitted_steps: set[int],
+) -> list[str]:
+    if not has_enhanced_startup_status(payload):
+        registered = coerce_int(payload.get("registeredProcessCount"), default=-1)
+        if 2 not in emitted_steps and registered < plan.expected_registered_process_count:
+            return [
+                build_waiting_line(
+                    2,
+                    7,
+                    "Legacy GM registration probe",
+                    f"registeredProcessCount={registered}/{plan.expected_registered_process_count}",
+                )
+            ]
+        return []
+
+    startup_flow = get_object_field(payload, "startupFlow")
+    nodes_by_id = get_status_entries_by_id(payload, "nodes")
+    mesh_by_id = get_status_entries_by_id(payload, "gameMeshReady")
+
+    expected_games = coerce_int(startup_flow.get("expectedGameCount"), default=len(plan.game_ids))
+    expected_gates = coerce_int(startup_flow.get("expectedGateCount"), default=len(plan.gate_ids))
+    registered_games = coerce_int(startup_flow.get("registeredGameCount"))
+    registered_gates = coerce_int(startup_flow.get("registeredGateCount"))
+    all_nodes_online = coerce_bool(startup_flow.get("allNodesOnline"))
+    all_expected_games_mesh_ready = coerce_bool(startup_flow.get("allExpectedGamesMeshReady"))
+    ownership_active = coerce_bool(startup_flow.get("ownershipActive"))
+    assignment_epoch = coerce_int(startup_flow.get("assignmentEpoch"))
+    total_stub_count = coerce_int(startup_flow.get("totalStubCount"))
+    assigned_stub_count = coerce_int(startup_flow.get("assignedStubCount"))
+    ready_stub_count = coerce_int(startup_flow.get("readyStubCount"))
+    ready_epoch = coerce_int(startup_flow.get("readyEpoch"))
+    cluster_ready = coerce_bool(startup_flow.get("clusterReady"))
+    catalog_loaded = coerce_bool(startup_flow.get("catalogLoaded"))
+    catalog_load_failed = coerce_bool(startup_flow.get("catalogLoadFailed"))
+
+    registered_nodes = [
+        node_name
+        for node_name in (*plan.game_ids, *plan.gate_ids)
+        if coerce_bool(nodes_by_id.get(node_name, {}).get("registered"))
+    ]
+    online_nodes = [
+        node_name
+        for node_name in (*plan.game_ids, *plan.gate_ids)
+        if coerce_bool(nodes_by_id.get(node_name, {}).get("online"))
+    ]
+    mesh_ready_nodes = [
+        node_name
+        for node_name in plan.game_ids
+        if coerce_bool(mesh_by_id.get(node_name, {}).get("meshReady"))
+    ]
+
+    if 2 not in emitted_steps and (registered_games < expected_games or registered_gates < expected_gates):
+        lines = [
+            build_waiting_line(
+                2,
+                7,
+                "Game/Gate -> GM register and heartbeat",
+                build_registration_detail(
+                    plan,
+                    registered_games,
+                    expected_games,
+                    registered_gates,
+                    expected_gates,
+                    registered_nodes,
+                ),
+            )
+        ]
+        lines.extend(
+            render_pending_node_status_lines(
+                plan,
+                nodes_by_id,
+                target_node_ids=[*plan.game_ids, *plan.gate_ids],
+                require_online=False,
+                indent="    ",
+            )
+        )
+        return lines
+
+    if 3 not in emitted_steps and not all_nodes_online:
+        lines = [
+            build_waiting_line(
+                3,
+                7,
+                "GM -> Game allNodesOnline",
+                build_online_detail(plan, online_nodes, all_nodes_online),
+            )
+        ]
+        lines.extend(
+            render_pending_node_status_lines(
+                plan,
+                nodes_by_id,
+                target_node_ids=[*plan.game_ids, *plan.gate_ids],
+                require_online=True,
+                indent="    ",
+            )
+        )
+        return lines
+
+    if 4 not in emitted_steps and not all_expected_games_mesh_ready:
+        lines = [
+            build_waiting_line(
+                4,
+                7,
+                "Game -> GM mesh ready",
+                build_mesh_ready_detail(plan, mesh_ready_nodes),
+            )
+        ]
+        lines.extend(
+            render_pending_mesh_ready_lines(
+                plan,
+                nodes_by_id,
+                mesh_by_id,
+                indent="    ",
+            )
+        )
+        return lines
+
+    if 5 not in emitted_steps and not ownership_active:
+        detail = (
+            "managed catalog load failed"
+            if catalog_load_failed
+            else (
+                f"catalogLoaded={str(catalog_loaded).lower()}, "
+                f"assignmentEpoch={assignment_epoch}, assigned={assigned_stub_count}/{total_stub_count}"
+            )
+        )
+        return [
+            build_waiting_line(
+                5,
+                7,
+                "GM -> Game ServerStubOwnershipSync",
+                detail,
+            )
+        ]
+
+    if 6 not in emitted_steps and not (total_stub_count > 0 and ready_stub_count >= total_stub_count):
+        return [
+            build_waiting_line(
+                6,
+                7,
+                "Game -> GM GameServiceReadyReport",
+                f"ready stubs {ready_stub_count}/{total_stub_count}",
+            )
+        ]
+
+    if 7 not in emitted_steps and not cluster_ready:
+        return [
+            build_waiting_line(
+                7,
+                7,
+                "GM -> Gate ClusterReadyNotify",
+                f"clusterReady={str(cluster_ready).lower()}, readyEpoch={ready_epoch}",
+            )
+        ]
+
+    return []
+
+
+def has_enhanced_startup_status(payload: dict[str, object]) -> bool:
+    return bool(get_object_field(payload, "startupFlow"))
+
+
+def is_startup_complete(plan: ClusterPlan, payload: dict[str, object]) -> bool:
+    if not has_enhanced_startup_status(payload):
+        registered = coerce_int(payload.get("registeredProcessCount"), default=-1)
+        return registered >= plan.expected_registered_process_count
+
+    startup_flow = get_object_field(payload, "startupFlow")
+    return coerce_bool(startup_flow.get("clusterReady"))
+
+
+def describe_startup_problem(plan: ClusterPlan, payload: dict[str, object]) -> str:
+    if not has_enhanced_startup_status(payload):
+        registered = coerce_int(payload.get("registeredProcessCount"), default=-1)
+        return (
+            f"GM registeredProcessCount is {registered}, "
+            f"expected at least {plan.expected_registered_process_count}."
+        )
+
+    startup_flow = get_object_field(payload, "startupFlow")
+    nodes_by_id = get_status_entries_by_id(payload, "nodes")
+    mesh_by_id = get_status_entries_by_id(payload, "gameMeshReady")
+
+    expected_games = coerce_int(startup_flow.get("expectedGameCount"), default=len(plan.game_ids))
+    expected_gates = coerce_int(startup_flow.get("expectedGateCount"), default=len(plan.gate_ids))
+    registered_games = coerce_int(startup_flow.get("registeredGameCount"))
+    registered_gates = coerce_int(startup_flow.get("registeredGateCount"))
+
+    if coerce_bool(startup_flow.get("catalogLoadFailed")):
+        return "GM failed to load the managed server stub catalog."
+
+    if registered_games < expected_games or registered_gates < expected_gates:
+        pending_nodes = [
+            node_id
+            for node_id in (*plan.game_ids, *plan.gate_ids)
+            if not coerce_bool(nodes_by_id.get(node_id, {}).get("registered"))
+        ]
+        pending_text = ", ".join(pending_nodes) if pending_nodes else "unknown nodes"
+        return (
+            f"Waiting for Game/Gate registration to GM. "
+            f"Game {registered_games}/{expected_games}, Gate {registered_gates}/{expected_gates}; "
+            f"pending: {pending_text}."
+        )
+
+    if not coerce_bool(startup_flow.get("allNodesOnline")):
+        return "GM has not published allNodesOnline = true yet."
+
+    ready_games = [
+        node_id
+        for node_id in plan.game_ids
+        if coerce_bool(mesh_by_id.get(node_id, {}).get("meshReady"))
+    ]
+    if len(ready_games) < len(plan.game_ids):
+        pending_games = [node_id for node_id in plan.game_ids if node_id not in ready_games]
+        return (
+            f"Waiting for Game mesh ready aggregation. "
+            f"Ready {len(ready_games)}/{len(plan.game_ids)}; pending: {', '.join(pending_games)}."
+        )
+
+    if not coerce_bool(startup_flow.get("ownershipActive")):
+        assigned_stub_count = coerce_int(startup_flow.get("assignedStubCount"))
+        total_stub_count = coerce_int(startup_flow.get("totalStubCount"))
+        return (
+            f"Waiting for GM ownership sync. "
+            f"assigned stubs {assigned_stub_count}/{total_stub_count}."
+        )
+
+    ready_stub_count = coerce_int(startup_flow.get("readyStubCount"))
+    total_stub_count = coerce_int(startup_flow.get("totalStubCount"))
+    if ready_stub_count < total_stub_count:
+        return f"Waiting for Game service ready aggregation. ready stubs {ready_stub_count}/{total_stub_count}."
+
+    if not coerce_bool(startup_flow.get("clusterReady")):
+        return "GM has not published clusterReady = true yet."
+
+    return "GM /status has not reached the expected startup state."
+def render_stub_distribution_lines(
+    plan: ClusterPlan,
+    stub_distribution_by_id: dict[str, dict[str, object]],
+    *,
+    indent: str = "",
+) -> list[str]:
+    lines: list[str] = []
+    for game_id in plan.game_ids:
+        owner = stub_distribution_by_id.get(game_id, {})
+        owned_stub_count = coerce_int(owner.get("ownedStubCount"))
+        ready_stub_count = coerce_int(owner.get("readyStubCount"))
+        stubs = []
+        for stub in get_list_field(owner, "stubs"):
+            entity_type = coerce_text(stub.get("entityType"), default="unknown")
+            state = coerce_text(stub.get("state"), default="unknown")
+            stubs.append(f"{entity_type}[{state}]")
+
+        stub_text = ", ".join(stubs) if stubs else "-"
+        lines.append(f"{indent}{game_id}: owned={owned_stub_count}, ready={ready_stub_count} -> {stub_text}")
+    return lines
+
+
+def render_pending_node_status_lines(
+    plan: ClusterPlan,
+    nodes_by_id: dict[str, dict[str, object]],
+    *,
+    target_node_ids: Sequence[str],
+    require_online: bool,
+    indent: str = "",
+) -> list[str]:
+    lines: list[str] = []
+    for node_id in target_node_ids:
+        node = nodes_by_id.get(node_id, {})
+        is_registered = coerce_bool(node.get("registered"))
+        is_online = coerce_bool(node.get("online"))
+        if require_online:
+            if is_online:
+                continue
+        else:
+            if is_registered:
+                continue
+
+        lines.append(
+            f"{indent}{node_id}: registered={str(is_registered).lower()}, "
+            f"online={str(is_online).lower()}, "
+            f"heartbeatTimedOut={str(coerce_bool(node.get('heartbeatTimedOut'))).lower()}, "
+            f"lastProtocolError={build_optional_text(node.get('lastProtocolError'))}"
+        )
+    return lines
+
+
+def render_pending_mesh_ready_lines(
+    plan: ClusterPlan,
+    nodes_by_id: dict[str, dict[str, object]],
+    mesh_by_id: dict[str, dict[str, object]],
+    *,
+    indent: str = "",
+) -> list[str]:
+    lines: list[str] = []
+    for game_id in plan.game_ids:
+        mesh_entry = mesh_by_id.get(game_id, {})
+        if coerce_bool(mesh_entry.get("meshReady")):
+            continue
+
+        node = nodes_by_id.get(game_id, {})
+        lines.append(
+            f"{indent}{game_id}: gmRegistered={str(coerce_bool(node.get('registered'))).lower()}, "
+            f"gmOnline={str(coerce_bool(node.get('online'))).lower()}, "
+            f"meshReady=false, "
+            f"reportedAtUnixMs={coerce_int(mesh_entry.get('reportedAtUnixMs'))}, "
+            f"lastProtocolError={build_optional_text(node.get('lastProtocolError'))}"
+        )
+    return lines
+
+
+def build_registration_detail(
+    plan: ClusterPlan,
+    registered_games: int,
+    expected_games: int,
+    registered_gates: int,
+    expected_gates: int,
+    registered_nodes: list[str],
+) -> str:
+    pending_nodes = [node_id for node_id in (*plan.game_ids, *plan.gate_ids) if node_id not in registered_nodes]
+    detail = f"Game {registered_games}/{expected_games}, Gate {registered_gates}/{expected_gates}"
+    if registered_nodes:
+        detail += f"; registered={', '.join(registered_nodes)}"
+    if pending_nodes:
+        detail += f"; pending={', '.join(pending_nodes)}"
+    return detail
+
+
+def build_online_detail(plan: ClusterPlan, online_nodes: list[str], all_nodes_online: bool) -> str:
+    pending_nodes = [node_id for node_id in (*plan.game_ids, *plan.gate_ids) if node_id not in online_nodes]
+    detail = f"allNodesOnline={str(all_nodes_online).lower()}"
+    if online_nodes:
+        detail += f"; online={', '.join(online_nodes)}"
+    if pending_nodes:
+        detail += f"; pending={', '.join(pending_nodes)}"
+    return detail
+
+
+def build_mesh_ready_detail(plan: ClusterPlan, mesh_ready_nodes: list[str]) -> str:
+    pending_nodes = [node_id for node_id in plan.game_ids if node_id not in mesh_ready_nodes]
+    detail = f"ready={len(mesh_ready_nodes)}/{len(plan.game_ids)}"
+    if mesh_ready_nodes:
+        detail += f"; meshReady={', '.join(mesh_ready_nodes)}"
+    if pending_nodes:
+        detail += f"; pending={', '.join(pending_nodes)}"
+    return detail
+
+
+def build_optional_text(value: object) -> str:
+    text = coerce_text(value).strip()
+    return text if text else "-"
+
+
+def get_object_field(payload: dict[str, object], key: str) -> dict[str, object]:
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def get_list_field(payload: dict[str, object], key: str) -> list[dict[str, object]]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        return []
+
+    items: list[dict[str, object]] = []
+    for entry in value:
+        if isinstance(entry, dict):
+            items.append(entry)
+    return items
+
+
+def get_status_entries_by_id(payload: dict[str, object], key: str) -> dict[str, dict[str, object]]:
+    items_by_id: dict[str, dict[str, object]] = {}
+    for entry in get_list_field(payload, key):
+        entry_id = entry.get("nodeId")
+        if isinstance(entry_id, str) and entry_id:
+            items_by_id[entry_id] = entry
+    return items_by_id
+
+
+def coerce_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return False
+
+
+def coerce_int(value: object, *, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return default
+    return default
+
+
+def coerce_text(value: object, *, default: str = "") -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return default
+    return str(value)
 
 
 def fetch_json(url: str, timeout_seconds: float) -> dict[str, object]:

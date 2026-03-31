@@ -338,11 +338,7 @@ NodeErrorCode GmNode::OnInit()
     control_options.listen_endpoint = control_endpoint;
     control_options.node_id = std::string(node_id());
     control_options.status_provider = [this]() {
-        GmControlHttpStatusSnapshot snapshot;
-        snapshot.inner_network_endpoint = inner_network() != nullptr ? std::string(inner_network()->bound_endpoint()) : "";
-        snapshot.registered_process_count = static_cast<std::uint64_t>(inner_network_remote_sessions().size());
-        snapshot.running = true;
-        return snapshot;
+        return BuildControlHttpStatusSnapshot();
     };
     control_options.stop_handler = [this]() {
         RequestStop();
@@ -744,6 +740,150 @@ std::vector<xs::net::ServerStubOwnershipEntry> GmNode::BuildServerStubOwnershipA
     }
 
     return assignments;
+}
+
+GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
+{
+    GmControlHttpStatusSnapshot snapshot;
+    snapshot.inner_network_endpoint = inner_network() != nullptr ? std::string(inner_network()->bound_endpoint()) : "";
+    snapshot.registered_process_count = static_cast<std::uint64_t>(inner_network_remote_sessions().size());
+    snapshot.running = true;
+
+    const std::vector<InnerNetworkSession> registry = inner_network_remote_sessions().Snapshot();
+    const auto find_session = [&registry](std::string_view node_id) -> const InnerNetworkSession* {
+        const auto iterator = std::find_if(
+            registry.begin(),
+            registry.end(),
+            [node_id](const InnerNetworkSession& entry) {
+                return entry.node_id == node_id;
+            });
+        return iterator != registry.end() ? &(*iterator) : nullptr;
+    };
+
+    const auto count_registered = [&find_session](const std::vector<std::string>& node_ids) {
+        return static_cast<std::uint64_t>(std::count_if(
+            node_ids.begin(),
+            node_ids.end(),
+            [&find_session](const std::string& node_id) {
+                const InnerNetworkSession* session = find_session(node_id);
+                return session != nullptr && session->registered;
+            }));
+    };
+
+    snapshot.startup_flow.expected_game_count =
+        static_cast<std::uint64_t>(cluster_nodes_online_state_.expected_game_node_ids.size());
+    snapshot.startup_flow.expected_gate_count =
+        static_cast<std::uint64_t>(cluster_nodes_online_state_.expected_gate_node_ids.size());
+    snapshot.startup_flow.registered_game_count =
+        count_registered(cluster_nodes_online_state_.expected_game_node_ids);
+    snapshot.startup_flow.registered_gate_count =
+        count_registered(cluster_nodes_online_state_.expected_gate_node_ids);
+    snapshot.startup_flow.all_nodes_online = cluster_nodes_online_state_.all_nodes_online;
+    snapshot.startup_flow.last_all_nodes_online_server_now_unix_ms =
+        cluster_nodes_online_state_.last_server_now_unix_ms;
+    snapshot.startup_flow.all_expected_games_mesh_ready =
+        game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready;
+    snapshot.startup_flow.catalog_loaded = server_stub_state_table_.catalog_loaded;
+    snapshot.startup_flow.catalog_load_failed = server_stub_state_table_.catalog_load_failed;
+    snapshot.startup_flow.total_stub_count = static_cast<std::uint64_t>(server_stub_state_table_.entries.size());
+
+    const std::uint64_t assigned_stub_count = static_cast<std::uint64_t>(std::count_if(
+        server_stub_state_table_.entries.begin(),
+        server_stub_state_table_.entries.end(),
+        [](const ServerStubEntry& entry) {
+            return !entry.owner_game_node_id.empty();
+        }));
+    const std::uint64_t ready_stub_count = static_cast<std::uint64_t>(std::count_if(
+        server_stub_state_table_.entries.begin(),
+        server_stub_state_table_.entries.end(),
+        [](const ServerStubEntry& entry) {
+            return !entry.owner_game_node_id.empty() && entry.state == ServerStubState::Ready;
+        }));
+    snapshot.startup_flow.assigned_stub_count = assigned_stub_count;
+    snapshot.startup_flow.ready_stub_count = ready_stub_count;
+    snapshot.startup_flow.ownership_active =
+        snapshot.startup_flow.total_stub_count > 0U &&
+        assigned_stub_count == snapshot.startup_flow.total_stub_count;
+    snapshot.startup_flow.assignment_epoch =
+        snapshot.startup_flow.ownership_active ? kServerStubOwnershipAssignmentEpoch : 0U;
+    snapshot.startup_flow.ready_epoch = cluster_ready_state_.ready_epoch;
+    snapshot.startup_flow.cluster_ready = cluster_ready_state_.cluster_ready;
+    snapshot.startup_flow.last_cluster_ready_server_now_unix_ms =
+        cluster_ready_state_.last_server_now_unix_ms;
+
+    snapshot.nodes.reserve(
+        cluster_nodes_online_state_.expected_game_node_ids.size() +
+        cluster_nodes_online_state_.expected_gate_node_ids.size());
+    const auto append_expected_nodes =
+        [&snapshot, &find_session](const std::vector<std::string>& node_ids, xs::core::ProcessType process_type) {
+            for (const std::string& node_id : node_ids)
+            {
+                const InnerNetworkSession* session = find_session(node_id);
+
+                GmControlHttpStatusSnapshot::NodeSnapshot node_snapshot;
+                node_snapshot.node_id = node_id;
+                node_snapshot.process_type = std::string(xs::core::ProcessTypeName(process_type));
+                if (session != nullptr)
+                {
+                    node_snapshot.pid = session->pid;
+                    node_snapshot.inner_network_endpoint = BuildInnerNetworkEndpointText(session->inner_network_endpoint);
+                    node_snapshot.last_heartbeat_at_unix_ms = session->last_heartbeat_at_unix_ms;
+                    node_snapshot.last_server_now_unix_ms = session->last_server_now_unix_ms;
+                    node_snapshot.last_protocol_error = session->last_protocol_error;
+                    node_snapshot.registered = session->registered;
+                    node_snapshot.heartbeat_timed_out = session->heartbeat_timed_out;
+                    node_snapshot.online = session->registered && !session->heartbeat_timed_out;
+                    node_snapshot.inner_network_ready = session->inner_network_ready;
+                }
+
+                snapshot.nodes.push_back(std::move(node_snapshot));
+            }
+        };
+    append_expected_nodes(cluster_nodes_online_state_.expected_game_node_ids, xs::core::ProcessType::Game);
+    append_expected_nodes(cluster_nodes_online_state_.expected_gate_node_ids, xs::core::ProcessType::Gate);
+
+    snapshot.game_mesh_ready.reserve(game_to_gate_full_connection_aggregation_state_.entries.size());
+    for (const GameMeshReadyEntry& entry : game_to_gate_full_connection_aggregation_state_.entries)
+    {
+        snapshot.game_mesh_ready.push_back(
+            GmControlHttpStatusSnapshot::GameMeshReadySnapshot{
+                .node_id = entry.node_id,
+                .mesh_ready = entry.mesh_ready,
+                .reported_at_unix_ms = entry.reported_at_unix_ms,
+            });
+    }
+
+    snapshot.stub_distribution.reserve(cluster_nodes_online_state_.expected_game_node_ids.size());
+    for (const std::string& node_id : cluster_nodes_online_state_.expected_game_node_ids)
+    {
+        GmControlHttpStatusSnapshot::StubOwnerSnapshot owner_snapshot;
+        owner_snapshot.node_id = node_id;
+
+        for (const ServerStubEntry& entry : server_stub_state_table_.entries)
+        {
+            if (entry.owner_game_node_id != node_id)
+            {
+                continue;
+            }
+
+            ++owner_snapshot.owned_stub_count;
+            if (entry.state == ServerStubState::Ready)
+            {
+                ++owner_snapshot.ready_stub_count;
+            }
+
+            owner_snapshot.stubs.push_back(
+                GmControlHttpStatusSnapshot::StubSnapshot{
+                    .entity_type = entry.entity_type,
+                    .entity_id = entry.entity_id,
+                    .state = entry.state == ServerStubState::Ready ? "Ready" : "Init",
+                });
+        }
+
+        snapshot.stub_distribution.push_back(std::move(owner_snapshot));
+    }
+
+    return snapshot;
 }
 
 GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node_id) noexcept

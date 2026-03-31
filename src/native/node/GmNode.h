@@ -102,6 +102,7 @@ class GmNode final : public ServerNode
     [[nodiscard]] bool LoadManagedServerStubCatalog();
     [[nodiscard]] bool EnsureServerStubAssignments();
     [[nodiscard]] std::vector<xs::net::ServerStubOwnershipEntry> BuildServerStubOwnershipAssignments() const;
+    [[nodiscard]] GmControlHttpStatusSnapshot BuildControlHttpStatusSnapshot() const;
     [[nodiscard]] bool AreAllExpectedNodesOnline() const noexcept;
     [[nodiscard]] bool AreAllExpectedGamesMeshReady() const noexcept;
     [[nodiscard]] bool AreAllServerStubsReady() const noexcept;
