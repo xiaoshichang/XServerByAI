@@ -6,7 +6,6 @@ PointerAlignment: Left
 BreakBeforeBraces: Allman
 AllowShortBlocksOnASingleLine: Never
 AllowShortFunctionsOnASingleLine: None
-AllowShortIfStatementsOnASingleLine: AllIfsAndElse
 AllowShortLoopsOnASingleLine: false
 AllowShortLambdasOnASingleLine: None
 NamespaceIndentation: None

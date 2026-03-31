@@ -462,7 +462,6 @@ NodeErrorCode GameNode::OnUninit()
     }
 
     ResetGateSessionStates();
-    ResetGmSessionState();
 
     if (inner_network() != nullptr)
     {
@@ -566,11 +565,10 @@ void GameNode::HandleGmConnectionStateChanged(ipc::ZmqConnectionState state)
 
     session->connection_state = state;
 
-    logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed GM inner connection state change.");
-
-    if (state != ipc::ZmqConnectionState::Connected)
+    logger().Log(xs::core::LogLevel::Info, "GameNode", "Game node observed GM inner connection state change.");
+    if (session->connection_state == ipc::ZmqConnectionState::Connected && state != ipc::ZmqConnectionState::Connected)
     {
-        ResetGmSessionState();
+        logger().Log(xs::core::LogLevel::Error, "GameNode", "GM disconnected");
         return;
     }
 
@@ -1602,30 +1600,6 @@ void GameNode::ResetServiceReadyState() noexcept
     service_ready_state_ = ServiceReadyState{};
 }
 
-void GameNode::ResetGmSessionState()
-{
-    InnerNetworkSession* session = gm_session();
-    if (session == nullptr)
-    {
-        return;
-    }
-
-    CancelHeartbeatTimer();
-    all_nodes_online_ = false;
-    last_cluster_nodes_online_server_now_unix_ms_ = 0U;
-    ResetMeshReadyState();
-    ResetOwnershipState();
-    session->inner_network_ready = false;
-    session->registered = false;
-    session->register_in_flight = false;
-    session->register_seq = 0U;
-    session->heartbeat_seq = 0U;
-    session->heartbeat_interval_ms = 0U;
-    session->heartbeat_timeout_ms = 0U;
-    session->last_server_now_unix_ms = 0U;
-    session->last_heartbeat_at_unix_ms = 0U;
-}
-
 void GameNode::ResetGateSessionStates()
 {
     const std::vector<InnerNetworkSession> snapshot = inner_network_remote_sessions().Snapshot();
@@ -1690,17 +1664,12 @@ void GameNode::RefreshMeshReadyState()
     const bool state_changed = mesh_ready_state_.current != all_gate_connected;
     mesh_ready_state_.current = all_gate_connected;
 
-    if (!all_gate_connected)
-    {
-        ResetOwnershipState();
-    }
-
     if (all_gate_connected != mesh_ready_state_.last_reported || !mesh_ready_state_.has_reported)
     {
         (void)SendMeshReadyReport(all_gate_connected);
     }
 
-    if (all_gate_connected)
+    if (state_changed && all_gate_connected)
     {
         CheckAllLocalStubsReady();
     }

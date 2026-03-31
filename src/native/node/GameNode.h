@@ -101,7 +101,6 @@ class GameNode final : public ServerNode
     void ResetMeshReadyState() noexcept;
     void ResetOwnershipState();
     void ResetServiceReadyState() noexcept;
-    void ResetGmSessionState();
     void ResetGateSessionStates();
     void RefreshMeshReadyState();
     void CheckAllLocalStubsReady();
