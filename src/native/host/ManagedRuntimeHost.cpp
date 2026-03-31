@@ -349,9 +349,7 @@ class ManagedRuntimeHost::Impl final
             return ManagedHostErrorCode::AssemblyPathNotFound;
         }
 
-        SetProcessEnvironmentVariable(
-            kManagedDiscoveryAssemblyPathsEnvironmentVariable,
-            BuildDiscoveryAssemblyPathsEnvironmentValue(discovery_assembly_paths));
+        SetProcessEnvironmentVariable(kManagedDiscoveryAssemblyPathsEnvironmentVariable, BuildDiscoveryAssemblyPathsEnvironmentValue(discovery_assembly_paths));
 
         std::filesystem::path hostfxr_path;
         const ManagedHostErrorCode resolve_result = ResolveHostfxrPath(assembly_path, &hostfxr_path);
@@ -361,8 +359,7 @@ class ManagedRuntimeHost::Impl final
         }
 
         ProcessHostfxrState& process_hostfxr_state = GetProcessHostfxrState();
-        const ManagedHostErrorCode process_hostfxr_result =
-            EnsureProcessHostfxrLoaded(hostfxr_path, &process_hostfxr_state);
+        const ManagedHostErrorCode process_hostfxr_result = EnsureProcessHostfxrLoaded(hostfxr_path, &process_hostfxr_state);
         if (process_hostfxr_result != ManagedHostErrorCode::None)
         {
             return process_hostfxr_result;
@@ -372,8 +369,7 @@ class ManagedRuntimeHost::Impl final
         void* raw_delegate = nullptr;
         const auto native_runtime_config_path = PathToNativeString(runtime_config_path);
 
-        const std::int32_t initialize_result = process_hostfxr_state.exports.initialize_for_runtime_config(
-            native_runtime_config_path.c_str(), nullptr, &host_context);
+        const std::int32_t initialize_result = process_hostfxr_state.exports.initialize_for_runtime_config(native_runtime_config_path.c_str(), nullptr, &host_context);
         if (initialize_result < 0)
         {
             return ManagedHostErrorCode::RuntimeInitializeFailed;
@@ -384,8 +380,7 @@ class ManagedRuntimeHost::Impl final
             return ManagedHostErrorCode::RuntimeInitializeFailed;
         }
 
-        const std::int32_t delegate_result = process_hostfxr_state.exports.get_runtime_delegate(
-            host_context, hdt_load_assembly_and_get_function_pointer, &raw_delegate);
+        const std::int32_t delegate_result = process_hostfxr_state.exports.get_runtime_delegate(host_context, hdt_load_assembly_and_get_function_pointer, &raw_delegate);
         if (delegate_result != 0)
         {
             (void)process_hostfxr_state.exports.close(host_context);
@@ -406,8 +401,7 @@ class ManagedRuntimeHost::Impl final
         runtime_config_path_ = runtime_config_path;
         assembly_path_ = assembly_path;
         hostfxr_path_ = process_hostfxr_state.library_path;
-        load_assembly_and_get_function_pointer_ =
-            reinterpret_cast<load_assembly_and_get_function_pointer_fn>(raw_delegate);
+        load_assembly_and_get_function_pointer_ = reinterpret_cast<load_assembly_and_get_function_pointer_fn>(raw_delegate);
         abi_version_ = 0U;
         game_exports_ = ManagedGameExports{};
         game_exports_bound_ = false;
@@ -451,9 +445,7 @@ class ManagedRuntimeHost::Impl final
         ManagedGameExports resolved_exports{};
 
         void* raw_get_abi_version = nullptr;
-        ManagedHostErrorCode result = ResolveManagedEntryPoint(
-            load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName,
-            kManagedGameGetAbiVersionMethodName, &raw_get_abi_version);
+        ManagedHostErrorCode result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName, kManagedGameGetAbiVersionMethodName, &raw_get_abi_version);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -463,8 +455,7 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.get_abi_version = reinterpret_cast<ManagedGetAbiVersionFn>(raw_get_abi_version);
 
         void* raw_init = nullptr;
-        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
-                                          kManagedGameExportsTypeName, kManagedGameInitMethodName, &raw_init);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName, kManagedGameInitMethodName, &raw_init);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -472,9 +463,7 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.init = reinterpret_cast<ManagedInitFn>(raw_init);
 
         void* raw_on_message = nullptr;
-        result =
-            ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
-                                     kManagedGameExportsTypeName, kManagedGameOnMessageMethodName, &raw_on_message);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName, kManagedGameOnMessageMethodName, &raw_on_message);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -482,8 +471,7 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.on_message = reinterpret_cast<ManagedOnMessageFn>(raw_on_message);
 
         void* raw_on_tick = nullptr;
-        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
-                                          kManagedGameExportsTypeName, kManagedGameOnTickMethodName, &raw_on_tick);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName, kManagedGameOnTickMethodName, &raw_on_tick);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -491,31 +479,23 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.on_tick = reinterpret_cast<ManagedOnTickFn>(raw_on_tick);
 
         void* raw_apply_server_stub_ownership = nullptr;
-        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
-                                          kManagedGameExportsTypeName, kManagedGameApplyServerStubOwnershipMethodName,
-                                          &raw_apply_server_stub_ownership);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName, kManagedGameApplyServerStubOwnershipMethodName, &raw_apply_server_stub_ownership);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
         }
-        resolved_exports.apply_server_stub_ownership =
-            reinterpret_cast<ManagedApplyServerStubOwnershipFn>(raw_apply_server_stub_ownership);
+        resolved_exports.apply_server_stub_ownership = reinterpret_cast<ManagedApplyServerStubOwnershipFn>(raw_apply_server_stub_ownership);
 
         void* raw_reset_server_stub_ownership = nullptr;
-        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
-                                          kManagedGameExportsTypeName, kManagedGameResetServerStubOwnershipMethodName,
-                                          &raw_reset_server_stub_ownership);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,kManagedGameExportsTypeName, kManagedGameResetServerStubOwnershipMethodName, &raw_reset_server_stub_ownership);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
         }
-        resolved_exports.reset_server_stub_ownership =
-            reinterpret_cast<ManagedResetServerStubOwnershipFn>(raw_reset_server_stub_ownership);
+        resolved_exports.reset_server_stub_ownership = reinterpret_cast<ManagedResetServerStubOwnershipFn>(raw_reset_server_stub_ownership);
 
         void* raw_get_ready_server_stub_count = nullptr;
-        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
-                                          kManagedGameExportsTypeName, kManagedGameGetReadyServerStubCountMethodName,
-                                          &raw_get_ready_server_stub_count);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName, kManagedGameGetReadyServerStubCountMethodName, &raw_get_ready_server_stub_count);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
@@ -524,15 +504,12 @@ class ManagedRuntimeHost::Impl final
             reinterpret_cast<ManagedGetReadyServerStubCountFn>(raw_get_ready_server_stub_count);
 
         void* raw_get_ready_server_stub_entry = nullptr;
-        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
-                                          kManagedGameExportsTypeName, kManagedGameGetReadyServerStubEntryMethodName,
-                                          &raw_get_ready_server_stub_entry);
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_, kManagedGameExportsTypeName, kManagedGameGetReadyServerStubEntryMethodName, &raw_get_ready_server_stub_entry);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
         }
-        resolved_exports.get_ready_server_stub_entry =
-            reinterpret_cast<ManagedGetReadyServerStubEntryFn>(raw_get_ready_server_stub_entry);
+        resolved_exports.get_ready_server_stub_entry = reinterpret_cast<ManagedGetReadyServerStubEntryFn>(raw_get_ready_server_stub_entry);
 
         game_exports_ = resolved_exports;
         game_exports_bound_ = true;
@@ -674,10 +651,11 @@ class ManagedRuntimeHost::Impl final
     std::filesystem::path runtime_config_path_{};
     std::filesystem::path assembly_path_{};
     std::filesystem::path hostfxr_path_{};
-    ManagedGameExports game_exports_{};
-    ManagedServerStubCatalogExports server_stub_catalog_exports_{};
     load_assembly_and_get_function_pointer_fn load_assembly_and_get_function_pointer_{nullptr};
     std::uint32_t abi_version_{0U};
+
+    ManagedGameExports game_exports_{};
+    ManagedServerStubCatalogExports server_stub_catalog_exports_{};
     bool game_exports_bound_{false};
     bool server_stub_catalog_exports_bound_{false};
 };
