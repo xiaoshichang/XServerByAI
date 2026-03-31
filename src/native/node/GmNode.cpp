@@ -551,35 +551,35 @@ bool GmNode::LoadManagedServerStubCatalog()
             DescribeManagedHostError(load_result));
     }
 
-    const xs::host::ManagedHostErrorCode bind_result = runtime_host.BindServerStubCatalogExports();
+    const xs::host::ManagedHostErrorCode bind_result = runtime_host.BindExports();
     if (bind_result != xs::host::ManagedHostErrorCode::None)
     {
         return log_failure(
-            "GM failed to bind managed server stub catalog exports.",
+            "GM failed to bind managed exports.",
             xs::host::ManagedHostErrorCanonicalName(bind_result),
             DescribeManagedHostError(bind_result));
     }
 
-    xs::host::ManagedServerStubCatalogExports catalog_exports{};
-    const xs::host::ManagedHostErrorCode exports_result = runtime_host.GetServerStubCatalogExports(catalog_exports);
+    xs::host::ManagedExports catalog_exports{};
+    const xs::host::ManagedHostErrorCode exports_result = runtime_host.GetExports(catalog_exports);
     if (exports_result != xs::host::ManagedHostErrorCode::None)
     {
         return log_failure(
-            "GM failed to resolve managed server stub catalog exports.",
+            "GM failed to resolve managed exports.",
             xs::host::ManagedHostErrorCanonicalName(exports_result),
             DescribeManagedHostError(exports_result));
     }
 
-    if (catalog_exports.get_count == nullptr || catalog_exports.get_entry == nullptr)
+    if (catalog_exports.get_server_stub_catalog_count == nullptr || catalog_exports.get_server_stub_catalog_entry == nullptr)
     {
         return log_failure(
-            "GM resolved incomplete managed server stub catalog exports.",
+            "GM resolved incomplete managed exports.",
             "Interop.InvalidCatalogExports",
-            "Managed server stub catalog exports must provide both count and entry delegates.");
+            "Managed exports must provide both server stub catalog delegates.");
     }
 
     std::uint32_t catalog_count = 0U;
-    const std::int32_t count_result = catalog_exports.get_count(&catalog_count);
+    const std::int32_t count_result = catalog_exports.get_server_stub_catalog_count(&catalog_count);
     if (count_result != 0)
     {
         return log_failure(
@@ -604,7 +604,7 @@ bool GmNode::LoadManagedServerStubCatalog()
     for (std::uint32_t index = 0U; index < catalog_count; ++index)
     {
         xs::host::ManagedServerStubCatalogEntry catalog_entry{};
-        const std::int32_t entry_result = catalog_exports.get_entry(index, &catalog_entry);
+        const std::int32_t entry_result = catalog_exports.get_server_stub_catalog_entry(index, &catalog_entry);
         if (entry_result != 0)
         {
             return log_failure(

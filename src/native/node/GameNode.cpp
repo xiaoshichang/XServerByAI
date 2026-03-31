@@ -322,8 +322,8 @@ NodeErrorCode GameNode::OnInit()
     last_cluster_nodes_online_server_now_unix_ms_ = 0U;
     all_nodes_online_ = false;
     inner_network_remote_sessions().Clear();
-    managed_game_exports_ = xs::host::ManagedGameExports{};
-    managed_game_exports_loaded_ = false;
+    managed_exports_ = xs::host::ManagedExports{};
+    managed_exports_loaded_ = false;
 
     const NodeErrorCode managed_runtime_result = InitializeManagedRuntime(config->managed);
     if (managed_runtime_result != NodeErrorCode::None)
@@ -478,21 +478,21 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
                         "Failed to load Game managed runtime host: " + DescribeManagedHostError(load_result));
     }
 
-    const xs::host::ManagedHostErrorCode bind_result = managed_runtime_host_.BindGameExports();
+    const xs::host::ManagedHostErrorCode bind_result = managed_runtime_host_.BindExports();
     if (bind_result != xs::host::ManagedHostErrorCode::None)
     {
         (void)managed_runtime_host_.Unload();
         return SetError(NodeErrorCode::NodeInitFailed,
-                        "Failed to bind Game managed runtime exports: " + DescribeManagedHostError(bind_result));
+                        "Failed to bind Game managed exports: " + DescribeManagedHostError(bind_result));
     }
 
-    const xs::host::ManagedHostErrorCode exports_result = managed_runtime_host_.GetGameExports(managed_game_exports_);
+    const xs::host::ManagedHostErrorCode exports_result = managed_runtime_host_.GetExports(managed_exports_);
     if (exports_result != xs::host::ManagedHostErrorCode::None)
     {
-        managed_game_exports_ = xs::host::ManagedGameExports{};
+        managed_exports_ = xs::host::ManagedExports{};
         (void)managed_runtime_host_.Unload();
         return SetError(NodeErrorCode::NodeInitFailed,
-                        "Failed to read Game managed runtime exports: " + DescribeManagedHostError(exports_result));
+                        "Failed to read Game managed exports: " + DescribeManagedHostError(exports_result));
     }
 
     const std::string node_id_text(node_id());
@@ -516,16 +516,16 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
         .native_callbacks = native_callbacks,
     };
 
-    const std::int32_t init_result = managed_game_exports_.init(&init_args);
+    const std::int32_t init_result = managed_exports_.init(&init_args);
     if (init_result != 0)
     {
-        managed_game_exports_ = xs::host::ManagedGameExports{};
+        managed_exports_ = xs::host::ManagedExports{};
         (void)managed_runtime_host_.Unload();
         return SetError(NodeErrorCode::NodeInitFailed,
                         "Game managed runtime initialization returned error code " + std::to_string(init_result) + '.');
     }
 
-    managed_game_exports_loaded_ = true;
+    managed_exports_loaded_ = true;
 
     logger().Log(xs::core::LogLevel::Info, "runtime", "Game node loaded managed runtime host.");
     return NodeErrorCode::None;
@@ -761,7 +761,7 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
 
 void GameNode::HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry)
 {
-    if (!managed_game_exports_loaded_ || assignment_epoch == 0U ||
+    if (!managed_exports_loaded_ || assignment_epoch == 0U ||
         assignment_epoch != ownership_state_.assignment_epoch || entry.ready == 0U)
     {
         return;
@@ -1557,8 +1557,8 @@ void GameNode::StartGateConnectors()
 
 void GameNode::ResetRuntimeState() noexcept
 {
-    managed_game_exports_loaded_ = false;
-    managed_game_exports_ = xs::host::ManagedGameExports{};
+    managed_exports_loaded_ = false;
+    managed_exports_ = xs::host::ManagedExports{};
     (void)managed_runtime_host_.Unload();
     runtime_state_ = RuntimeState{};
 }
@@ -1570,9 +1570,9 @@ void GameNode::ResetMeshReadyState() noexcept
 
 void GameNode::ResetOwnershipState()
 {
-    if (managed_game_exports_loaded_ && managed_game_exports_.reset_server_stub_ownership != nullptr)
+    if (managed_exports_loaded_ && managed_exports_.reset_server_stub_ownership != nullptr)
     {
-        const std::int32_t reset_result = managed_game_exports_.reset_server_stub_ownership();
+        const std::int32_t reset_result = managed_exports_.reset_server_stub_ownership();
         if (reset_result != 0)
         {
             logger().Log(xs::core::LogLevel::Warn, "runtime", "Game node failed to reset managed ownership state.");
@@ -1718,7 +1718,7 @@ void GameNode::CheckAllLocalStubsReady()
 
 bool GameNode::CreateAllLocalStubs(const xs::net::ServerStubOwnershipSync& sync)
 {
-    if (!managed_game_exports_loaded_ || managed_game_exports_.apply_server_stub_ownership == nullptr)
+    if (!managed_exports_loaded_ || managed_exports_.apply_server_stub_ownership == nullptr)
     {
         logger().Log(xs::core::LogLevel::Warn, "runtime",
                      "Game node cannot apply ownership before managed exports are ready.");
@@ -1771,7 +1771,7 @@ bool GameNode::CreateAllLocalStubs(const xs::net::ServerStubOwnershipSync& sync)
     managed_sync.assignment_count = static_cast<std::uint32_t>(managed_assignments.size());
     managed_sync.assignments = managed_assignments.empty() ? nullptr : managed_assignments.data();
 
-    const std::int32_t apply_result = managed_game_exports_.apply_server_stub_ownership(&managed_sync);
+    const std::int32_t apply_result = managed_exports_.apply_server_stub_ownership(&managed_sync);
     if (apply_result != 0)
     {
         logger().Log(xs::core::LogLevel::Warn, "runtime", "Game node failed to apply ownership in managed runtime.");

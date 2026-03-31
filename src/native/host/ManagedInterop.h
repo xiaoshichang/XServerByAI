@@ -14,7 +14,7 @@ namespace xs::host
 {
 
 inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 4;
-inline constexpr std::string_view kManagedGameExportsTypeName =
+inline constexpr std::string_view kManagedExportsTypeName =
     "XServer.Managed.Framework.Interop.GameNativeExports, XServer.Managed.Framework";
 inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNativeGetAbiVersion";
 inline constexpr std::string_view kManagedGameInitMethodName = "GameNativeInit";
@@ -146,7 +146,7 @@ using ManagedGetServerStubCatalogCountFn = std::int32_t(XS_MANAGED_CALLTYPE*)(st
 using ManagedGetServerStubCatalogEntryFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint32_t index,
                                                                               ManagedServerStubCatalogEntry* entry);
 
-struct ManagedGameExports
+struct ManagedExports
 {
     std::uint32_t abi_version{0};
     ManagedGetAbiVersionFn get_abi_version{nullptr};
@@ -157,13 +157,8 @@ struct ManagedGameExports
     ManagedResetServerStubOwnershipFn reset_server_stub_ownership{nullptr};
     ManagedGetReadyServerStubCountFn get_ready_server_stub_count{nullptr};
     ManagedGetReadyServerStubEntryFn get_ready_server_stub_entry{nullptr};
-};
-
-struct ManagedServerStubCatalogExports
-{
-    std::uint32_t abi_version{0};
-    ManagedGetServerStubCatalogCountFn get_count{nullptr};
-    ManagedGetServerStubCatalogEntryFn get_entry{nullptr};
+    ManagedGetServerStubCatalogCountFn get_server_stub_catalog_count{nullptr};
+    ManagedGetServerStubCatalogEntryFn get_server_stub_catalog_entry{nullptr};
 };
 
 } // namespace xs::host

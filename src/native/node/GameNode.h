@@ -123,8 +123,8 @@ class GameNode final : public ServerNode
     OwnershipState ownership_state_{};
     ServiceReadyState service_ready_state_{};
     xs::host::ManagedRuntimeHost managed_runtime_host_{};
-    xs::host::ManagedGameExports managed_game_exports_{};
-    bool managed_game_exports_loaded_{false};
+    xs::host::ManagedExports managed_exports_{};
+    bool managed_exports_loaded_{false};
     std::uint64_t last_cluster_nodes_online_server_now_unix_ms_{0U};
     bool all_nodes_online_{false};
 };
