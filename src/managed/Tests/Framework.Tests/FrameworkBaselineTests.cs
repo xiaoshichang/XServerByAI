@@ -70,9 +70,9 @@ namespace XServer.Managed.Framework.Tests
                 .Select(static type => type.Name)
                 .ToArray();
 
-            Assert.Contains(nameof(ChatService), entityTypeNames);
-            Assert.Contains(nameof(LeaderboardService), entityTypeNames);
-            Assert.Contains(nameof(MatchService), entityTypeNames);
+            Assert.Contains(nameof(ChatStub), entityTypeNames);
+            Assert.Contains(nameof(LeaderboardStub), entityTypeNames);
+            Assert.Contains(nameof(MatchStub), entityTypeNames);
             Assert.DoesNotContain(nameof(ServerEntity), entityTypeNames);
             Assert.DoesNotContain(nameof(ServerStubEntity), entityTypeNames);
         }
@@ -87,17 +87,17 @@ namespace XServer.Managed.Framework.Tests
                 entries,
                 entry =>
                 {
-                    Assert.Equal("ChatService", entry.EntityType);
+                    Assert.Equal("ChatStub", entry.EntityType);
                     Assert.Equal(ServerStubCatalog.UnknownEntityId, entry.EntityId);
                 },
                 entry =>
                 {
-                    Assert.Equal("LeaderboardService", entry.EntityType);
+                    Assert.Equal("LeaderboardStub", entry.EntityType);
                     Assert.Equal(ServerStubCatalog.UnknownEntityId, entry.EntityId);
                 },
                 entry =>
                 {
-                    Assert.Equal("MatchService", entry.EntityType);
+                    Assert.Equal("MatchStub", entry.EntityType);
                     Assert.Equal(ServerStubCatalog.UnknownEntityId, entry.EntityId);
                 });
         }

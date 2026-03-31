@@ -33,13 +33,13 @@ namespace XServer.Managed.Framework.Tests
                 runtimeState.OwnedServerStubs,
                 stub =>
                 {
-                    Assert.IsType<MatchService>(stub);
+                    Assert.IsType<MatchStub>(stub);
                     Assert.True(stub.IsReady);
                     Assert.NotEqual(Guid.Empty, stub.EntityId);
                 },
                 stub =>
                 {
-                    Assert.IsType<LeaderboardService>(stub);
+                    Assert.IsType<LeaderboardStub>(stub);
                     Assert.True(stub.IsReady);
                     Assert.NotEqual(Guid.Empty, stub.EntityId);
                 });
@@ -63,9 +63,9 @@ namespace XServer.Managed.Framework.Tests
                     Assert.NotEqual(Guid.Empty, notification.EntityId);
                     Assert.True(notification.IsReady);
                 });
-            Assert.Single(runtimeState.EntityManager.SnapshotByType<MatchService>());
-            Assert.Single(runtimeState.EntityManager.SnapshotByType<LeaderboardService>());
-            Assert.Empty(runtimeState.EntityManager.SnapshotByType<ChatService>());
+            Assert.Single(runtimeState.EntityManager.SnapshotByType<MatchStub>());
+            Assert.Single(runtimeState.EntityManager.SnapshotByType<LeaderboardStub>());
+            Assert.Empty(runtimeState.EntityManager.SnapshotByType<ChatStub>());
         }
 
         [Fact]
@@ -135,7 +135,7 @@ namespace XServer.Managed.Framework.Tests
             Assert.False(runtimeState.EntityManager.Contains(revokedStub.EntityId));
             Assert.Equal(EntityLifecycleState.Destroyed, revokedStub.LifecycleState);
             Assert.Single(runtimeState.OwnedServerStubs);
-            Assert.IsType<ChatService>(runtimeState.OwnedServerStubs[0]);
+            Assert.IsType<ChatStub>(runtimeState.OwnedServerStubs[0]);
             Assert.True(runtimeState.OwnedServerStubs[0].IsReady);
             Assert.Equal(2, runtimeState.EntityManager.Count);
         }
