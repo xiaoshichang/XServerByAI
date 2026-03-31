@@ -72,11 +72,11 @@ class GmNode final : public ServerNode
         bool catalog_load_failed{false};
     };
 
-    struct ClusterReadyState final
+    struct ClusterGateOpenState final
     {
         std::uint64_t ready_epoch{0U};
         std::uint64_t last_server_now_unix_ms{0U};
-        bool cluster_ready{false};
+        bool is_open{false};
     };
 
     void HandleInnerMessage(
@@ -91,7 +91,7 @@ class GmNode final : public ServerNode
     void HandleGameGateMeshReadyReport(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
-    void HandleGameServiceReadyReport(
+    void HandleGameStubsReadyReport(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
     void HandleTimeoutScan();
@@ -110,7 +110,7 @@ class GmNode final : public ServerNode
     void InvalidateGameMeshReadyState(std::string_view game_node_id);
     void RefreshClusterNodesOnlineState(std::string_view trigger_node_id = {});
     void RefreshServerStubDistributeTable();
-    void RefreshClusterReadyState();
+    void RefreshClusterGateOpenState();
     void SendClusterNodesOnlineNotifyToGame(
         const InnerNetworkSession& session,
         bool all_nodes_online,
@@ -118,7 +118,7 @@ class GmNode final : public ServerNode
     void SendOwnershipSyncToGame(
         const InnerNetworkSession& session,
         const xs::net::ServerStubOwnershipSync& sync);
-    void SendClusterReadyNotifyToGate(
+    void SendClusterGateOpenNotifyToGate(
         const InnerNetworkSession& session,
         const xs::net::ClusterReadyNotify& notify);
     [[nodiscard]] GameMeshReadyEntry* mesh_ready_entry(std::string_view node_id) noexcept;
@@ -129,7 +129,7 @@ class GmNode final : public ServerNode
     ClusterNodesOnlineState cluster_nodes_online_state_{};
     GameToGateFullConnectionAggregationState game_to_gate_full_connection_aggregation_state_{};
     ServerStubStateTable server_stub_state_table_{};
-    ClusterReadyState cluster_ready_state_{};
+    ClusterGateOpenState cluster_gate_open_state_{};
 };
 
 } // namespace xs::node

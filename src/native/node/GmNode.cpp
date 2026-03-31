@@ -321,7 +321,7 @@ NodeErrorCode GmNode::OnInit()
     InitializeClusterNodesOnlineState();
     InitializeGameToGateFullConnectionAggregationState();
     ResetServerStubStateTable();
-    cluster_ready_state_ = ClusterReadyState{};
+    cluster_gate_open_state_ = ClusterGateOpenState{};
 
     const NodeErrorCode init_result = InitInnerNetwork(std::move(options));
     if (init_result != NodeErrorCode::None)
@@ -438,7 +438,7 @@ NodeErrorCode GmNode::OnUninit()
     cluster_nodes_online_state_ = ClusterNodesOnlineState{};
     game_to_gate_full_connection_aggregation_state_ = GameToGateFullConnectionAggregationState{};
     ResetServerStubStateTable();
-    cluster_ready_state_ = ClusterReadyState{};
+    cluster_gate_open_state_ = ClusterGateOpenState{};
     ClearError();
     return NodeErrorCode::None;
 }
@@ -806,10 +806,10 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
         assigned_stub_count == snapshot.startup_flow.total_stub_count;
     snapshot.startup_flow.assignment_epoch =
         snapshot.startup_flow.ownership_active ? kServerStubOwnershipAssignmentEpoch : 0U;
-    snapshot.startup_flow.ready_epoch = cluster_ready_state_.ready_epoch;
-    snapshot.startup_flow.cluster_ready = cluster_ready_state_.cluster_ready;
+    snapshot.startup_flow.ready_epoch = cluster_gate_open_state_.ready_epoch;
+    snapshot.startup_flow.cluster_ready = cluster_gate_open_state_.is_open;
     snapshot.startup_flow.last_cluster_ready_server_now_unix_ms =
-        cluster_ready_state_.last_server_now_unix_ms;
+        cluster_gate_open_state_.last_server_now_unix_ms;
 
     snapshot.nodes.reserve(
         cluster_nodes_online_state_.expected_game_node_ids.size() +
@@ -1007,7 +1007,7 @@ void GmNode::RefreshClusterNodesOnlineState(std::string_view trigger_node_id)
     {
         InvalidateAllGameMeshReadyState();
         ResetServerStubStates();
-        cluster_ready_state_ = ClusterReadyState{};
+        cluster_gate_open_state_ = ClusterGateOpenState{};
     }
 
     std::uint64_t notify_target_count = 0U;
@@ -1046,19 +1046,19 @@ void GmNode::RefreshServerStubDistributeTable()
     if (!all_expected_games_mesh_ready)
     {
         ResetServerStubStates();
-        cluster_ready_state_ = ClusterReadyState{};
+        cluster_gate_open_state_ = ClusterGateOpenState{};
         return;
     }
 
     if (!EnsureServerStubAssignments())
     {
         ResetServerStubStates();
-        cluster_ready_state_ = ClusterReadyState{};
+        cluster_gate_open_state_ = ClusterGateOpenState{};
         return;
     }
 
     ResetServerStubStates();
-    cluster_ready_state_ = ClusterReadyState{};
+    cluster_gate_open_state_ = ClusterGateOpenState{};
 
     const std::vector<xs::net::ServerStubOwnershipEntry> assignments = BuildServerStubOwnershipAssignments();
     if (assignments.empty())
@@ -1099,25 +1099,25 @@ void GmNode::RefreshServerStubDistributeTable()
     logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed server stub distribute table.", context);
 }
 
-void GmNode::RefreshClusterReadyState()
+void GmNode::RefreshClusterGateOpenState()
 {
-    const bool next_cluster_ready = AreAllServerStubsReady();
-    if (cluster_ready_state_.cluster_ready == next_cluster_ready)
+    const bool all_stubs_ready = AreAllServerStubsReady();
+    if (cluster_gate_open_state_.is_open == all_stubs_ready)
     {
         return;
     }
 
     const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
-    cluster_ready_state_.cluster_ready = next_cluster_ready;
-    cluster_ready_state_.last_server_now_unix_ms = server_now_unix_ms;
-    if (!next_cluster_ready)
+    cluster_gate_open_state_.is_open = all_stubs_ready;
+    cluster_gate_open_state_.last_server_now_unix_ms = server_now_unix_ms;
+    if (!all_stubs_ready)
     {
         return;
     }
 
-    ++cluster_ready_state_.ready_epoch;
+    ++cluster_gate_open_state_.ready_epoch;
     const xs::net::ClusterReadyNotify notify{
-        .ready_epoch = cluster_ready_state_.ready_epoch,
+        .ready_epoch = cluster_gate_open_state_.ready_epoch,
         .cluster_ready = true,
         .status_flags = 0U,
         .server_now_unix_ms = server_now_unix_ms,
@@ -1133,7 +1133,7 @@ void GmNode::RefreshClusterReadyState()
         }
 
         ++notify_target_count;
-        SendClusterReadyNotifyToGate(*session, notify);
+        SendClusterGateOpenNotifyToGate(*session, notify);
     }
 
     const std::array<xs::core::LogContextField, 5> context{
@@ -1298,7 +1298,7 @@ void GmNode::SendOwnershipSyncToGame(
     logger().Log(xs::core::LogLevel::Info, "inner", "GM sent ownership sync.", context);
 }
 
-void GmNode::SendClusterReadyNotifyToGate(
+void GmNode::SendClusterGateOpenNotifyToGate(
     const InnerNetworkSession& session,
     const xs::net::ClusterReadyNotify& notify)
 {
@@ -1400,7 +1400,7 @@ void GmNode::HandleInnerMessage(
 
     if (raw_header.msg_id == xs::net::kInnerGameServiceReadyReportMsgId)
     {
-        HandleGameServiceReadyReport(routing_id, payload);
+        HandleGameStubsReadyReport(routing_id, payload);
         return;
     }
 
@@ -1908,7 +1908,7 @@ void GmNode::HandleGameGateMeshReadyReport(
     RefreshServerStubDistributeTable();
 }
 
-void GmNode::HandleGameServiceReadyReport(
+void GmNode::HandleGameStubsReadyReport(
     std::span<const std::byte> routing_id,
     std::span<const std::byte> payload)
 {
@@ -2045,7 +2045,7 @@ void GmNode::HandleGameServiceReadyReport(
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted service ready report.", context);
 
-    RefreshClusterReadyState();
+    RefreshClusterGateOpenState();
 }
 
 void GmNode::HandleTimeoutScan()
