@@ -947,29 +947,12 @@ void TestGmNodeBroadcastsOwnershipSyncAfterExpectedGamesReportMeshReady()
                  BuildInnerGameGateMeshReadyReportPacket(true, 8103U),
                  &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
-    XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
-        return CountPacketsByMsgId(game_messages, xs::net::kInnerServerStubOwnershipSyncMsgId) == 2U;
-    }));
-
-    const std::vector<std::byte>* second_sync_packet_bytes =
-        FindLastPacketByMsgId(game_messages, xs::net::kInnerServerStubOwnershipSyncMsgId);
-    XS_CHECK(second_sync_packet_bytes != nullptr);
-    if (second_sync_packet_bytes != nullptr)
+    if (io_context.stopped())
     {
-        const xs::net::PacketView second_sync_packet = DecodeResponsePacket(*second_sync_packet_bytes);
-        xs::net::ServerStubOwnershipSync second_sync{};
-        XS_CHECK(
-            xs::net::DecodeServerStubOwnershipSync(second_sync_packet.payload, &second_sync) ==
-            xs::net::InnerClusterCodecErrorCode::None);
-        XS_CHECK(second_sync.assignment_epoch == first_sync.assignment_epoch);
-        XS_CHECK(second_sync.assignments.size() == first_sync.assignments.size());
-        for (const xs::net::ServerStubOwnershipEntry& entry : second_sync.assignments)
-        {
-            XS_CHECK(entry.owner_game_node_id == "Game0");
-            XS_CHECK(entry.entity_id == "unknown");
-            XS_CHECK(entry.entry_flags == 0U);
-        }
+        io_context.restart();
     }
+    (void)io_context.run_for(std::chrono::milliseconds(200));
+    XS_CHECK(CountPacketsByMsgId(game_messages, xs::net::kInnerServerStubOwnershipSyncMsgId) == 1U);
 
     game_connector.Stop();
     gate_connector.Stop();

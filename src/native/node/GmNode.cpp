@@ -68,6 +68,11 @@ std::string ToString(std::uint64_t value)
     return std::to_string(value);
 }
 
+bool ContainsNodeId(const std::vector<std::string>& node_ids, std::string_view node_id)
+{
+    return std::find(node_ids.begin(), node_ids.end(), node_id) != node_ids.end();
+}
+
 std::string DescribeManagedHostError(xs::host::ManagedHostErrorCode code)
 {
     return std::string(xs::host::ManagedHostErrorCanonicalName(code)) + ": " +
@@ -318,10 +323,9 @@ NodeErrorCode GmNode::OnInit()
 
     timeout_scan_timer_id_ = 0;
     inner_network_remote_sessions().Clear();
-    InitializeClusterNodesOnlineState();
-    InitializeGameToGateFullConnectionAggregationState();
+    InitializeStartupState();
     ResetServerStubStateTable();
-    cluster_gate_open_state_ = ClusterGateOpenState{};
+    startup_state_.ready_epoch = 0U;
 
     const NodeErrorCode init_result = InitInnerNetwork(std::move(options));
     if (init_result != NodeErrorCode::None)
@@ -435,40 +439,27 @@ NodeErrorCode GmNode::OnUninit()
         }
     }
 
-    cluster_nodes_online_state_ = ClusterNodesOnlineState{};
-    game_to_gate_full_connection_aggregation_state_ = GameToGateFullConnectionAggregationState{};
+    startup_state_ = StartupState{};
     ResetServerStubStateTable();
-    cluster_gate_open_state_ = ClusterGateOpenState{};
     ClearError();
     return NodeErrorCode::None;
 }
 
-void GmNode::InitializeClusterNodesOnlineState()
+void GmNode::InitializeStartupState()
 {
-    cluster_nodes_online_state_ = ClusterNodesOnlineState{};
-    cluster_nodes_online_state_.expected_gate_node_ids.reserve(cluster_config().gates.size());
+    startup_state_ = StartupState{};
+    startup_state_.expected_gate_node_ids.reserve(cluster_config().gates.size());
     for (const auto& [node_id, config] : cluster_config().gates)
     {
         (void)config;
-        cluster_nodes_online_state_.expected_gate_node_ids.push_back(node_id);
+        startup_state_.expected_gate_node_ids.push_back(node_id);
     }
 
-    cluster_nodes_online_state_.expected_game_node_ids.reserve(cluster_config().games.size());
+    startup_state_.expected_game_entries.reserve(cluster_config().games.size());
     for (const auto& [node_id, config] : cluster_config().games)
     {
         (void)config;
-        cluster_nodes_online_state_.expected_game_node_ids.push_back(node_id);
-    }
-}
-
-void GmNode::InitializeGameToGateFullConnectionAggregationState()
-{
-    game_to_gate_full_connection_aggregation_state_ = GameToGateFullConnectionAggregationState{};
-    game_to_gate_full_connection_aggregation_state_.entries.reserve(cluster_config().games.size());
-    for (const auto& [node_id, config] : cluster_config().games)
-    {
-        (void)config;
-        game_to_gate_full_connection_aggregation_state_.entries.push_back(
+        startup_state_.expected_game_entries.push_back(
             GameMeshReadyEntry{
                 .node_id = node_id,
             });
@@ -688,7 +679,7 @@ bool GmNode::EnsureServerStubAssignments()
         return false;
     }
 
-    if (server_stub_state_table_.entries.empty() || cluster_nodes_online_state_.expected_game_node_ids.empty())
+    if (server_stub_state_table_.entries.empty() || startup_state_.expected_game_entries.empty())
     {
         return false;
     }
@@ -706,19 +697,18 @@ bool GmNode::EnsureServerStubAssignments()
 
     std::uniform_int_distribution<std::size_t> distribution(
         0u,
-        cluster_nodes_online_state_.expected_game_node_ids.size() - 1u);
+        startup_state_.expected_game_entries.size() - 1u);
     std::mt19937_64 random_engine{std::random_device{}()};
     for (ServerStubEntry& entry : server_stub_state_table_.entries)
     {
-        entry.owner_game_node_id =
-            cluster_nodes_online_state_.expected_game_node_ids[distribution(random_engine)];
+        entry.owner_game_node_id = startup_state_.expected_game_entries[distribution(random_engine)].node_id;
         entry.state = ServerStubState::Init;
     }
 
     return true;
 }
 
-std::vector<xs::net::ServerStubOwnershipEntry> GmNode::BuildServerStubOwnershipAssignments() const
+std::vector<xs::net::ServerStubOwnershipEntry> GmNode::BuildServerStubDistributeTable() const
 {
     std::vector<xs::net::ServerStubOwnershipEntry> assignments;
     assignments.reserve(server_stub_state_table_.entries.size());
@@ -760,29 +750,19 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
         return iterator != registry.end() ? &(*iterator) : nullptr;
     };
 
-    const auto count_registered = [&find_session](const std::vector<std::string>& node_ids) {
-        return static_cast<std::uint64_t>(std::count_if(
-            node_ids.begin(),
-            node_ids.end(),
-            [&find_session](const std::string& node_id) {
-                const InnerNetworkSession* session = find_session(node_id);
-                return session != nullptr && session->registered;
-            }));
-    };
-
     snapshot.startup_flow.expected_game_count =
-        static_cast<std::uint64_t>(cluster_nodes_online_state_.expected_game_node_ids.size());
+        static_cast<std::uint64_t>(startup_state_.expected_game_entries.size());
     snapshot.startup_flow.expected_gate_count =
-        static_cast<std::uint64_t>(cluster_nodes_online_state_.expected_gate_node_ids.size());
+        static_cast<std::uint64_t>(startup_state_.expected_gate_node_ids.size());
     snapshot.startup_flow.registered_game_count =
-        count_registered(cluster_nodes_online_state_.expected_game_node_ids);
+        static_cast<std::uint64_t>(startup_state_.registered_game_node_ids.size());
     snapshot.startup_flow.registered_gate_count =
-        count_registered(cluster_nodes_online_state_.expected_gate_node_ids);
-    snapshot.startup_flow.all_nodes_online = cluster_nodes_online_state_.all_nodes_online;
+        static_cast<std::uint64_t>(startup_state_.registered_gate_node_ids.size());
+    snapshot.startup_flow.all_nodes_online = startup_state_.all_nodes_online;
     snapshot.startup_flow.last_all_nodes_online_server_now_unix_ms =
-        cluster_nodes_online_state_.last_server_now_unix_ms;
+        startup_state_.last_all_nodes_online_server_now_unix_ms;
     snapshot.startup_flow.all_expected_games_mesh_ready =
-        game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready;
+        startup_state_.all_expected_games_mesh_ready;
     snapshot.startup_flow.catalog_loaded = server_stub_state_table_.catalog_loaded;
     snapshot.startup_flow.catalog_load_failed = server_stub_state_table_.catalog_load_failed;
     snapshot.startup_flow.total_stub_count = static_cast<std::uint64_t>(server_stub_state_table_.entries.size());
@@ -806,14 +786,14 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
         assigned_stub_count == snapshot.startup_flow.total_stub_count;
     snapshot.startup_flow.assignment_epoch =
         snapshot.startup_flow.ownership_active ? kServerStubOwnershipAssignmentEpoch : 0U;
-    snapshot.startup_flow.ready_epoch = cluster_gate_open_state_.ready_epoch;
-    snapshot.startup_flow.cluster_ready = cluster_gate_open_state_.is_open;
+    snapshot.startup_flow.ready_epoch = startup_state_.ready_epoch;
+    snapshot.startup_flow.cluster_ready = startup_state_.gate_open;
     snapshot.startup_flow.last_cluster_ready_server_now_unix_ms =
-        cluster_gate_open_state_.last_server_now_unix_ms;
+        startup_state_.last_cluster_ready_server_now_unix_ms;
 
     snapshot.nodes.reserve(
-        cluster_nodes_online_state_.expected_game_node_ids.size() +
-        cluster_nodes_online_state_.expected_gate_node_ids.size());
+        startup_state_.expected_game_entries.size() +
+        startup_state_.expected_gate_node_ids.size());
     const auto append_expected_nodes =
         [&snapshot, &find_session](const std::vector<std::string>& node_ids, xs::core::ProcessType process_type) {
             for (const std::string& node_id : node_ids)
@@ -839,11 +819,17 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
                 snapshot.nodes.push_back(std::move(node_snapshot));
             }
         };
-    append_expected_nodes(cluster_nodes_online_state_.expected_game_node_ids, xs::core::ProcessType::Game);
-    append_expected_nodes(cluster_nodes_online_state_.expected_gate_node_ids, xs::core::ProcessType::Gate);
+    std::vector<std::string> expected_game_node_ids;
+    expected_game_node_ids.reserve(startup_state_.expected_game_entries.size());
+    for (const GameMeshReadyEntry& entry : startup_state_.expected_game_entries)
+    {
+        expected_game_node_ids.push_back(entry.node_id);
+    }
+    append_expected_nodes(expected_game_node_ids, xs::core::ProcessType::Game);
+    append_expected_nodes(startup_state_.expected_gate_node_ids, xs::core::ProcessType::Gate);
 
-    snapshot.game_mesh_ready.reserve(game_to_gate_full_connection_aggregation_state_.entries.size());
-    for (const GameMeshReadyEntry& entry : game_to_gate_full_connection_aggregation_state_.entries)
+    snapshot.game_mesh_ready.reserve(startup_state_.expected_game_entries.size());
+    for (const GameMeshReadyEntry& entry : startup_state_.expected_game_entries)
     {
         snapshot.game_mesh_ready.push_back(
             GmControlHttpStatusSnapshot::GameMeshReadySnapshot{
@@ -853,15 +839,15 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
             });
     }
 
-    snapshot.stub_distribution.reserve(cluster_nodes_online_state_.expected_game_node_ids.size());
-    for (const std::string& node_id : cluster_nodes_online_state_.expected_game_node_ids)
+    snapshot.stub_distribution.reserve(startup_state_.expected_game_entries.size());
+    for (const GameMeshReadyEntry& game_entry : startup_state_.expected_game_entries)
     {
         GmControlHttpStatusSnapshot::StubOwnerSnapshot owner_snapshot;
-        owner_snapshot.node_id = node_id;
+        owner_snapshot.node_id = game_entry.node_id;
 
         for (const ServerStubEntry& entry : server_stub_state_table_.entries)
         {
-            if (entry.owner_game_node_id != node_id)
+            if (entry.owner_game_node_id != game_entry.node_id)
             {
                 continue;
             }
@@ -889,62 +875,49 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
 GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node_id) noexcept
 {
     auto iterator = std::find_if(
-        game_to_gate_full_connection_aggregation_state_.entries.begin(),
-        game_to_gate_full_connection_aggregation_state_.entries.end(),
+        startup_state_.expected_game_entries.begin(),
+        startup_state_.expected_game_entries.end(),
         [node_id](const GameMeshReadyEntry& entry) {
             return entry.node_id == node_id;
         });
-    return iterator != game_to_gate_full_connection_aggregation_state_.entries.end() ? &(*iterator) : nullptr;
+    return iterator != startup_state_.expected_game_entries.end() ? &(*iterator) : nullptr;
 }
 
 const GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node_id) const noexcept
 {
     auto iterator = std::find_if(
-        game_to_gate_full_connection_aggregation_state_.entries.begin(),
-        game_to_gate_full_connection_aggregation_state_.entries.end(),
+        startup_state_.expected_game_entries.begin(),
+        startup_state_.expected_game_entries.end(),
         [node_id](const GameMeshReadyEntry& entry) {
             return entry.node_id == node_id;
         });
-    return iterator != game_to_gate_full_connection_aggregation_state_.entries.end() ? &(*iterator) : nullptr;
+    return iterator != startup_state_.expected_game_entries.end() ? &(*iterator) : nullptr;
 }
 
 bool GmNode::AreAllExpectedNodesOnline() const noexcept
 {
-    const auto is_online = [this](std::string_view node_id) {
-        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(node_id);
-        return session != nullptr &&
-               session->registered &&
-               !session->heartbeat_timed_out;
-    };
-
     const std::size_t expected_node_count =
-        cluster_nodes_online_state_.expected_gate_node_ids.size() +
-        cluster_nodes_online_state_.expected_game_node_ids.size();
+        startup_state_.expected_gate_node_ids.size() +
+        startup_state_.expected_game_entries.size();
     if (expected_node_count == 0U)
     {
         return false;
     }
 
-    return std::all_of(
-               cluster_nodes_online_state_.expected_gate_node_ids.begin(),
-               cluster_nodes_online_state_.expected_gate_node_ids.end(),
-               is_online) &&
-           std::all_of(
-               cluster_nodes_online_state_.expected_game_node_ids.begin(),
-               cluster_nodes_online_state_.expected_game_node_ids.end(),
-               is_online);
+    return startup_state_.registered_gate_node_ids.size() == startup_state_.expected_gate_node_ids.size() &&
+           startup_state_.registered_game_node_ids.size() == startup_state_.expected_game_entries.size();
 }
 
 bool GmNode::AreAllExpectedGamesMeshReady() const noexcept
 {
-    if (game_to_gate_full_connection_aggregation_state_.entries.empty())
+    if (startup_state_.expected_game_entries.empty())
     {
         return false;
     }
 
     return std::all_of(
-        game_to_gate_full_connection_aggregation_state_.entries.begin(),
-        game_to_gate_full_connection_aggregation_state_.entries.end(),
+        startup_state_.expected_game_entries.begin(),
+        startup_state_.expected_game_entries.end(),
         [](const GameMeshReadyEntry& entry) {
             return entry.mesh_ready;
         });
@@ -965,104 +938,98 @@ bool GmNode::AreAllServerStubsReady() const noexcept
         });
 }
 
-void GmNode::InvalidateAllGameMeshReadyState()
+void GmNode::RecordStartupRegistration(xs::core::ProcessType process_type, std::string_view node_id)
 {
-    for (GameMeshReadyEntry& entry : game_to_gate_full_connection_aggregation_state_.entries)
+    if (process_type == xs::core::ProcessType::Game)
     {
-        entry.mesh_ready = false;
-        entry.reported_at_unix_ms = 0U;
+        if (mesh_ready_entry(node_id) == nullptr || ContainsNodeId(startup_state_.registered_game_node_ids, node_id))
+        {
+            return;
+        }
+
+        startup_state_.registered_game_node_ids.push_back(std::string(node_id));
+        return;
     }
 
-    game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready = false;
-}
-
-void GmNode::InvalidateGameMeshReadyState(std::string_view game_node_id)
-{
-    GameMeshReadyEntry* entry = mesh_ready_entry(game_node_id);
-    if (entry == nullptr)
+    if (process_type != xs::core::ProcessType::Gate ||
+        !ContainsNodeId(startup_state_.expected_gate_node_ids, node_id) ||
+        ContainsNodeId(startup_state_.registered_gate_node_ids, node_id))
     {
         return;
     }
 
-    entry->mesh_ready = false;
-    entry->reported_at_unix_ms = 0U;
-    game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready = false;
+    startup_state_.registered_gate_node_ids.push_back(std::string(node_id));
 }
 
-void GmNode::RefreshClusterNodesOnlineState(std::string_view trigger_node_id)
+void GmNode::OnAllNodeOnline()
 {
-    const bool all_nodes_online = AreAllExpectedNodesOnline();
-    const bool state_changed = cluster_nodes_online_state_.all_nodes_online != all_nodes_online;
-    if (!state_changed)
+    if (startup_state_.all_nodes_online)
     {
-        RefreshServerStubDistributeTable();
         return;
     }
 
     const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
-    cluster_nodes_online_state_.all_nodes_online = all_nodes_online;
-    cluster_nodes_online_state_.last_server_now_unix_ms = server_now_unix_ms;
-
-    if (!all_nodes_online)
-    {
-        InvalidateAllGameMeshReadyState();
-        ResetServerStubStates();
-        cluster_gate_open_state_ = ClusterGateOpenState{};
-    }
+    startup_state_.all_nodes_online = true;
+    startup_state_.last_all_nodes_online_server_now_unix_ms = server_now_unix_ms;
 
     std::uint64_t notify_target_count = 0U;
-    for (const std::string& node_id : cluster_nodes_online_state_.expected_game_node_ids)
+    for (const GameMeshReadyEntry& game_entry : startup_state_.expected_game_entries)
     {
-        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(node_id);
+        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(game_entry.node_id);
         if (session == nullptr || !session->registered || session->heartbeat_timed_out)
         {
             continue;
         }
 
         ++notify_target_count;
-        SendClusterNodesOnlineNotifyToGame(*session, all_nodes_online, server_now_unix_ms);
+        SendClusterNodesOnlineNotifyToGame(*session, true, server_now_unix_ms);
     }
 
     const std::array<xs::core::LogContextField, 5> context{
-        xs::core::LogContextField{"allNodesOnline", all_nodes_online ? "true" : "false"},
+        xs::core::LogContextField{"allNodesOnline", "true"},
         xs::core::LogContextField{"notifyTargetCount", ToString(notify_target_count)},
-        xs::core::LogContextField{"expectedGameCount", ToString(cluster_nodes_online_state_.expected_game_node_ids.size())},
-        xs::core::LogContextField{"expectedGateCount", ToString(cluster_nodes_online_state_.expected_gate_node_ids.size())},
+        xs::core::LogContextField{"expectedGameCount", ToString(startup_state_.expected_game_entries.size())},
+        xs::core::LogContextField{"expectedGateCount", ToString(startup_state_.expected_gate_node_ids.size())},
         xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed cluster nodes online state.", context);
-    RefreshServerStubDistributeTable();
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM reached the all-nodes-online startup node.", context);
 }
 
-void GmNode::RefreshServerStubDistributeTable()
+void GmNode::OnAllGameReady()
 {
-    const bool all_expected_games_mesh_ready = cluster_nodes_online_state_.all_nodes_online && AreAllExpectedGamesMeshReady();
-    if (game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready == all_expected_games_mesh_ready)
+    if (startup_state_.all_expected_games_mesh_ready)
     {
         return;
     }
 
-    game_to_gate_full_connection_aggregation_state_.all_expected_games_mesh_ready = all_expected_games_mesh_ready;
-    if (!all_expected_games_mesh_ready)
-    {
-        ResetServerStubStates();
-        cluster_gate_open_state_ = ClusterGateOpenState{};
-        return;
-    }
-
+    startup_state_.all_expected_games_mesh_ready = true;
     if (!EnsureServerStubAssignments())
     {
-        ResetServerStubStates();
-        cluster_gate_open_state_ = ClusterGateOpenState{};
+        const std::array<xs::core::LogContextField, 2> context{
+            xs::core::LogContextField{"expectedGameCount", ToString(startup_state_.expected_game_entries.size())},
+            xs::core::LogContextField{"catalogEntryCount", ToString(server_stub_state_table_.entries.size())},
+        };
+        logger().Log(
+            xs::core::LogLevel::Error,
+            "inner",
+            "GM failed to assign server stubs after all Games reported mesh ready.",
+            context);
         return;
     }
 
     ResetServerStubStates();
-    cluster_gate_open_state_ = ClusterGateOpenState{};
 
-    const std::vector<xs::net::ServerStubOwnershipEntry> assignments = BuildServerStubOwnershipAssignments();
+    const std::vector<xs::net::ServerStubOwnershipEntry> assignments = BuildServerStubDistributeTable();
     if (assignments.empty())
     {
+        const std::array<xs::core::LogContextField, 1> context{
+            xs::core::LogContextField{"expectedGameCount", ToString(startup_state_.expected_game_entries.size())},
+        };
+        logger().Log(
+            xs::core::LogLevel::Error,
+            "inner",
+            "GM produced no ownership assignments after mesh-ready aggregation completed.",
+            context);
         return;
     }
 
@@ -1077,9 +1044,9 @@ void GmNode::RefreshServerStubDistributeTable()
     };
 
     std::uint64_t notify_target_count = 0U;
-    for (const std::string& node_id : cluster_nodes_online_state_.expected_game_node_ids)
+    for (const GameMeshReadyEntry& game_entry : startup_state_.expected_game_entries)
     {
-        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(node_id);
+        const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(game_entry.node_id);
         if (session == nullptr || !session->registered || session->heartbeat_timed_out)
         {
             continue;
@@ -1093,38 +1060,32 @@ void GmNode::RefreshServerStubDistributeTable()
         xs::core::LogContextField{"assignmentEpoch", ToString(kServerStubOwnershipAssignmentEpoch)},
         xs::core::LogContextField{"assignmentCount", ToString(assignments.size())},
         xs::core::LogContextField{"notifyTargetCount", ToString(notify_target_count)},
-        xs::core::LogContextField{"expectedGameCount", ToString(cluster_nodes_online_state_.expected_game_node_ids.size())},
+        xs::core::LogContextField{"expectedGameCount", ToString(startup_state_.expected_game_entries.size())},
         xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed server stub distribute table.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM reached the all-games-ready startup node.", context);
 }
 
-void GmNode::RefreshClusterGateOpenState()
+void GmNode::OnAllStubReady()
 {
-    const bool all_stubs_ready = AreAllServerStubsReady();
-    if (cluster_gate_open_state_.is_open == all_stubs_ready)
+    if (startup_state_.gate_open || !AreAllServerStubsReady())
     {
         return;
     }
 
     const std::uint64_t server_now_unix_ms = CurrentUnixTimeMilliseconds();
-    cluster_gate_open_state_.is_open = all_stubs_ready;
-    cluster_gate_open_state_.last_server_now_unix_ms = server_now_unix_ms;
-    if (!all_stubs_ready)
-    {
-        return;
-    }
-
-    ++cluster_gate_open_state_.ready_epoch;
+    startup_state_.gate_open = true;
+    startup_state_.last_cluster_ready_server_now_unix_ms = server_now_unix_ms;
+    ++startup_state_.ready_epoch;
     const xs::net::ClusterReadyNotify notify{
-        .ready_epoch = cluster_gate_open_state_.ready_epoch,
+        .ready_epoch = startup_state_.ready_epoch,
         .cluster_ready = true,
         .status_flags = 0U,
         .server_now_unix_ms = server_now_unix_ms,
     };
 
     std::uint64_t notify_target_count = 0U;
-    for (const std::string& node_id : cluster_nodes_online_state_.expected_gate_node_ids)
+    for (const std::string& node_id : startup_state_.expected_gate_node_ids)
     {
         const InnerNetworkSession* session = inner_network_remote_sessions().FindByNodeId(node_id);
         if (session == nullptr || !session->registered || session->heartbeat_timed_out)
@@ -1143,7 +1104,7 @@ void GmNode::RefreshClusterGateOpenState()
         xs::core::LogContextField{"assignmentCount", ToString(server_stub_state_table_.entries.size())},
         xs::core::LogContextField{"serverNowUnixMs", ToString(server_now_unix_ms)},
     };
-    logger().Log(xs::core::LogLevel::Info, "inner", "GM refreshed cluster ready state.", context);
+    logger().Log(xs::core::LogLevel::Info, "inner", "GM reached the all-stubs-ready startup node.", context);
 }
 
 void GmNode::SendClusterNodesOnlineNotifyToGame(
@@ -1583,35 +1544,8 @@ void GmNode::HandleRegisterMessage(
     InnerNetworkSession* session = inner_network_remote_sessions().FindMutableByNodeId(request.node_id);
     if (session != nullptr)
     {
-        const bool same_routing_id = session->routing_id == registration.routing_id;
-        if (!same_routing_id && !session->heartbeat_timed_out)
-        {
-            send_error_response(kInnerNodeIdConflict, &request);
-            return;
-        }
-
-        if (!same_routing_id)
-        {
-            const InnerNetworkSessionManagerErrorCode unregister_result =
-                inner_network_remote_sessions().UnregisterByNodeId(request.node_id);
-            if (unregister_result != InnerNetworkSessionManagerErrorCode::None)
-            {
-                std::vector<xs::core::LogContextField> context =
-                    BuildRegisterContext(routing_id, packet.header.seq, &request);
-                context.push_back(
-                    xs::core::LogContextField{
-                        "sessionManagerError",
-                        std::string(InnerNetworkSessionManagerErrorMessage(unregister_result))});
-                logger().Log(
-                    xs::core::LogLevel::Warn,
-                    "inner",
-                    "GM failed to replace an existing timed-out register session.",
-                    context);
-                return;
-            }
-
-            session = nullptr;
-        }
+        send_error_response(kInnerNodeIdConflict, &request);
+        return;
     }
 
     if (session == nullptr)
@@ -1647,15 +1581,13 @@ void GmNode::HandleRegisterMessage(
         session = inner_network_remote_sessions().FindMutableByNodeId(request.node_id);
     }
 
-    if (session != nullptr)
+    if (session == nullptr)
     {
-        apply_registration_state(*session);
+        std::vector<xs::core::LogContextField> context = BuildRegisterContext(routing_id, packet.header.seq, &request);
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM could not load the registered session after Register().", context);
+        return;
     }
-
-    if (registration.process_type == xs::core::ProcessType::Game)
-    {
-        InvalidateGameMeshReadyState(registration.node_id);
-    }
+    apply_registration_state(*session);
 
     const xs::net::RegisterSuccessResponse response{
         .heartbeat_interval_ms = kDefaultHeartbeatIntervalMs,
@@ -1682,7 +1614,11 @@ void GmNode::HandleRegisterMessage(
     std::vector<xs::core::LogContextField> context = BuildRegisterContext(routing_id, packet.header.seq, &request);
     logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted register request.", context);
 
-    RefreshClusterNodesOnlineState(request.node_id);
+    RecordStartupRegistration(registration.process_type, request.node_id);
+    if (!startup_state_.all_nodes_online && AreAllExpectedNodesOnline())
+    {
+        OnAllNodeOnline();
+    }
 }
 
 void GmNode::HandleHeartbeatMessage(
@@ -1767,14 +1703,18 @@ void GmNode::HandleHeartbeatMessage(
         return;
     }
 
-    const bool cluster_nodes_online_state_may_change =
-        session->heartbeat_timed_out ||
-        !session->registered;
+    if (!session->registered || session->heartbeat_timed_out)
+    {
+        log_heartbeat_rejected(
+            kInnerNodeNotRegistered,
+            "Inner.NodeNotRegistered",
+            "GM inner service ignored heartbeat from a session outside the startup happy path.");
+        return;
+    }
+
     session->load = request.load;
     session->last_heartbeat_at_unix_ms = now_unix_ms;
     session->inner_network_ready = true;
-    session->heartbeat_timed_out = false;
-    session->registered = true;
     session->connection_state = ipc::ZmqConnectionState::Connected;
     session->heartbeat_interval_ms = kDefaultHeartbeatIntervalMs;
     session->heartbeat_timeout_ms = kDefaultHeartbeatTimeoutMs;
@@ -1822,10 +1762,6 @@ void GmNode::HandleHeartbeatMessage(
     }
 
     logger().Log(xs::core::LogLevel::Debug, "inner", "GM inner service refreshed heartbeat state.", context);
-    if (cluster_nodes_online_state_may_change)
-    {
-        RefreshClusterNodesOnlineState();
-    }
 }
 
 void GmNode::HandleGameGateMeshReadyReport(
@@ -1876,12 +1812,12 @@ void GmNode::HandleGameGateMeshReadyReport(
         return;
     }
 
-    if (!cluster_nodes_online_state_.all_nodes_online)
+    if (!startup_state_.all_nodes_online)
     {
         std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
         context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
         context.push_back(xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"});
-        logger().Log(xs::core::LogLevel::Info, "inner", "GM ignored mesh ready report while allNodesOnline is false.", context);
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM rejected mesh ready report before all expected nodes registered.", context);
         return;
     }
 
@@ -1894,18 +1830,30 @@ void GmNode::HandleGameGateMeshReadyReport(
         return;
     }
 
-    entry->mesh_ready = report.mesh_ready;
+    if (!report.mesh_ready)
+    {
+        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
+        context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
+        context.push_back(xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)});
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM rejected a non-happy-path mesh ready report.", context);
+        return;
+    }
+
+    entry->mesh_ready = true;
     entry->reported_at_unix_ms = report.reported_at_unix_ms;
 
     const std::array<xs::core::LogContextField, 4> context{
         xs::core::LogContextField{"nodeId", session->node_id},
         xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"},
         xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)},
-        xs::core::LogContextField{"allNodesOnline", cluster_nodes_online_state_.all_nodes_online ? "true" : "false"},
+        xs::core::LogContextField{"allNodesOnline", startup_state_.all_nodes_online ? "true" : "false"},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted mesh ready report.", context);
 
-    RefreshServerStubDistributeTable();
+    if (!startup_state_.all_expected_games_mesh_ready && AreAllExpectedGamesMeshReady())
+    {
+        OnAllGameReady();
+    }
 }
 
 void GmNode::HandleGameStubsReadyReport(
@@ -1963,12 +1911,12 @@ void GmNode::HandleGameStubsReadyReport(
                                       [](const ServerStubEntry& entry) {
                                           return !entry.owner_game_node_id.empty();
                                       });
-    if (!cluster_nodes_online_state_.all_nodes_online || !ownership_active)
+    if (!startup_state_.all_expected_games_mesh_ready || !ownership_active)
     {
         std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
         context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
         context.push_back(xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)});
-        logger().Log(xs::core::LogLevel::Info, "inner", "GM ignored service ready report before ownership sync became active.", context);
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM rejected service ready report before ownership sync became active.", context);
         return;
     }
 
@@ -1979,7 +1927,17 @@ void GmNode::HandleGameStubsReadyReport(
             xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
             xs::core::LogContextField{"expectedAssignmentEpoch", ToString(kServerStubOwnershipAssignmentEpoch)},
         };
-        logger().Log(xs::core::LogLevel::Info, "inner", "GM ignored stale service ready report.", context);
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM rejected stale service ready report.", context);
+        return;
+    }
+
+    if (!report.local_ready)
+    {
+        const std::array<xs::core::LogContextField, 2> context{
+            xs::core::LogContextField{"nodeId", session->node_id},
+            xs::core::LogContextField{"assignmentEpoch", ToString(report.assignment_epoch)},
+        };
+        logger().Log(xs::core::LogLevel::Error, "inner", "GM rejected a non-happy-path service ready report.", context);
         return;
     }
 
@@ -1992,7 +1950,6 @@ void GmNode::HandleGameStubsReadyReport(
             continue;
         }
 
-        entry.state = ServerStubState::Init;
         owned_entries.push_back(&entry);
     }
 
@@ -2008,6 +1965,12 @@ void GmNode::HandleGameStubsReadyReport(
     std::size_t ignored_ready_count = 0U;
     for (const xs::net::ServerStubReadyEntry& ready_entry : report.entries)
     {
+        if (!ready_entry.ready)
+        {
+            ++ignored_ready_count;
+            continue;
+        }
+
         if (ready_entry.entity_id.empty() || ready_entry.entity_id == kUnknownServerEntityId)
         {
             ++ignored_ready_count;
@@ -2045,7 +2008,10 @@ void GmNode::HandleGameStubsReadyReport(
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "GM accepted service ready report.", context);
 
-    RefreshClusterGateOpenState();
+    if (!startup_state_.gate_open && AreAllServerStubsReady())
+    {
+        OnAllStubReady();
+    }
 }
 
 void GmNode::HandleTimeoutScan()
@@ -2053,7 +2019,6 @@ void GmNode::HandleTimeoutScan()
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
 
     const std::vector<InnerNetworkSession> snapshot = inner_network_remote_sessions().Snapshot();
-    bool cluster_nodes_online_needs_refresh = false;
     for (const InnerNetworkSession& entry : snapshot)
     {
         if (entry.last_heartbeat_at_unix_ms == 0U || entry.last_heartbeat_at_unix_ms > now_unix_ms)
@@ -2078,7 +2043,6 @@ void GmNode::HandleTimeoutScan()
         session->registered = false;
         session->connection_state = ipc::ZmqConnectionState::Stopped;
         session->last_protocol_error = "Heartbeat timed out.";
-        cluster_nodes_online_needs_refresh = true;
 
         const std::array<xs::core::LogContextField, 4> context{
             xs::core::LogContextField{"nodeId", entry.node_id},
@@ -2087,15 +2051,10 @@ void GmNode::HandleTimeoutScan()
             xs::core::LogContextField{"elapsedMs", ToString(elapsed_ms)},
         };
         logger().Log(
-            xs::core::LogLevel::Warn,
+            xs::core::LogLevel::Error,
             "inner",
-            "GM marked an inner network session as timed out.",
+            "GM detected a heartbeat timeout outside the startup happy path.",
             context);
-    }
-
-    if (cluster_nodes_online_needs_refresh)
-    {
-        RefreshClusterNodesOnlineState();
     }
 }
 
