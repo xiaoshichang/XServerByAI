@@ -53,6 +53,24 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(EntityManagerErrorCode.EntityNotFound, manager.Unregister(entity.EntityId));
             Assert.Equal(0, manager.Count);
         }
+
+        [Fact]
+        public void EntityManager_RegistersConcreteGameEntities_AndSnapshotsByConcreteType()
+        {
+            EntityManager manager = new();
+            SpaceEntity space = new();
+            AvatarEntity avatar = new();
+
+            Assert.Equal(EntityManagerErrorCode.None, manager.Register(space));
+            Assert.Equal(EntityManagerErrorCode.None, manager.Register(avatar));
+
+            Assert.True(manager.TryGet(space.EntityId, out ServerEntity? resolvedSpace));
+            Assert.True(manager.TryGet(avatar.EntityId, out ServerEntity? resolvedAvatar));
+            Assert.Same(space, resolvedSpace);
+            Assert.Same(avatar, resolvedAvatar);
+            Assert.Single(manager.SnapshotByType<SpaceEntity>());
+            Assert.Single(manager.SnapshotByType<AvatarEntity>());
+        }
     }
 
     internal sealed class TrackingEntity : ServerEntity

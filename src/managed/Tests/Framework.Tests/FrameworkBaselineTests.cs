@@ -74,6 +74,8 @@ namespace XServer.Managed.Framework.Tests
             Assert.Contains(nameof(ChatStub), entityTypeNames);
             Assert.Contains(nameof(LeaderboardStub), entityTypeNames);
             Assert.Contains(nameof(MatchStub), entityTypeNames);
+            Assert.Contains(nameof(SpaceEntity), entityTypeNames);
+            Assert.Contains(nameof(AvatarEntity), entityTypeNames);
             Assert.DoesNotContain(nameof(ServerEntity), entityTypeNames);
             Assert.DoesNotContain(nameof(ServerStubEntity), entityTypeNames);
         }
@@ -96,6 +98,8 @@ namespace XServer.Managed.Framework.Tests
             Assert.Contains(nameof(ChatStub), entryTypeNames);
             Assert.Contains(nameof(LeaderboardStub), entryTypeNames);
             Assert.Contains(nameof(MatchStub), entryTypeNames);
+            Assert.DoesNotContain(nameof(SpaceEntity), entryTypeNames);
+            Assert.DoesNotContain(nameof(AvatarEntity), entryTypeNames);
         }
 
         [Fact]
@@ -109,7 +113,21 @@ namespace XServer.Managed.Framework.Tests
         {
             Assert.IsAssignableFrom<ServerEntity>(new TestEntity());
             Assert.IsAssignableFrom<ServerEntity>(new TestStubEntity());
+            Assert.IsAssignableFrom<ServerEntity>(new SpaceEntity());
+            Assert.IsAssignableFrom<ServerEntity>(new AvatarEntity());
             Assert.IsAssignableFrom<ServerStubEntity>(new TestStubEntity());
+        }
+
+        [Fact]
+        public void ConcreteEntityTypes_ExposeExpectedMigratabilitySemantics()
+        {
+            SpaceEntity space = new();
+            AvatarEntity avatar = new();
+
+            Assert.Equal(nameof(SpaceEntity), space.EntityType);
+            Assert.False(space.IsMigratable());
+            Assert.Equal(nameof(AvatarEntity), avatar.EntityType);
+            Assert.True(avatar.IsMigratable());
         }
 
         private sealed class TestEntity : ServerEntity
