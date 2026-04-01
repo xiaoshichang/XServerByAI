@@ -1359,7 +1359,7 @@ void TestGameNodeNormalizesWildcardGateConnectorEndpoints()
     bool all_nodes_online_sent = false;
     bool gate_register_accepted = false;
     bool gate_heartbeat_accepted = false;
-    bool mesh_ready_true_reported = false;
+    bool mesh_ready_reported = false;
 
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
     while (std::chrono::steady_clock::now() < deadline)
@@ -1406,7 +1406,7 @@ void TestGameNodeNormalizesWildcardGateConnectorEndpoints()
                     XS_CHECK(
                         xs::net::DecodeGameGateMeshReadyReport(packet.payload, &report) ==
                         xs::net::InnerClusterCodecErrorCode::None);
-                    mesh_ready_true_reported = mesh_ready_true_reported || report.mesh_ready;
+                    mesh_ready_reported = true;
                 }
             }
         }
@@ -1444,7 +1444,7 @@ void TestGameNodeNormalizesWildcardGateConnectorEndpoints()
             }
         }
 
-        if (mesh_ready_true_reported && gate_register_accepted && gate_heartbeat_accepted)
+        if (mesh_ready_reported && gate_register_accepted && gate_heartbeat_accepted)
         {
             break;
         }
@@ -1461,7 +1461,7 @@ void TestGameNodeNormalizesWildcardGateConnectorEndpoints()
     XS_CHECK(all_nodes_online_sent);
     XS_CHECK(gate_register_accepted);
     XS_CHECK(gate_heartbeat_accepted);
-    XS_CHECK(mesh_ready_true_reported);
+    XS_CHECK(mesh_ready_reported);
     XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
         return game_node.node().mesh_ready() &&
             game_node.node().inner_connection_state("Gate0") == xs::ipc::ZmqConnectionState::Connected;
@@ -1581,8 +1581,8 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
     bool gate1_register_accepted = false;
     bool gate0_heartbeat_accepted = false;
     bool gate1_heartbeat_accepted = false;
-    bool mesh_ready_true_reported = false;
-    bool mesh_ready_true_reported_before_gate_mesh = false;
+    bool mesh_ready_reported = false;
+    bool mesh_ready_reported_before_gate_mesh = false;
     bool ownership_sync_sent = false;
     bool service_ready_reported = false;
     bool service_ready_reported_before_ownership = false;
@@ -1642,23 +1642,22 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
                     XS_CHECK(report.status_flags == 0U);
                     XS_CHECK(report.reported_at_unix_ms != 0U);
 
-                    if (report.mesh_ready &&
-                        !(gate0_register_accepted &&
+                    if (!(gate0_register_accepted &&
                           gate1_register_accepted &&
                           gate0_heartbeat_accepted &&
                           gate1_heartbeat_accepted))
                     {
-                        mesh_ready_true_reported_before_gate_mesh = true;
+                        mesh_ready_reported_before_gate_mesh = true;
                     }
 
-                    if (report.mesh_ready && !ownership_sync_sent)
+                    if (!ownership_sync_sent)
                     {
                         const std::vector<std::byte> ownership_packet = EncodeServerStubOwnershipSyncPacket(accepted_sync);
                         XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], ownership_packet));
                         ownership_sync_sent = true;
                     }
 
-                    mesh_ready_true_reported = mesh_ready_true_reported || report.mesh_ready;
+                    mesh_ready_reported = true;
                 }
                 else if (packet.header.msg_id == xs::net::kInnerGameServiceReadyReportMsgId)
                 {
@@ -1769,8 +1768,8 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
     XS_CHECK(gate1_register_accepted);
     XS_CHECK(gate0_heartbeat_accepted);
     XS_CHECK(gate1_heartbeat_accepted);
-    XS_CHECK(mesh_ready_true_reported);
-    XS_CHECK(!mesh_ready_true_reported_before_gate_mesh);
+    XS_CHECK(mesh_ready_reported);
+    XS_CHECK(!mesh_ready_reported_before_gate_mesh);
     XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node, &accepted_sync]() {
         return game_node.node().mesh_ready() &&
             game_node.node().mesh_ready_reported_at_unix_ms() != 0U &&
@@ -1831,13 +1830,13 @@ void TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes()
 
         const std::vector<std::byte> notify = EncodeClusterNodesOnlineNotifyPacket(false);
         XS_CHECK(SendRouterReply(gm_router.socket(), gm_routing_id, notify));
-        XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node]() {
-            return !game_node.node().all_nodes_online() &&
-                !game_node.node().mesh_ready() &&
-                game_node.node().assignment_epoch() == 0U &&
-                game_node.node().ownership_server_now_unix_ms() == 0U &&
-                game_node.node().ownership_assignments().empty() &&
-                game_node.node().owned_stub_assignments().empty();
+        XS_CHECK(WaitUntil(std::chrono::seconds(2), [&game_node, &accepted_sync]() {
+            return game_node.node().all_nodes_online() &&
+                game_node.node().mesh_ready() &&
+                game_node.node().assignment_epoch() == accepted_sync.assignment_epoch &&
+                game_node.node().ownership_server_now_unix_ms() == accepted_sync.server_now_unix_ms &&
+                game_node.node().ownership_assignments().size() == accepted_sync.assignments.size() &&
+                game_node.node().owned_stub_assignments().size() == 2U;
         }));
     }
 
@@ -1986,7 +1985,7 @@ void TestGameNodeSkipsServiceReadyReportWhenNoStubIsOwned()
                         xs::net::DecodeGameGateMeshReadyReport(packet.payload, &report) ==
                         xs::net::InnerClusterCodecErrorCode::None);
 
-                    if (report.mesh_ready && !ownership_sync_sent)
+                    if (!ownership_sync_sent)
                     {
                         const std::vector<std::byte> ownership_packet = EncodeServerStubOwnershipSyncPacket(no_owned_sync);
                         XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], ownership_packet));

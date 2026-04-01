@@ -372,13 +372,11 @@ const std::vector<std::byte>* FindLastPacketByMsgId(
 }
 
 std::vector<std::byte> BuildInnerGameGateMeshReadyReportPacket(
-    bool mesh_ready,
     std::uint64_t reported_at_unix_ms,
     std::uint16_t flags = 0U,
     std::uint32_t seq = xs::net::kPacketSeqNone)
 {
     const xs::net::GameGateMeshReadyReport report{
-        .mesh_ready = mesh_ready,
         .status_flags = 0U,
         .reported_at_unix_ms = reported_at_unix_ms,
     };
@@ -878,7 +876,7 @@ void TestGmNodeBroadcastsOwnershipSyncAfterExpectedGamesReportMeshReady()
 
     const std::uint64_t first_reported_at_unix_ms = 8101U;
     XS_CHECK(game_connector.Send(
-                 BuildInnerGameGateMeshReadyReportPacket(true, first_reported_at_unix_ms),
+                 BuildInnerGameGateMeshReadyReportPacket(first_reported_at_unix_ms),
                  &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {
@@ -933,18 +931,7 @@ void TestGmNodeBroadcastsOwnershipSyncAfterExpectedGamesReportMeshReady()
     XS_CHECK(has_first_sync_assignment("MatchStub"));
 
     XS_CHECK(game_connector.Send(
-                 BuildInnerGameGateMeshReadyReportPacket(false, 8102U),
-                 &error_message) == xs::ipc::ZmqSocketErrorCode::None);
-    XS_CHECK(error_message.empty());
-    if (io_context.stopped())
-    {
-        io_context.restart();
-    }
-    (void)io_context.run_for(std::chrono::milliseconds(200));
-    XS_CHECK(CountPacketsByMsgId(game_messages, xs::net::kInnerServerStubOwnershipSyncMsgId) == 1U);
-
-    XS_CHECK(game_connector.Send(
-                 BuildInnerGameGateMeshReadyReportPacket(true, 8103U),
+                 BuildInnerGameGateMeshReadyReportPacket(8102U),
                  &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     if (io_context.stopped())
@@ -1065,7 +1052,7 @@ void TestGmNodeOpensGateOnlyAfterAllOwnedStubsReportReady()
     XS_CHECK(CountPacketsByMsgId(gate_messages, xs::net::kInnerClusterReadyNotifyMsgId) == 0U);
 
     XS_CHECK(game_connector.Send(
-                 BuildInnerGameGateMeshReadyReportPacket(true, 8301U),
+                 BuildInnerGameGateMeshReadyReportPacket(8301U),
                  &error_message) == xs::ipc::ZmqSocketErrorCode::None);
     XS_CHECK(error_message.empty());
     XS_CHECK(SpinUntil(io_context, std::chrono::seconds(2), [&]() {

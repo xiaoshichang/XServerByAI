@@ -50,8 +50,6 @@ class GameNode final : public ServerNode
     struct MeshReadyState final
     {
         bool current{false};
-        bool has_reported{false};
-        bool last_reported{false};
         std::uint64_t last_reported_at_unix_ms{0U};
     };
 
@@ -91,25 +89,22 @@ class GameNode final : public ServerNode
     void HandleGateHeartbeatResponse(std::string_view gate_node_id, const xs::net::PacketView& packet);
     [[nodiscard]] bool SendRegisterRequest();
     [[nodiscard]] bool SendHeartbeatRequest();
-    [[nodiscard]] bool SendMeshReadyReport(bool mesh_ready);
+    void OnAllGateConnected();
+    [[nodiscard]] bool SendMeshReadyReport();
     [[nodiscard]] bool SendServiceReadyReport();
     [[nodiscard]] bool SendGateRegisterRequest(std::string_view gate_node_id);
     [[nodiscard]] bool SendGateHeartbeatRequest(std::string_view gate_node_id);
     [[nodiscard]] NodeErrorCode InitializeManagedRuntime(const xs::core::ManagedConfig& managed_config);
     void StartGateConnectors();
     void ResetRuntimeState() noexcept;
-    void ResetMeshReadyState() noexcept;
-    void ResetOwnershipState();
-    void ResetServiceReadyState() noexcept;
     void ResetGateSessionStates();
-    void RefreshMeshReadyState();
     void CheckAllLocalStubsReady();
     [[nodiscard]] bool CreateAllLocalStubs(const xs::net::ServerStubOwnershipSync& sync);
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void StartOrResetGateHeartbeatTimer(std::string_view gate_node_id, std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;
     void CancelGateHeartbeatTimer(std::string_view gate_node_id) noexcept;
-    [[nodiscard]] bool AreAllGateSessionsMeshReady() const noexcept;
+    [[nodiscard]] bool AreAllGateSessionsConnected() const noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence(InnerNetworkSession* session) noexcept;
     [[nodiscard]] const xs::core::GameNodeConfig* game_config() const noexcept;
     [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;

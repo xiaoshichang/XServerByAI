@@ -20,7 +20,7 @@ inline constexpr std::size_t kClusterNodesOnlineNotifySize =
 inline constexpr std::size_t kClusterReadyNotifySize =
     sizeof(std::uint64_t) + sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kGameGateMeshReadyReportSize =
-    sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
+    sizeof(std::uint32_t) + sizeof(std::uint64_t);
 
 enum class InnerClusterCodecErrorCode : std::uint8_t
 {
@@ -57,7 +57,6 @@ struct ClusterNodesOnlineNotify
 
 struct GameGateMeshReadyReport
 {
-    bool mesh_ready{false};
     std::uint32_t status_flags{0};
     std::uint64_t reported_at_unix_ms{0};
 };

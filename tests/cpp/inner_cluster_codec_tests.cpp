@@ -119,7 +119,6 @@ void TestEncodeClusterNodesOnlineNotifyRoundTrip()
 void TestEncodeGameGateMeshReadyReportRoundTrip()
 {
     const xs::net::GameGateMeshReadyReport report{
-        .mesh_ready = true,
         .status_flags = 0u,
         .reported_at_unix_ms = 0x5152535455565758ull,
     };
@@ -130,7 +129,6 @@ void TestEncodeGameGateMeshReadyReportRoundTrip()
         xs::net::InnerClusterCodecErrorCode::None);
 
     const std::array<std::byte, xs::net::kGameGateMeshReadyReportSize> expected{
-        std::byte{0x01},
         std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00},
         std::byte{0x51}, std::byte{0x52}, std::byte{0x53}, std::byte{0x54},
         std::byte{0x55}, std::byte{0x56}, std::byte{0x57}, std::byte{0x58},
@@ -141,7 +139,6 @@ void TestEncodeGameGateMeshReadyReportRoundTrip()
     XS_CHECK(
         xs::net::DecodeGameGateMeshReadyReport(buffer, &decoded) ==
         xs::net::InnerClusterCodecErrorCode::None);
-    XS_CHECK(decoded.mesh_ready == report.mesh_ready);
     XS_CHECK(decoded.status_flags == report.status_flags);
     XS_CHECK(decoded.reported_at_unix_ms == report.reported_at_unix_ms);
 }
@@ -332,7 +329,6 @@ void TestRejectsClusterReadySemanticViolationsAndMalformedBuffers()
 void TestRejectsGameGateMeshReadySemanticViolationsAndMalformedBuffers()
 {
     const xs::net::GameGateMeshReadyReport valid_report{
-        .mesh_ready = false,
         .status_flags = 0u,
         .reported_at_unix_ms = 5u,
     };
@@ -343,17 +339,11 @@ void TestRejectsGameGateMeshReadySemanticViolationsAndMalformedBuffers()
         xs::net::InnerClusterCodecErrorCode::None);
 
     auto invalid_status_flags = buffer;
-    invalid_status_flags[4] = std::byte{0x01};
+    invalid_status_flags[3] = std::byte{0x01};
     xs::net::GameGateMeshReadyReport decoded{};
     XS_CHECK(
         xs::net::DecodeGameGateMeshReadyReport(invalid_status_flags, &decoded) ==
         xs::net::InnerClusterCodecErrorCode::InvalidMeshReadyStatusFlags);
-
-    auto invalid_bool = buffer;
-    invalid_bool[0] = std::byte{0x02};
-    XS_CHECK(
-        xs::net::DecodeGameGateMeshReadyReport(invalid_bool, &decoded) ==
-        xs::net::InnerClusterCodecErrorCode::InvalidBoolValue);
 
     const std::span<const std::byte> truncated(buffer.data(), buffer.size() - 1u);
     XS_CHECK(
@@ -544,7 +534,6 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
         xs::net::InnerClusterCodecErrorCode::InvalidArgument);
 
     const xs::net::GameGateMeshReadyReport invalid_mesh_ready{
-        .mesh_ready = true,
         .status_flags = 1u,
         .reported_at_unix_ms = 4u,
     };
@@ -555,7 +544,6 @@ void TestRejectsInvalidArgumentsAndSizeViolations()
 
     std::array<std::byte, xs::net::kGameGateMeshReadyReportSize - 1u> short_mesh_ready_buffer{};
     const xs::net::GameGateMeshReadyReport valid_mesh_ready{
-        .mesh_ready = false,
         .status_flags = 0u,
         .reported_at_unix_ms = 5u,
     };

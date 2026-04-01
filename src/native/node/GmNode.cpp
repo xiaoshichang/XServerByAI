@@ -1807,7 +1807,6 @@ void GmNode::HandleGameGateMeshReadyReport(
         session->heartbeat_timed_out)
     {
         std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
-        context.push_back(xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"});
         logger().Log(xs::core::LogLevel::Warn, "inner", "GM ignored mesh ready report from an unregistered Game session.", context);
         return;
     }
@@ -1816,7 +1815,6 @@ void GmNode::HandleGameGateMeshReadyReport(
     {
         std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
         context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
-        context.push_back(xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"});
         logger().Log(xs::core::LogLevel::Error, "inner", "GM rejected mesh ready report before all expected nodes registered.", context);
         return;
     }
@@ -1830,21 +1828,11 @@ void GmNode::HandleGameGateMeshReadyReport(
         return;
     }
 
-    if (!report.mesh_ready)
-    {
-        std::vector<xs::core::LogContextField> context = BuildPacketContext(routing_id, payload.size());
-        context.push_back(xs::core::LogContextField{"nodeId", session->node_id});
-        context.push_back(xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)});
-        logger().Log(xs::core::LogLevel::Error, "inner", "GM rejected a non-happy-path mesh ready report.", context);
-        return;
-    }
-
     entry->mesh_ready = true;
     entry->reported_at_unix_ms = report.reported_at_unix_ms;
 
-    const std::array<xs::core::LogContextField, 4> context{
+    const std::array<xs::core::LogContextField, 3> context{
         xs::core::LogContextField{"nodeId", session->node_id},
-        xs::core::LogContextField{"meshReady", report.mesh_ready ? "true" : "false"},
         xs::core::LogContextField{"reportedAtUnixMs", ToString(report.reported_at_unix_ms)},
         xs::core::LogContextField{"allNodesOnline", startup_state_.all_nodes_online ? "true" : "false"},
     };

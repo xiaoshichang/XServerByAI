@@ -563,10 +563,11 @@ void GameNode::HandleGmConnectionStateChanged(ipc::ZmqConnectionState state)
         return;
     }
 
+    const ipc::ZmqConnectionState previous_state = session->connection_state;
     session->connection_state = state;
 
     logger().Log(xs::core::LogLevel::Info, "GameNode", "Game node observed GM inner connection state change.");
-    if (session->connection_state == ipc::ZmqConnectionState::Connected && state != ipc::ZmqConnectionState::Connected)
+    if (previous_state == ipc::ZmqConnectionState::Connected && state != ipc::ZmqConnectionState::Connected)
     {
         logger().Log(xs::core::LogLevel::Error, "GameNode", "GM disconnected");
         return;
@@ -586,6 +587,10 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
         return;
     }
 
+    const ipc::ZmqConnectionState previous_state = session->connection_state;
+    const bool gate_was_ready = previous_state == ipc::ZmqConnectionState::Connected ||
+                                session->registered ||
+                                session->inner_network_ready;
     session->connection_state = state;
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node observed Gate inner connection state change.");
 
@@ -601,7 +606,11 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
         session->heartbeat_timeout_ms = 0U;
         session->last_server_now_unix_ms = 0U;
         session->last_heartbeat_at_unix_ms = 0U;
-        RefreshMeshReadyState();
+        if (gate_was_ready || mesh_ready_state_.current)
+        {
+            logger().Log(xs::core::LogLevel::Error, "inner",
+                         "Game node observed Gate disconnect outside the startup happy path.");
+        }
         return;
     }
 
@@ -610,8 +619,6 @@ void GameNode::HandleGateConnectionStateChanged(std::string_view gate_node_id, i
     {
         (void)SendGateRegisterRequest(gate_node_id);
     }
-
-    RefreshMeshReadyState();
 }
 
 void GameNode::HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload)
@@ -868,20 +875,23 @@ void GameNode::HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet)
         return;
     }
 
-    all_nodes_online_ = notify.all_nodes_online;
+    if (!notify.all_nodes_online)
+    {
+        session->last_protocol_error = "GM clusterNodesOnline notify reported allNodesOnline=false.";
+        logger().Log(xs::core::LogLevel::Error, "inner",
+                     "Game node rejected GM cluster nodes online notify outside the startup happy path.");
+        return;
+    }
+
+    all_nodes_online_ = true;
     last_cluster_nodes_online_server_now_unix_ms_ = notify.server_now_unix_ms;
     session->last_protocol_error.clear();
 
-    if (notify.all_nodes_online)
+    StartGateConnectors();
+    if (!mesh_ready_state_.current && AreAllGateSessionsConnected())
     {
-        StartGateConnectors();
+        OnAllGateConnected();
     }
-    else
-    {
-        ResetOwnershipState();
-    }
-
-    RefreshMeshReadyState();
 
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted GM cluster nodes online notify.");
 }
@@ -1053,7 +1063,6 @@ void GameNode::HandleHeartbeatResponse(const xs::net::PacketView& packet)
     }
 
     logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted GM heartbeat success response.");
-    RefreshMeshReadyState();
 }
 
 bool GameNode::SendRegisterRequest()
@@ -1182,7 +1191,21 @@ bool GameNode::SendHeartbeatRequest()
     return true;
 }
 
-bool GameNode::SendMeshReadyReport(bool mesh_ready)
+void GameNode::OnAllGateConnected()
+{
+    if (mesh_ready_state_.current)
+    {
+        return;
+    }
+
+    mesh_ready_state_.current = true;
+    (void)SendMeshReadyReport();
+    CheckAllLocalStubsReady();
+
+    logger().Log(xs::core::LogLevel::Info, "inner", "Game node reached the all-gates-connected startup node.");
+}
+
+bool GameNode::SendMeshReadyReport()
 {
     InnerNetworkSession* session = gm_session();
     if (session == nullptr || inner_network() == nullptr || !session->registered ||
@@ -1192,7 +1215,6 @@ bool GameNode::SendMeshReadyReport(bool mesh_ready)
     }
 
     const xs::net::GameGateMeshReadyReport report{
-        .mesh_ready = mesh_ready,
         .status_flags = 0U,
         .reported_at_unix_ms = CurrentUnixTimeMilliseconds(),
     };
@@ -1226,8 +1248,6 @@ bool GameNode::SendMeshReadyReport(bool mesh_ready)
         return false;
     }
 
-    mesh_ready_state_.has_reported = true;
-    mesh_ready_state_.last_reported = mesh_ready;
     mesh_ready_state_.last_reported_at_unix_ms = report.reported_at_unix_ms;
     session->last_protocol_error.clear();
 
@@ -1361,7 +1381,10 @@ void GameNode::HandleGateRegisterResponse(std::string_view gate_node_id, const x
     StartOrResetGateHeartbeatTimer(gate_node_id, response.heartbeat_interval_ms);
 
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node accepted Gate register success response.");
-    RefreshMeshReadyState();
+    if (all_nodes_online_ && !mesh_ready_state_.current && AreAllGateSessionsConnected())
+    {
+        OnAllGateConnected();
+    }
 }
 
 void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const xs::net::PacketView& packet)
@@ -1407,7 +1430,10 @@ void GameNode::HandleGateHeartbeatResponse(std::string_view gate_node_id, const 
     }
 
     logger().Log(xs::core::LogLevel::Debug, "inner", "Game node accepted Gate heartbeat success response.");
-    RefreshMeshReadyState();
+    if (all_nodes_online_ && !mesh_ready_state_.current && AreAllGateSessionsConnected())
+    {
+        OnAllGateConnected();
+    }
 }
 
 bool GameNode::SendGateRegisterRequest(std::string_view gate_node_id)
@@ -1579,31 +1605,6 @@ void GameNode::ResetRuntimeState() noexcept
     runtime_state_ = RuntimeState{};
 }
 
-void GameNode::ResetMeshReadyState() noexcept
-{
-    mesh_ready_state_ = MeshReadyState{};
-}
-
-void GameNode::ResetOwnershipState()
-{
-    if (managed_exports_loaded_ && managed_exports_.reset_server_stub_ownership != nullptr)
-    {
-        const std::int32_t reset_result = managed_exports_.reset_server_stub_ownership();
-        if (reset_result != 0)
-        {
-            logger().Log(xs::core::LogLevel::Warn, "runtime", "Game node failed to reset managed ownership state.");
-        }
-    }
-
-    ownership_state_ = OwnershipState{};
-    ResetServiceReadyState();
-}
-
-void GameNode::ResetServiceReadyState() noexcept
-{
-    service_ready_state_ = ServiceReadyState{};
-}
-
 void GameNode::ResetGateSessionStates()
 {
     const std::vector<InnerNetworkSession> snapshot = inner_network_remote_sessions().Snapshot();
@@ -1634,11 +1635,9 @@ void GameNode::ResetGateSessionStates()
         session->last_heartbeat_at_unix_ms = 0U;
         session->last_protocol_error.clear();
     }
-
-    RefreshMeshReadyState();
 }
 
-bool GameNode::AreAllGateSessionsMeshReady() const noexcept
+bool GameNode::AreAllGateSessionsConnected() const noexcept
 {
     if (cluster_config().gates.empty())
     {
@@ -1660,23 +1659,6 @@ bool GameNode::AreAllGateSessionsMeshReady() const noexcept
     }
 
     return true;
-}
-
-void GameNode::RefreshMeshReadyState()
-{
-    const bool all_gate_connected = all_nodes_online_ && AreAllGateSessionsMeshReady();
-    const bool state_changed = mesh_ready_state_.current != all_gate_connected;
-    mesh_ready_state_.current = all_gate_connected;
-
-    if (all_gate_connected != mesh_ready_state_.last_reported || !mesh_ready_state_.has_reported)
-    {
-        (void)SendMeshReadyReport(all_gate_connected);
-    }
-
-    if (state_changed && all_gate_connected)
-    {
-        CheckAllLocalStubsReady();
-    }
 }
 
 void GameNode::CheckAllLocalStubsReady()

@@ -270,8 +270,7 @@ InnerClusterCodecErrorCode EncodeGameGateMeshReadyReport(
     }
 
     BinaryWriter writer(buffer);
-    if (!writer.WriteBool(message.mesh_ready) ||
-        !writer.WriteUInt32(message.status_flags) ||
+    if (!writer.WriteUInt32(message.status_flags) ||
         !writer.WriteUInt64(message.reported_at_unix_ms))
     {
         return MapSerializationError(writer.error());
@@ -293,8 +292,7 @@ InnerClusterCodecErrorCode DecodeGameGateMeshReadyReport(
 
     BinaryReader reader(buffer);
     GameGateMeshReadyReport parsed_message{};
-    if (!reader.ReadBool(&parsed_message.mesh_ready) ||
-        !reader.ReadUInt32(&parsed_message.status_flags) ||
+    if (!reader.ReadUInt32(&parsed_message.status_flags) ||
         !reader.ReadUInt64(&parsed_message.reported_at_unix_ms))
     {
         return MapSerializationError(reader.error());
