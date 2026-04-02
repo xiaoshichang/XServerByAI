@@ -13,13 +13,14 @@
 namespace xs::host
 {
 
-inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 4;
+inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 6;
 inline constexpr std::string_view kManagedExportsTypeName =
     "XServer.Managed.Framework.Interop.GameNativeExports, XServer.Managed.Framework";
 inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNativeGetAbiVersion";
 inline constexpr std::string_view kManagedGameInitMethodName = "GameNativeInit";
 inline constexpr std::string_view kManagedGameOnMessageMethodName = "GameNativeOnMessage";
 inline constexpr std::string_view kManagedGameOnTickMethodName = "GameNativeOnTick";
+inline constexpr std::string_view kManagedGameOnNativeTimerMethodName = "GameNativeOnNativeTimer";
 inline constexpr std::string_view kManagedGameApplyServerStubOwnershipMethodName = "GameNativeApplyServerStubOwnership";
 inline constexpr std::string_view kManagedGameResetServerStubOwnershipMethodName = "GameNativeResetServerStubOwnership";
 inline constexpr std::string_view kManagedGameGetReadyServerStubCountMethodName = "GameNativeGetReadyServerStubCount";
@@ -51,6 +52,8 @@ using ManagedOnLogCallbackFn = void(XS_MANAGED_CALLTYPE*)(void* context, std::ui
                                                           std::uint32_t category_length,
                                                           const std::uint8_t* message_utf8,
                                                           std::uint32_t message_length);
+using ManagedCreateOnceTimerCallbackFn = std::int64_t(XS_MANAGED_CALLTYPE*)(void* context, std::uint64_t delay_ms);
+using ManagedCancelTimerCallbackFn = std::int32_t(XS_MANAGED_CALLTYPE*)(void* context, std::int64_t timer_id);
 
 struct ManagedNativeCallbacks
 {
@@ -59,6 +62,8 @@ struct ManagedNativeCallbacks
     void* context{nullptr};
     ManagedOnServerStubReadyCallbackFn on_server_stub_ready{nullptr};
     ManagedOnLogCallbackFn on_log{nullptr};
+    ManagedCreateOnceTimerCallbackFn create_once_timer{nullptr};
+    ManagedCancelTimerCallbackFn cancel_timer{nullptr};
 };
 
 struct ManagedInitArgs
@@ -136,6 +141,7 @@ using ManagedGetAbiVersionFn = std::uint32_t(XS_MANAGED_CALLTYPE*)();
 using ManagedInitFn = std::int32_t(XS_MANAGED_CALLTYPE*)(const ManagedInitArgs* args);
 using ManagedOnMessageFn = std::int32_t(XS_MANAGED_CALLTYPE*)(const ManagedMessageView* message);
 using ManagedOnTickFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint64_t now_unix_ms_utc, std::uint32_t delta_ms);
+using ManagedOnNativeTimerFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::int64_t timer_id);
 using ManagedApplyServerStubOwnershipFn =
     std::int32_t(XS_MANAGED_CALLTYPE*)(const ManagedServerStubOwnershipSync* sync);
 using ManagedResetServerStubOwnershipFn = std::int32_t(XS_MANAGED_CALLTYPE*)();
@@ -153,6 +159,7 @@ struct ManagedExports
     ManagedInitFn init{nullptr};
     ManagedOnMessageFn on_message{nullptr};
     ManagedOnTickFn on_tick{nullptr};
+    ManagedOnNativeTimerFn on_native_timer{nullptr};
     ManagedApplyServerStubOwnershipFn apply_server_stub_ownership{nullptr};
     ManagedResetServerStubOwnershipFn reset_server_stub_ownership{nullptr};
     ManagedGetReadyServerStubCountFn get_ready_server_stub_count{nullptr};

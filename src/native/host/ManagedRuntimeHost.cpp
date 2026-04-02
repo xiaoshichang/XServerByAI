@@ -480,6 +480,16 @@ class ManagedRuntimeHost::Impl final
         }
         resolved_exports.on_tick = reinterpret_cast<ManagedOnTickFn>(raw_on_tick);
 
+        void* raw_on_native_timer = nullptr;
+        result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
+                                          kManagedExportsTypeName, kManagedGameOnNativeTimerMethodName,
+                                          &raw_on_native_timer);
+        if (result != ManagedHostErrorCode::None)
+        {
+            return result;
+        }
+        resolved_exports.on_native_timer = reinterpret_cast<ManagedOnNativeTimerFn>(raw_on_native_timer);
+
         void* raw_apply_server_stub_ownership = nullptr;
         result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
                                           kManagedExportsTypeName,

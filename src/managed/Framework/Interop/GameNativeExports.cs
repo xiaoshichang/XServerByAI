@@ -16,6 +16,7 @@ namespace XServer.Managed.Framework.Interop
         private const int OwnershipApplyErrorOffset = 1000;
         private const string RuntimeLogCategory = "managed.runtime";
         private static ManagedNativeCallbacks s_nativeCallbacks;
+        private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
         private static GameNodeRuntimeState? s_runtimeState;
 
         [UnmanagedCallersOnly(EntryPoint = "GameNativeGetAbiVersion", CallConvs = [typeof(CallConvCdecl)])]
@@ -36,14 +37,20 @@ namespace XServer.Managed.Framework.Interop
             {
                 s_nativeCallbacks = args->NativeCallbacks;
                 NativeLoggerBridge.Configure(s_nativeCallbacks);
+                s_nativeTimerScheduler = new ManagedNativeTimerScheduler(s_nativeCallbacks);
                 string nodeId = ReadUtf8(args->NodeIdUtf8, args->NodeIdLength);
                 _ = ReadUtf8(args->ConfigPathUtf8, args->ConfigPathLength);
-                s_runtimeState = new GameNodeRuntimeState(nodeId, NotifyNativeServerStubReady);
+                s_runtimeState = new GameNodeRuntimeState(
+                    nodeId,
+                    NotifyNativeServerStubReady,
+                    nativeTimerScheduler: s_nativeTimerScheduler);
                 NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime initialized.");
                 return 0;
             }
             catch
             {
+                s_nativeTimerScheduler?.Reset();
+                s_nativeTimerScheduler = null;
                 NativeLoggerBridge.Reset();
                 s_nativeCallbacks = default;
                 s_runtimeState = null;
@@ -64,6 +71,17 @@ namespace XServer.Managed.Framework.Interop
             _ = nowUnixMsUtc;
             _ = deltaMs;
             return 0;
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "GameNativeOnNativeTimer", CallConvs = [typeof(CallConvCdecl)])]
+        public static int GameNativeOnNativeTimer(long timerId)
+        {
+            if (s_nativeTimerScheduler == null)
+            {
+                return RuntimeNotInitialized;
+            }
+
+            return s_nativeTimerScheduler.HandleTimerFired(timerId);
         }
 
         [UnmanagedCallersOnly(EntryPoint = "GameNativeApplyServerStubOwnership", CallConvs = [typeof(CallConvCdecl)])]

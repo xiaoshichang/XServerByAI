@@ -1,6 +1,11 @@
 #include "ManagedRuntimeHost.h"
+#include "Timer.h"
 
+#include <asio/io_context.hpp>
+
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cctype>
 #include <cstring>
 #include <cstdlib>
@@ -186,10 +191,32 @@ struct ManagedLogCapture final
     std::vector<std::string> messages{};
 };
 
+struct ManagedNativeTimerCapture final
+{
+    asio::io_context io_context{};
+    xs::core::TimerManager timer_manager;
+    const xs::host::ManagedExports* exports{nullptr};
+    std::vector<std::uint64_t> requested_create_once_delays_ms{};
+    std::vector<std::int64_t> created_timer_ids{};
+    std::vector<std::int64_t> fired_timer_ids{};
+    std::vector<std::int64_t> cancelled_timer_ids{};
+
+    ManagedNativeTimerCapture() : timer_manager(io_context)
+    {
+    }
+
+    void RunUntilIdle()
+    {
+        io_context.restart();
+        io_context.run();
+    }
+};
+
 struct ManagedCallbackCapture final
 {
     ReadyCallbackCapture ready{};
     ManagedLogCapture logs{};
+    ManagedNativeTimerCapture timers{};
 };
 
 void OnServerStubReady(void* context, std::uint64_t assignment_epoch,
@@ -222,6 +249,66 @@ void OnManagedLog(void* context, std::uint32_t level, const std::uint8_t* catego
     capture->logs.levels.push_back(level);
     capture->logs.categories.push_back(ReadManagedUtf8(category_utf8, category_length));
     capture->logs.messages.push_back(ReadManagedUtf8(message_utf8, message_length));
+}
+
+std::int64_t CreateOnceTimer(void* context, std::uint64_t delay_ms)
+{
+    auto* capture = static_cast<ManagedCallbackCapture*>(context);
+    if (capture == nullptr || capture->timers.exports == nullptr || capture->timers.exports->on_native_timer == nullptr)
+    {
+        XS_CHECK(false);
+        return static_cast<std::int64_t>(xs::core::TimerErrorCode::Unknown);
+    }
+
+    capture->timers.requested_create_once_delays_ms.push_back(delay_ms);
+
+    const std::chrono::milliseconds actual_delay = delay_ms == 0U ? std::chrono::milliseconds::zero()
+                                                                  : std::chrono::milliseconds(1);
+    auto native_timer_id = std::make_shared<std::int64_t>(0);
+    const xs::core::TimerCreateResult create_result =
+        capture->timers.timer_manager.CreateOnce(actual_delay,
+                                                 [capture, native_timer_id]()
+                                                 {
+                                                     capture->timers.fired_timer_ids.push_back(*native_timer_id);
+                                                     if (capture->timers.exports == nullptr ||
+                                                         capture->timers.exports->on_native_timer == nullptr)
+                                                     {
+                                                         XS_CHECK(false);
+                                                         return;
+                                                     }
+
+                                                     XS_CHECK(capture->timers.exports->on_native_timer(*native_timer_id) == 0);
+                                                 });
+    if (!xs::core::IsTimerID(create_result))
+    {
+        XS_CHECK(false);
+        return create_result;
+    }
+
+    *native_timer_id = static_cast<std::int64_t>(create_result);
+    capture->timers.created_timer_ids.push_back(*native_timer_id);
+    return *native_timer_id;
+}
+
+std::int32_t CancelTimer(void* context, std::int64_t timer_id)
+{
+    auto* capture = static_cast<ManagedCallbackCapture*>(context);
+    if (capture == nullptr || timer_id <= 0)
+    {
+        XS_CHECK(false);
+        return -1;
+    }
+
+    const xs::core::TimerErrorCode cancel_result =
+        capture->timers.timer_manager.Cancel(static_cast<xs::core::TimerID>(timer_id));
+    if (cancel_result != xs::core::TimerErrorCode::None)
+    {
+        XS_CHECK(false);
+        return -1;
+    }
+
+    capture->timers.cancelled_timer_ids.push_back(timer_id);
+    return 0;
 }
 
 std::size_t CountManagedLogs(const ManagedLogCapture& capture, std::uint32_t level, std::string_view category,
@@ -271,6 +358,8 @@ void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
     input->args.native_callbacks.context = nullptr;
     input->args.native_callbacks.on_server_stub_ready = nullptr;
     input->args.native_callbacks.on_log = nullptr;
+    input->args.native_callbacks.create_once_timer = nullptr;
+    input->args.native_callbacks.cancel_timer = nullptr;
 }
 
 xs::host::ManagedServerStubOwnershipEntry MakeOwnershipEntry(std::string_view entity_type, std::string_view entity_id,
@@ -414,6 +503,7 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(exports.init != nullptr);
     XS_CHECK(exports.on_message != nullptr);
     XS_CHECK(exports.on_tick != nullptr);
+    XS_CHECK(exports.on_native_timer != nullptr);
     XS_CHECK(exports.apply_server_stub_ownership != nullptr);
     XS_CHECK(exports.reset_server_stub_ownership != nullptr);
     XS_CHECK(exports.get_ready_server_stub_count != nullptr);
@@ -425,9 +515,12 @@ void TestLoadAndBindExportsSucceed()
     ManagedInitInput init_input{};
     PopulateManagedInitInput(&init_input, "Game0");
     ManagedCallbackCapture callback_capture{};
+    callback_capture.timers.exports = &exports;
     init_input.args.native_callbacks.context = &callback_capture;
     init_input.args.native_callbacks.on_server_stub_ready = &OnServerStubReady;
     init_input.args.native_callbacks.on_log = &OnManagedLog;
+    init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
+    init_input.args.native_callbacks.cancel_timer = &CancelTimer;
     XS_CHECK(exports.init(&init_input.args) == 0);
     XS_CHECK(exports.on_message(nullptr) == 0);
     XS_CHECK(exports.on_tick(1234, 16) == 0);
@@ -438,9 +531,9 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(ready_count == 0U);
 
     std::vector<xs::host::ManagedServerStubOwnershipEntry> assignments;
+    assignments.push_back(MakeOwnershipEntry("OnlineStub", "unknown", "Game0"));
     assignments.push_back(MakeOwnershipEntry("MatchStub", "unknown", "Game0"));
     assignments.push_back(MakeOwnershipEntry("ChatStub", "unknown", "Game9"));
-    assignments.push_back(MakeOwnershipEntry("LeaderboardStub", "unknown", "Game0"));
 
     xs::host::ManagedServerStubOwnershipSync ownership_sync{};
     ownership_sync.struct_size = sizeof(xs::host::ManagedServerStubOwnershipSync);
@@ -449,6 +542,7 @@ void TestLoadAndBindExportsSucceed()
     ownership_sync.assignments = assignments.data();
 
     XS_CHECK(exports.apply_server_stub_ownership(&ownership_sync) == 0);
+    callback_capture.timers.RunUntilIdle();
     XS_CHECK(callback_capture.ready.call_count == 2U);
     XS_CHECK(callback_capture.ready.assignment_epochs.size() == 2U);
     XS_CHECK(callback_capture.ready.entity_types.size() == 2U);
@@ -460,8 +554,8 @@ void TestLoadAndBindExportsSucceed()
     }
     if (callback_capture.ready.entity_types.size() == 2U)
     {
-        XS_CHECK(callback_capture.ready.entity_types[0] == "MatchStub");
-        XS_CHECK(callback_capture.ready.entity_types[1] == "LeaderboardStub");
+        XS_CHECK(callback_capture.ready.entity_types[0] == "OnlineStub");
+        XS_CHECK(callback_capture.ready.entity_types[1] == "MatchStub");
     }
     if (callback_capture.ready.entity_ids.size() == 2U)
     {
@@ -477,9 +571,9 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(exports.get_ready_server_stub_entry(0U, &first_ready_entry) == 0);
     XS_CHECK(exports.get_ready_server_stub_entry(1U, &second_ready_entry) == 0);
     XS_CHECK(ReadManagedUtf8(first_ready_entry.entity_type_utf8, first_ready_entry.entity_type_length) ==
-             "MatchStub");
+             "OnlineStub");
     XS_CHECK(ReadManagedUtf8(second_ready_entry.entity_type_utf8, second_ready_entry.entity_type_length) ==
-             "LeaderboardStub");
+             "MatchStub");
     XS_CHECK(
         IsCanonicalGuidText(ReadManagedUtf8(first_ready_entry.entity_id_utf8, first_ready_entry.entity_id_length)));
     XS_CHECK(
@@ -500,7 +594,15 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(exports.get_ready_server_stub_count(&ready_count) == 0);
     XS_CHECK(ready_count == 0U);
 
-    XS_CHECK(callback_capture.logs.call_count >= 6U);
+    XS_CHECK(callback_capture.timers.requested_create_once_delays_ms.size() == 1U);
+    XS_CHECK(callback_capture.timers.created_timer_ids.size() == 1U);
+    XS_CHECK(callback_capture.timers.fired_timer_ids.size() == 1U);
+    XS_CHECK(callback_capture.timers.cancelled_timer_ids.empty());
+    if (callback_capture.timers.requested_create_once_delays_ms.size() == 1U)
+    {
+        XS_CHECK(callback_capture.timers.requested_create_once_delays_ms[0] == 5000U);
+    }
+    XS_CHECK(callback_capture.logs.call_count >= 7U);
     XS_CHECK(callback_capture.logs.levels.size() == callback_capture.logs.call_count);
     XS_CHECK(callback_capture.logs.categories.size() == callback_capture.logs.call_count);
     XS_CHECK(callback_capture.logs.messages.size() == callback_capture.logs.call_count);
@@ -512,6 +614,8 @@ void TestLoadAndBindExportsSucceed()
                               "managed.runtime", "Game managed runtime reset server stub ownership state.") == 2U);
     XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Debug),
                               "managed.runtime", "Game managed runtime published server stub ready.") == 2U);
+    XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Info),
+                              "MatchStub", "MatchStub received call msgId=5101.") == 1U);
 
     XS_CHECK(host.Unload() == xs::host::ManagedHostErrorCode::None);
     XS_CHECK(!host.IsLoaded());

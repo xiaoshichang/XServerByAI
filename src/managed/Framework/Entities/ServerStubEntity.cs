@@ -1,5 +1,6 @@
 using System;
 using XServer.Managed.Framework.Interop;
+using XServer.Managed.Framework.Runtime;
 
 namespace XServer.Managed.Framework.Entities
 {
@@ -33,9 +34,25 @@ namespace XServer.Managed.Framework.Entities
             _readyCallback = readyCallback;
         }
 
+        internal StubCallErrorCode ReceiveStubCall(StubCallMessage message)
+        {
+            if (message.MsgId == 0)
+            {
+                return StubCallErrorCode.InvalidMessageId;
+            }
+
+            return OnStubCall(message);
+        }
+
         protected virtual void OnReady()
         {
             NativeLoggerBridge.Log(ManagedLogLevel.Info, "ServerStubEntity", $"Stub {GetType()} is ready.");
+        }
+
+        protected virtual StubCallErrorCode OnStubCall(StubCallMessage message)
+        {
+            _ = message;
+            return StubCallErrorCode.StubRejected;
         }
     }
 }

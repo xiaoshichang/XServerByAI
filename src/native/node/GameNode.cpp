@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstring>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -29,6 +30,9 @@ constexpr std::string_view kUnknownServerEntityId = "unknown";
 constexpr std::string_view kManagedRuntimeLogCategory = "managed.runtime";
 constexpr std::uint16_t kResponseFlags = static_cast<std::uint16_t>(xs::net::PacketFlag::Response);
 constexpr std::uint16_t kErrorResponseFlags = kResponseFlags | static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
+constexpr std::int64_t kManagedNativeCreateTimerFailed = static_cast<std::int64_t>(xs::core::TimerErrorCode::Unknown);
+constexpr std::int32_t kManagedNativeCallbackInvalidArgument = -1;
+constexpr std::int32_t kManagedNativeCallbackOperationFailed = -2;
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -235,10 +239,91 @@ void GameNode::HandleManagedLogCallback(void* context, std::uint32_t level, cons
     game_node->HandleManagedLog(level, category, message);
 }
 
+std::int64_t GameNode::HandleManagedCreateOnceTimerCallback(void* context, std::uint64_t delay_ms)
+{
+    if (context == nullptr)
+    {
+        return kManagedNativeCreateTimerFailed;
+    }
+
+    auto* game_node = static_cast<GameNode*>(context);
+    return game_node->CreateManagedOnceTimer(delay_ms);
+}
+
+std::int32_t GameNode::HandleManagedCancelTimerCallback(void* context, std::int64_t timer_id)
+{
+    if (context == nullptr)
+    {
+        return kManagedNativeCallbackInvalidArgument;
+    }
+
+    auto* game_node = static_cast<GameNode*>(context);
+    return game_node->CancelManagedTimer(timer_id);
+}
+
 void GameNode::HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message)
 {
     const std::string_view resolved_category = category.empty() ? kManagedRuntimeLogCategory : category;
     logger().Log(ToNativeLogLevel(level), resolved_category, message);
+}
+
+std::int64_t GameNode::CreateManagedOnceTimer(std::uint64_t delay_ms)
+{
+    if (!managed_exports_loaded_ || managed_exports_.on_native_timer == nullptr)
+    {
+        return kManagedNativeCreateTimerFailed;
+    }
+
+    const std::int64_t clamped_delay_ms =
+        delay_ms > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())
+            ? std::numeric_limits<std::int64_t>::max()
+            : static_cast<std::int64_t>(delay_ms);
+    auto native_timer_id = std::make_shared<std::int64_t>(0);
+    const xs::core::TimerCreateResult create_result =
+        event_loop().timers().CreateOnce(std::chrono::milliseconds(clamped_delay_ms),
+                                         [this, native_timer_id]()
+                                         {
+                                             HandleManagedTimerFired(*native_timer_id);
+                                         });
+    if (!xs::core::IsTimerID(create_result))
+    {
+        return create_result;
+    }
+
+    *native_timer_id = static_cast<std::int64_t>(create_result);
+    return static_cast<std::int64_t>(create_result);
+}
+
+std::int32_t GameNode::CancelManagedTimer(std::int64_t timer_id)
+{
+    if (timer_id <= 0)
+    {
+        return kManagedNativeCallbackInvalidArgument;
+    }
+
+    const xs::core::TimerErrorCode cancel_result =
+        event_loop().timers().Cancel(static_cast<xs::core::TimerID>(timer_id));
+    if (cancel_result != xs::core::TimerErrorCode::None)
+    {
+        return kManagedNativeCallbackOperationFailed;
+    }
+
+    return 0;
+}
+
+void GameNode::HandleManagedTimerFired(std::int64_t timer_id)
+{
+    if (!managed_exports_loaded_ || managed_exports_.on_native_timer == nullptr)
+    {
+        return;
+    }
+
+    const std::int32_t callback_result = managed_exports_.on_native_timer(timer_id);
+    if (callback_result != 0)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "runtime",
+                     "Game node observed a managed native timer callback failure.");
+    }
 }
 
 std::string_view GameNode::managed_assembly_name() const noexcept
@@ -516,6 +601,8 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
         .context = this,
         .on_server_stub_ready = &GameNode::HandleManagedServerStubReadyCallback,
         .on_log = &GameNode::HandleManagedLogCallback,
+        .create_once_timer = &GameNode::HandleManagedCreateOnceTimerCallback,
+        .cancel_timer = &GameNode::HandleManagedCancelTimerCallback,
     };
     const xs::host::ManagedInitArgs init_args{
         .struct_size = sizeof(xs::host::ManagedInitArgs),

@@ -408,7 +408,7 @@ add_dependencies(
     xs_managed_interop_missing_exports_runtime_assets
 )
 
-target_link_libraries(xs_host_runtime_tests PRIVATE host)
+target_link_libraries(xs_host_runtime_tests PRIVATE host core)
 
 target_compile_definitions(xs_host_runtime_tests PRIVATE
     XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH="${xs_managed_framework_runtime_assets_ASSEMBLY_PATH}"

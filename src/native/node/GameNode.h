@@ -79,8 +79,13 @@ class GameNode final : public ServerNode
     static void HandleManagedLogCallback(void* context, std::uint32_t level, const std::uint8_t* category_utf8,
                                          std::uint32_t category_length, const std::uint8_t* message_utf8,
                                          std::uint32_t message_length);
+    static std::int64_t HandleManagedCreateOnceTimerCallback(void* context, std::uint64_t delay_ms);
+    static std::int32_t HandleManagedCancelTimerCallback(void* context, std::int64_t timer_id);
     void HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry);
     void HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message);
+    [[nodiscard]] std::int64_t CreateManagedOnceTimer(std::uint64_t delay_ms);
+    [[nodiscard]] std::int32_t CancelManagedTimer(std::int64_t timer_id);
+    void HandleManagedTimerFired(std::int64_t timer_id);
     void HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet);
     void HandleServerStubOwnershipSync(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
