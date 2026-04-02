@@ -74,5 +74,5 @@
 3. `M3-14` 必须先聚合 `Game` 的 mesh ready，再下发 ownership，并把 ownership 作为 `Game` 本地 Stub 初始化的真值来源。当前阶段 ownership 生成先采用最简单的随机分配，后续可扩展为基于 Stub 负载预估的分配策略。
 4. `M3-15` 必须建立在当前 `assignmentEpoch` 的本地 Stub ready 之上，并由 `GM` 聚合 ready 结果后下发 `clusterReady`；`Gate` 只消费结论，不重新推导结论。
 5. `M4-02` 的 `ClientNetwork` 必须受 `clusterReady` 控制，禁止在 `Gate` 启动时自动开放。
-6. `M4-05` 之后的转发通道必须建立在启动期已经完成的 `Game -> Gate` 全连接与注册目录之上，而不是依赖旧的 `Gate -> GM` 目录查询假设。
+6. `M4-06` 之后的请求转发链路必须建立在启动期已经完成的 `Game -> Gate` 全连接与注册目录之上，而不是依赖旧的 `Gate -> GM` 目录查询假设。
 

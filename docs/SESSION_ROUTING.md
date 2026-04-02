@@ -106,8 +106,8 @@
 3. 会话路由与实体 ownership 是两套相关但不等价的状态：会话绑定的是“当前客户端入口该发往哪个 `Game`”，实体 ownership 表达的是“哪个 `Game` 持有该逻辑实体的权威活动实例”。
 
 **后续条目约束**
-1. `M4-04` 应围绕 `sessionId -> SessionRecord` 建立权威会话表。
-2. `M4-05` 应基于“`Game` 已注册到当前 `Gate`”这一事实实现内部转发通道，而不是再引入一套独立的 GM 下发目录模型。
+1. `M4-05` 应围绕 `sessionId -> SessionRecord` 建立权威会话表。
+2. `M4-06` 应基于“`Game` 已注册到当前 `Gate`”这一事实实现请求转发链路，而不是再引入一套独立的 GM 下发目录模型。
 3. `M4-10` 的会话断开清理应依赖 `gameNodeId -> sessionId[]` 索引，保证 `Game` 路由失效时能快速定位受影响会话。
 4. `M4-11` 的固定绑定策略只允许决定“如何选择首次目标 `Game`”，不应改写 `RouteTarget` 与 `RouteState` 的基础语义。
 5. `M4-12` 的负载感知分配应读取 `GameDirectoryEntry.load`，并只在 `Available` 的目录项中选择候选目标。
