@@ -98,6 +98,17 @@ target_link_libraries(xs_net_inner_cluster_codec_tests PRIVATE net)
 add_test(NAME xs_net_inner_cluster_codec_tests COMMAND xs_net_inner_cluster_codec_tests)
 
 ###############################
+# xs_net_relay_codec_tests
+###############################
+add_executable(xs_net_relay_codec_tests
+    relay_codec_tests.cpp
+)
+
+target_link_libraries(xs_net_relay_codec_tests PRIVATE net)
+
+add_test(NAME xs_net_relay_codec_tests COMMAND xs_net_relay_codec_tests)
+
+###############################
 # xs_main_event_loop_tests
 ###############################
 add_executable(xs_main_event_loop_tests
@@ -408,7 +419,7 @@ add_dependencies(
     xs_managed_interop_missing_exports_runtime_assets
 )
 
-target_link_libraries(xs_host_runtime_tests PRIVATE host core)
+target_link_libraries(xs_host_runtime_tests PRIVATE host core net)
 
 target_compile_definitions(xs_host_runtime_tests PRIVATE
     XS_TEST_MANAGED_FRAMEWORK_ASSEMBLY_PATH="${xs_managed_framework_runtime_assets_ASSEMBLY_PATH}"

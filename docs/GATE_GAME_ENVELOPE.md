@@ -1,9 +1,9 @@
-﻿# GATE_GAME_ENVELOPE
+# GATE_GAME_ENVELOPE
 
 本文档定义 XServerByAI 当前阶段 Gate 与 Game 之间的中继封装格式。该格式用于承载“客户端请求转发到 Game”“Game 将业务响应回传 Gate”“Game 经由 Gate 主动推送客户端消息”三类链路语义。当前默认 Gate↔Game 传输承载在 ZeroMQ over TCP 全连接链路上。
 
 **适用范围**
-1. 当前覆盖 `Relay.ForwardToGame`（`msgId = 2000`）与 `Relay.PushToClient`（`msgId = 2001`）两类内部消息。
+1. 当前覆盖 `Relay.ForwardToGame`（`msgId = 2000`）、`Relay.PushToClient`（`msgId = 2001`）与 `Relay.ForwardStubCall`（`msgId = 2002`）三类内部消息。
 2. `Relay.ForwardToGame` 的请求方向为 `Gate -> Game`；成功或失败响应方向为 `Game -> Gate`，响应复用同一 `msgId` 并设置 `PacketHeader.flags.Response`。
 3. `Relay.PushToClient` 的方向为 `Game -> Gate`，当前为单向消息，不定义显式协议级确认。
 4. `PacketHeader.flags.Error` 在本链路中只表达“中继层失败”，不直接等价于客户端业务层失败。
@@ -90,6 +90,30 @@
 1. `relay.clientFlags` 不得设置 `Response` 位；如推送本身携带客户端错误语义，可按客户端协议需要设置 `Error` 位。
 2. `relay.clientSeq` 默认应为 `0`；只有客户端协议明确要求推送也携带关联序号时，才允许使用非零值。
 3. `relay.clientMsgId` 应指向客户端可见的推送消息编号，不能复用 `Inner` 或中继 `msgId`。
+
+**Relay.ForwardStubCall（`msgId = 2002`）**
+1. 用途：源 `Game` 将基于 `Mailbox` ownership 解析得到的目标 `ServerStub` 调用，经 `Gate` 中转到目标 `Game`。
+2. 外层 `PacketHeader.seq` 当前必须为 `0`，`PacketHeader.flags` 必须为 `0`；当前版本不定义协议级响应、确认或回执。
+3. 该消息不携带客户端会话字段，而是携带最小的 Stub 路由元数据；`Gate` 只负责校验并按 `targetGameNodeId` 转发，不参与业务分发。
+
+消息体：
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `sourceGameNodeId` | `string16` | 发起调用的源 `GameNodeId` |
+| `targetGameNodeId` | `string16` | 目标 Stub 当前 owner 所在 `GameNodeId` |
+| `targetStubType` | `string16` | 目标 `ServerStubEntity` 类型名 |
+| `stubCallMsgId` | `uint32` | Stub 内部消息编号；必须非零 |
+| `relayFlags` | `uint32` | 当前保留，必须置 `0` |
+| `payloadLength` | `uint32` | Stub 调用负载长度 |
+| `payload` | `bytes` | Stub 调用负载 |
+
+转发约束：
+1. `sourceGameNodeId`、`targetGameNodeId` 与 `targetStubType` 都必须为非空字符串。
+2. `stubCallMsgId = 0` 视为非法中继包。
+3. `relayFlags` 当前必须为 `0`；后续如需扩展确认、追踪或压缩语义，应分配新的协议字段或新的 `msgId`。
+4. `Gate` 收到该消息后，应校验源 `Game` 路由身份与 `sourceGameNodeId` 一致，再按 `targetGameNodeId` 查找目标 `Game` 会话并转发原始中继包。
+5. 目标 `Game` 收到后，应校验 `targetGameNodeId` 等于当前本地节点，再将其解码并投递给本地 `ServerStubEntity.OnStubCall(...)`。
 
 **字段与校验规则**
 1. `sessionId = 0` 一律视为非法中继包。

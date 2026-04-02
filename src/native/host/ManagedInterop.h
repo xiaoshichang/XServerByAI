@@ -13,7 +13,7 @@
 namespace xs::host
 {
 
-inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 6;
+inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 7;
 inline constexpr std::string_view kManagedExportsTypeName =
     "XServer.Managed.Framework.Interop.GameNativeExports, XServer.Managed.Framework";
 inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNativeGetAbiVersion";
@@ -54,6 +54,15 @@ using ManagedOnLogCallbackFn = void(XS_MANAGED_CALLTYPE*)(void* context, std::ui
                                                           std::uint32_t message_length);
 using ManagedCreateOnceTimerCallbackFn = std::int64_t(XS_MANAGED_CALLTYPE*)(void* context, std::uint64_t delay_ms);
 using ManagedCancelTimerCallbackFn = std::int32_t(XS_MANAGED_CALLTYPE*)(void* context, std::int64_t timer_id);
+using ManagedForwardStubCallCallbackFn =
+    std::int32_t(XS_MANAGED_CALLTYPE*)(void* context,
+                                       const std::uint8_t* target_game_node_id_utf8,
+                                       std::uint32_t target_game_node_id_length,
+                                       const std::uint8_t* target_stub_type_utf8,
+                                       std::uint32_t target_stub_type_length,
+                                       std::uint32_t msg_id,
+                                       const std::uint8_t* payload,
+                                       std::uint32_t payload_length);
 
 struct ManagedNativeCallbacks
 {
@@ -64,6 +73,7 @@ struct ManagedNativeCallbacks
     ManagedOnLogCallbackFn on_log{nullptr};
     ManagedCreateOnceTimerCallbackFn create_once_timer{nullptr};
     ManagedCancelTimerCallbackFn cancel_timer{nullptr};
+    ManagedForwardStubCallCallbackFn forward_stub_call{nullptr};
 };
 
 struct ManagedInitArgs

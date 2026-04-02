@@ -6,6 +6,7 @@
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
+#include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
 
 #include <asio/io_context.hpp>
@@ -191,9 +192,28 @@ xs::core::Json MakeClusterConfigJson(
     std::uint16_t gm_inner_port,
     std::uint16_t gm_control_port,
     std::uint16_t gate_inner_port = 7000U,
-    std::uint16_t game_inner_port = 7100U)
+    std::uint16_t game_inner_port = 7100U,
+    std::uint16_t second_game_inner_port = 0U)
 {
     const std::string root_log_dir = (base_path / "logs").string();
+    xs::core::Json game_block = xs::core::Json::object();
+    game_block["Game0"] = xs::core::Json{
+        {"innerNetwork",
+         xs::core::Json{
+             {"listenEndpoint",
+              xs::core::Json{{"host", "127.0.0.1"}, {"port", game_inner_port}}},
+         }},
+    };
+    if (second_game_inner_port != 0U)
+    {
+        game_block["Game1"] = xs::core::Json{
+            {"innerNetwork",
+             xs::core::Json{
+                 {"listenEndpoint",
+                  xs::core::Json{{"host", "127.0.0.1"}, {"port", second_game_inner_port}}},
+             }},
+        };
+    }
 
     return xs::core::Json{
         {"env", xs::core::Json{{"id", "local-dev"}, {"environment", "dev"}}},
@@ -249,17 +269,7 @@ xs::core::Json MakeClusterConfigJson(
                    }},
               }},
          }},
-        {"game",
-         xs::core::Json{
-             {"Game0",
-              xs::core::Json{
-                  {"innerNetwork",
-                   xs::core::Json{
-                       {"listenEndpoint",
-                        xs::core::Json{{"host", "127.0.0.1"}, {"port", game_inner_port}}},
-                   }},
-              }},
-         }},
+        {"game", game_block},
     };
 }
 
@@ -269,7 +279,8 @@ bool WriteRuntimeConfig(
     std::uint16_t gm_control_port,
     std::filesystem::path* file_path,
     std::uint16_t gate_inner_port = 7000U,
-    std::uint16_t game_inner_port = 7100U)
+    std::uint16_t game_inner_port = 7100U,
+    std::uint16_t second_game_inner_port = 0U)
 {
     if (file_path == nullptr)
     {
@@ -278,7 +289,15 @@ bool WriteRuntimeConfig(
     }
 
     *file_path = base_path / "config.json";
-    return WriteJsonFile(*file_path, MakeClusterConfigJson(base_path, gm_inner_port, gm_control_port, gate_inner_port, game_inner_port));
+    return WriteJsonFile(
+        *file_path,
+        MakeClusterConfigJson(
+            base_path,
+            gm_inner_port,
+            gm_control_port,
+            gate_inner_port,
+            game_inner_port,
+            second_game_inner_port));
 }
 
 bool DirectoryContainsRegularFile(const std::filesystem::path& path)
@@ -725,6 +744,38 @@ std::vector<std::byte> EncodeHeartbeatRequestPacket(std::uint32_t seq)
     return packet;
 }
 
+std::vector<std::byte> EncodeRelayForwardStubCallPacket(std::string_view source_game_node_id,
+                                                        std::string_view target_game_node_id,
+                                                        std::string_view target_stub_type,
+                                                        std::uint32_t stub_call_msg_id,
+                                                        std::span<const std::byte> payload)
+{
+    const xs::net::RelayForwardStubCall relay_message{
+        .source_game_node_id = std::string(source_game_node_id),
+        .target_game_node_id = std::string(target_game_node_id),
+        .target_stub_type = std::string(target_stub_type),
+        .stub_call_msg_id = stub_call_msg_id,
+        .relay_flags = 0u,
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    };
+
+    std::size_t wire_size = 0u;
+    XS_CHECK(
+        xs::net::GetRelayForwardStubCallWireSize(relay_message, &wire_size) == xs::net::RelayCodecErrorCode::None);
+
+    std::vector<std::byte> body(wire_size);
+    XS_CHECK(xs::net::EncodeRelayForwardStubCall(relay_message, body) == xs::net::RelayCodecErrorCode::None);
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + body.size());
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kRelayForwardStubCallMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(body.size()));
+    XS_CHECK(xs::net::EncodePacket(header, body, packet) == xs::net::PacketCodecErrorCode::None);
+    return packet;
+}
+
 std::vector<std::byte> EncodeClusterReadyNotifyPacket(
     std::uint64_t ready_epoch,
     bool cluster_ready)
@@ -1160,6 +1211,137 @@ void TestGateNodeRejectsUnknownGameRegister()
     CleanupTestDirectory(base_path);
 }
 
+void TestGateNodeForwardsStubCallBetweenGames()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gate-forward-stub-call-between-games");
+    const std::uint16_t gate_inner_port = AcquireLoopbackPort();
+    const std::string gate_endpoint = "tcp://127.0.0.1:" + std::to_string(gate_inner_port);
+    const std::uint16_t game0_inner_port = AcquireLoopbackPort();
+    const std::uint16_t game1_inner_port = AcquireLoopbackPort();
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(
+            base_path,
+            AcquireLoopbackPort(),
+            AcquireLoopbackPort(),
+            &config_path,
+            gate_inner_port,
+            game0_inner_port,
+            game1_inner_port))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGateNode gate_node(config_path);
+    if (!gate_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gate_node]() {
+        return gate_node.node().game_inner_listener_state() == xs::ipc::ZmqListenerState::Listening;
+    }));
+
+    RawZmqSocket source_dealer(ZMQ_DEALER);
+    RawZmqSocket target_dealer(ZMQ_DEALER);
+    XS_CHECK(source_dealer.IsValid());
+    XS_CHECK(target_dealer.IsValid());
+    XS_CHECK(source_dealer.SetRoutingId("Game0"));
+    XS_CHECK(target_dealer.SetRoutingId("Game1"));
+    XS_CHECK(source_dealer.Connect(gate_endpoint));
+    XS_CHECK(target_dealer.Connect(gate_endpoint));
+
+    auto wait_for_single_response =
+        [](RawZmqSocket& dealer, std::uint32_t expected_msg_id, std::uint32_t expected_seq) -> bool
+    {
+        std::vector<std::vector<std::byte>> dealer_frames;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            if (TryReceiveMultipartMessage(dealer.socket(), &dealer_frames))
+            {
+                XS_CHECK(dealer_frames.size() == 1U);
+                if (dealer_frames.size() != 1U)
+                {
+                    return false;
+                }
+
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(dealer_frames[0], &packet) == xs::net::PacketCodecErrorCode::None);
+                XS_CHECK(packet.header.msg_id == expected_msg_id);
+                XS_CHECK(packet.header.seq == expected_seq);
+                return true;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+
+        return false;
+    };
+
+    XS_CHECK(source_dealer.Send(EncodeRegisterRequestPacket(1U, "Game0", static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), game0_inner_port)));
+    XS_CHECK(target_dealer.Send(EncodeRegisterRequestPacket(1U, "Game1", static_cast<std::uint16_t>(xs::net::InnerProcessType::Game), game1_inner_port)));
+    XS_CHECK(wait_for_single_response(source_dealer, xs::net::kInnerRegisterMsgId, 1U));
+    XS_CHECK(wait_for_single_response(target_dealer, xs::net::kInnerRegisterMsgId, 1U));
+
+    XS_CHECK(source_dealer.Send(EncodeHeartbeatRequestPacket(2U)));
+    XS_CHECK(target_dealer.Send(EncodeHeartbeatRequestPacket(2U)));
+    XS_CHECK(wait_for_single_response(source_dealer, xs::net::kInnerHeartbeatMsgId, 2U));
+    XS_CHECK(wait_for_single_response(target_dealer, xs::net::kInnerHeartbeatMsgId, 2U));
+
+    const std::string stub_payload_text = "relay-test-payload";
+    const std::span<const std::byte> stub_payload(
+        reinterpret_cast<const std::byte*>(stub_payload_text.data()),
+        stub_payload_text.size());
+    XS_CHECK(source_dealer.Send(EncodeRelayForwardStubCallPacket("Game0", "Game1", "MatchStub", 5101U, stub_payload)));
+
+    std::vector<std::vector<std::byte>> target_frames;
+    bool forwarded = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (TryReceiveMultipartMessage(target_dealer.socket(), &target_frames))
+        {
+            XS_CHECK(target_frames.size() == 1U);
+            if (target_frames.size() != 1U)
+            {
+                break;
+            }
+
+            xs::net::PacketView packet{};
+            XS_CHECK(xs::net::DecodePacket(target_frames[0], &packet) == xs::net::PacketCodecErrorCode::None);
+            XS_CHECK(packet.header.msg_id == xs::net::kRelayForwardStubCallMsgId);
+            XS_CHECK(packet.header.flags == 0U);
+            XS_CHECK(packet.header.seq == xs::net::kPacketSeqNone);
+
+            xs::net::RelayForwardStubCall relay_message{};
+            XS_CHECK(
+                xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message) ==
+                xs::net::RelayCodecErrorCode::None);
+            XS_CHECK(relay_message.source_game_node_id == "Game0");
+            XS_CHECK(relay_message.target_game_node_id == "Game1");
+            XS_CHECK(relay_message.target_stub_type == "MatchStub");
+            XS_CHECK(relay_message.stub_call_msg_id == 5101U);
+            XS_CHECK(std::string(reinterpret_cast<const char*>(relay_message.payload.data()), relay_message.payload.size()) ==
+                     stub_payload_text);
+            forwarded = true;
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(forwarded);
+
+    gate_node.StopAndJoin();
+    XS_CHECK_MSG(gate_node.run_result() == xs::node::NodeErrorCode::None, gate_node.run_error().data());
+    XS_CHECK(gate_node.Uninit());
+
+    CleanupTestDirectory(base_path);
+}
+
 void TestGateNodeRejectsHeartbeatResponseWithErrorFlag()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gate-gm-session-heartbeat-invalid-envelope");
@@ -1268,6 +1450,7 @@ int main()
     TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify();
     TestGateNodeAcceptsGameRegisterAndHeartbeat();
     TestGateNodeRejectsUnknownGameRegister();
+    TestGateNodeForwardsStubCallBetweenGames();
     TestGateNodeRejectsHeartbeatResponseWithErrorFlag();
 
     if (g_failures != 0)

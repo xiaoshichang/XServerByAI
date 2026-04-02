@@ -16,6 +16,7 @@ namespace XServer.Managed.Framework.Interop
         private const int OwnershipApplyErrorOffset = 1000;
         private const string RuntimeLogCategory = "managed.runtime";
         private static ManagedNativeCallbacks s_nativeCallbacks;
+        private static ManagedNativeStubCallTransport? s_nativeStubCallTransport;
         private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
         private static GameNodeRuntimeState? s_runtimeState;
 
@@ -37,18 +38,21 @@ namespace XServer.Managed.Framework.Interop
             {
                 s_nativeCallbacks = args->NativeCallbacks;
                 NativeLoggerBridge.Configure(s_nativeCallbacks);
+                s_nativeStubCallTransport = ManagedNativeStubCallTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeTimerScheduler = new ManagedNativeTimerScheduler(s_nativeCallbacks);
                 string nodeId = ReadUtf8(args->NodeIdUtf8, args->NodeIdLength);
                 _ = ReadUtf8(args->ConfigPathUtf8, args->ConfigPathLength);
                 s_runtimeState = new GameNodeRuntimeState(
                     nodeId,
                     NotifyNativeServerStubReady,
+                    s_nativeStubCallTransport,
                     nativeTimerScheduler: s_nativeTimerScheduler);
                 NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime initialized.");
                 return 0;
             }
             catch
             {
+                s_nativeStubCallTransport = null;
                 s_nativeTimerScheduler?.Reset();
                 s_nativeTimerScheduler = null;
                 NativeLoggerBridge.Reset();
@@ -61,8 +65,53 @@ namespace XServer.Managed.Framework.Interop
         [UnmanagedCallersOnly(EntryPoint = "GameNativeOnMessage", CallConvs = [typeof(CallConvCdecl)])]
         public static int GameNativeOnMessage(ManagedMessageView* message)
         {
-            _ = message;
-            return 0;
+            if (message == null)
+            {
+                return 0;
+            }
+
+            if (s_runtimeState == null)
+            {
+                return RuntimeNotInitialized;
+            }
+
+            try
+            {
+                if (message->MsgId != RelayStubCallCodec.ForwardStubCallMsgId)
+                {
+                    return 0;
+                }
+
+                if (!RelayStubCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayStubCallCodec.RelayStubCallEnvelope relay))
+                {
+                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded stub call payload.");
+                    return InvalidArgument;
+                }
+
+                if (!string.Equals(relay.TargetGameNodeId, s_runtimeState.NodeId, StringComparison.Ordinal))
+                {
+                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime rejected forwarded stub call for another game node.");
+                    return InvalidArgument;
+                }
+
+                StubCallErrorCode result = s_runtimeState.ReceiveStubCall(
+                    relay.TargetStubType,
+                    new StubCallMessage(relay.StubCallMsgId, relay.Payload));
+                if (result != StubCallErrorCode.None)
+                {
+                    NativeLoggerBridge.Warn(
+                        RuntimeLogCategory,
+                        $"Game managed runtime rejected forwarded stub call: {StubCallError.Message(result)}");
+                    return (int)result;
+                }
+
+                return 0;
+            }
+            catch
+            {
+                NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed while handling forwarded stub call.");
+                return InvalidArgument;
+            }
         }
 
         [UnmanagedCallersOnly(EntryPoint = "GameNativeOnTick", CallConvs = [typeof(CallConvCdecl)])]

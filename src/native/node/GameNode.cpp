@@ -5,6 +5,7 @@
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
+#include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
 
 #include <asio/post.hpp>
@@ -33,6 +34,7 @@ constexpr std::uint16_t kErrorResponseFlags = kResponseFlags | static_cast<std::
 constexpr std::int64_t kManagedNativeCreateTimerFailed = static_cast<std::int64_t>(xs::core::TimerErrorCode::Unknown);
 constexpr std::int32_t kManagedNativeCallbackInvalidArgument = -1;
 constexpr std::int32_t kManagedNativeCallbackOperationFailed = -2;
+constexpr std::int32_t kManagedNativeCallbackTargetNodeUnavailable = 4;
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -261,6 +263,41 @@ std::int32_t GameNode::HandleManagedCancelTimerCallback(void* context, std::int6
     return game_node->CancelManagedTimer(timer_id);
 }
 
+std::int32_t GameNode::HandleManagedForwardStubCallCallback(
+    void* context,
+    const std::uint8_t* target_game_node_id_utf8,
+    std::uint32_t target_game_node_id_length,
+    const std::uint8_t* target_stub_type_utf8,
+    std::uint32_t target_stub_type_length,
+    std::uint32_t msg_id,
+    const std::uint8_t* payload,
+    std::uint32_t payload_length)
+{
+    if (context == nullptr)
+    {
+        return kManagedNativeCallbackInvalidArgument;
+    }
+
+    std::string_view target_game_node_id;
+    std::string_view target_stub_type;
+    if (!TryReadManagedUtf8View(target_game_node_id_utf8, target_game_node_id_length, &target_game_node_id) ||
+        !TryReadManagedUtf8View(target_stub_type_utf8, target_stub_type_length, &target_stub_type))
+    {
+        return kManagedNativeCallbackInvalidArgument;
+    }
+
+    if (payload == nullptr && payload_length != 0U)
+    {
+        return kManagedNativeCallbackInvalidArgument;
+    }
+
+    const std::span<const std::byte> payload_view(
+        reinterpret_cast<const std::byte*>(payload),
+        static_cast<std::size_t>(payload_length));
+    auto* game_node = static_cast<GameNode*>(context);
+    return game_node->ForwardManagedStubCall(target_game_node_id, target_stub_type, msg_id, payload_view);
+}
+
 void GameNode::HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message)
 {
     const std::string_view resolved_category = category.empty() ? kManagedRuntimeLogCategory : category;
@@ -308,6 +345,96 @@ std::int32_t GameNode::CancelManagedTimer(std::int64_t timer_id)
         return kManagedNativeCallbackOperationFailed;
     }
 
+    return 0;
+}
+
+std::int32_t GameNode::ForwardManagedStubCall(
+    std::string_view target_game_node_id,
+    std::string_view target_stub_type,
+    std::uint32_t msg_id,
+    std::span<const std::byte> payload)
+{
+    if (target_game_node_id.empty() || target_stub_type.empty() || msg_id == 0U || inner_network() == nullptr)
+    {
+        return kManagedNativeCallbackInvalidArgument;
+    }
+
+    InnerNetworkSession* gate_session = nullptr;
+    std::string_view selected_gate_node_id;
+    for (const auto& [gate_node_id, gate_config] : cluster_config().gates)
+    {
+        (void)gate_config;
+
+        InnerNetworkSession* session = remote_session(gate_node_id);
+        if (session == nullptr ||
+            session->connection_state != ipc::ZmqConnectionState::Connected ||
+            !session->registered ||
+            !session->inner_network_ready)
+        {
+            continue;
+        }
+
+        gate_session = session;
+        selected_gate_node_id = gate_node_id;
+        break;
+    }
+
+    if (gate_session == nullptr)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node cannot forward stub call because no Gate is ready.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    const xs::net::RelayForwardStubCall relay_message{
+        .source_game_node_id = std::string(node_id()),
+        .target_game_node_id = std::string(target_game_node_id),
+        .target_stub_type = std::string(target_stub_type),
+        .stub_call_msg_id = msg_id,
+        .relay_flags = 0u,
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    };
+
+    std::size_t wire_size = 0u;
+    const xs::net::RelayCodecErrorCode wire_size_result =
+        xs::net::GetRelayForwardStubCallWireSize(relay_message, &wire_size);
+    if (wire_size_result != xs::net::RelayCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(wire_size_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size forwarded stub call payload.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    std::vector<std::byte> relay_payload(wire_size);
+    const xs::net::RelayCodecErrorCode encode_result =
+        xs::net::EncodeRelayForwardStubCall(relay_message, relay_payload);
+    if (encode_result != xs::net::RelayCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(encode_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode forwarded stub call payload.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kRelayForwardStubCallMsgId, xs::net::kPacketSeqNone, 0U,
+                                  static_cast<std::uint32_t>(relay_payload.size()));
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + relay_payload.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, relay_payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap forwarded stub call into a packet.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(selected_gate_node_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(inner_network()->last_error_message());
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send forwarded stub call to Gate.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    gate_session->last_protocol_error.clear();
     return 0;
 }
 
@@ -603,6 +730,7 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
         .on_log = &GameNode::HandleManagedLogCallback,
         .create_once_timer = &GameNode::HandleManagedCreateOnceTimerCallback,
         .cancel_timer = &GameNode::HandleManagedCancelTimerCallback,
+        .forward_stub_call = &GameNode::HandleManagedForwardStubCallCallback,
     };
     const xs::host::ManagedInitArgs init_args{
         .struct_size = sizeof(xs::host::ManagedInitArgs),
@@ -821,6 +949,67 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         session->last_protocol_error = std::string(protocol_error);
         logger().Log(xs::core::LogLevel::Warn, "inner", log_message);
     };
+
+    if (packet.header.msg_id == xs::net::kRelayForwardStubCallMsgId)
+    {
+        if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+        {
+            session->last_protocol_error = "Gate forwarded stub call envelope is invalid.";
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node ignored Gate forwarded stub call with an invalid envelope.");
+            return;
+        }
+
+        xs::net::RelayForwardStubCall relay_message{};
+        const xs::net::RelayCodecErrorCode decode_result =
+            xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message);
+        if (decode_result != xs::net::RelayCodecErrorCode::None)
+        {
+            session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(decode_result));
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate forwarded stub call.");
+            return;
+        }
+
+        if (relay_message.target_game_node_id != node_id())
+        {
+            session->last_protocol_error = "Gate forwarded stub call target game node mismatch.";
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node rejected Gate forwarded stub call for another game node.");
+            return;
+        }
+
+        if (!managed_exports_loaded_ || managed_exports_.on_message == nullptr)
+        {
+            session->last_protocol_error = "Game managed runtime is unavailable for forwarded stub call.";
+            logger().Log(xs::core::LogLevel::Warn, "runtime",
+                         "Game node cannot dispatch forwarded stub call before managed exports are ready.");
+            return;
+        }
+
+        const xs::host::ManagedMessageView managed_message{
+            .struct_size = sizeof(xs::host::ManagedMessageView),
+            .msg_id = packet.header.msg_id,
+            .seq = packet.header.seq,
+            .flags = packet.header.flags,
+            .session_id = 0u,
+            .player_id = 0u,
+            .payload = reinterpret_cast<const std::uint8_t*>(packet.payload.data()),
+            .payload_length = static_cast<std::uint32_t>(packet.payload.size()),
+            .reserved0 = 0u,
+        };
+        const std::int32_t managed_result = managed_exports_.on_message(&managed_message);
+        if (managed_result != 0)
+        {
+            session->last_protocol_error =
+                "Game managed runtime rejected forwarded stub call with error code " + std::to_string(managed_result) + ".";
+            logger().Log(xs::core::LogLevel::Warn, "runtime",
+                         "Game node observed a managed forwarded stub call failure.");
+            return;
+        }
+
+        session->last_protocol_error.clear();
+        return;
+    }
 
     if (packet.header.seq == xs::net::kPacketSeqNone)
     {

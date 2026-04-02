@@ -5,6 +5,7 @@
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
+#include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
 
 #include <array>
@@ -618,6 +619,12 @@ void GateNode::HandleGameMessage(
         return;
     }
 
+    if (raw_header.msg_id == xs::net::kRelayForwardStubCallMsgId)
+    {
+        HandleGameForwardStubCallMessage(routing_id, payload);
+        return;
+    }
+
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
@@ -626,6 +633,114 @@ void GateNode::HandleGameMessage(
         xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored an unsupported Game inner packet.", context);
+}
+
+void GateNode::HandleGameForwardStubCallMessage(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
+    xs::net::PacketView packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node dropped malformed forwarded stub call packet.", context);
+        return;
+    }
+
+    if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored forwarded stub call with an invalid envelope.", context);
+        return;
+    }
+
+    xs::net::RelayForwardStubCall relay_message{};
+    const xs::net::RelayCodecErrorCode decode_result =
+        xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message);
+    if (decode_result != xs::net::RelayCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"relayError", std::string(xs::net::RelayCodecErrorMessage(decode_result))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode forwarded stub call payload.", context);
+        return;
+    }
+
+    InnerNetworkSession* source_session = inner_network_remote_sessions().FindMutableByRoutingId(routing_id);
+    if (source_session == nullptr || !source_session->registered)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded stub call from an unregistered Game.", context);
+        return;
+    }
+
+    if (source_session->node_id != relay_message.source_game_node_id)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", source_session->node_id},
+            xs::core::LogContextField{"declaredSourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded stub call with a mismatched source Game node.", context);
+        return;
+    }
+
+    InnerNetworkSession* target_session = remote_session(relay_message.target_game_node_id);
+    if (target_session == nullptr ||
+        target_session->process_type != xs::core::ProcessType::Game ||
+        target_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !target_session->registered ||
+        !target_session->inner_network_ready ||
+        target_session->routing_id.empty())
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
+            xs::core::LogContextField{"targetStubType", relay_message.target_stub_type},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node cannot forward stub call because target Game is unavailable.", context);
+        return;
+    }
+
+    if (inner_network() == nullptr)
+    {
+        return;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(target_session->routing_id, payload);
+    if (send_result != NodeErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
+            xs::core::LogContextField{"targetStubType", relay_message.target_stub_type},
+            xs::core::LogContextField{"innerNetworkError", std::string(inner_network()->last_error_message())},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to forward stub call to target Game.", context);
+    }
 }
 
 void GateNode::HandleGameRegisterMessage(

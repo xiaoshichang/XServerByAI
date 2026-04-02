@@ -4,7 +4,7 @@ namespace XServer.Managed.Framework.Interop
 {
     public static class ManagedAbi
     {
-        public const uint Version = 7;
+        public const uint Version = 8;
     }
 
     [StructLayout(LayoutKind.Sequential)]

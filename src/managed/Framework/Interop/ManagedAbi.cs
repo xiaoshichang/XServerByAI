@@ -4,7 +4,7 @@ namespace XServer.Managed.Framework.Interop
 {
     public static class ManagedAbi
     {
-        public const uint Version = 6;
+        public const uint Version = 7;
         public const int NodeIdMaxUtf8Bytes = 128;
         public const int ServerStubEntityTypeMaxUtf8Bytes = 128;
         public const int ServerStubEntityIdMaxUtf8Bytes = 128;
@@ -30,6 +30,7 @@ namespace XServer.Managed.Framework.Interop
         public delegate* unmanaged[Cdecl]<void*, uint, byte*, uint, byte*, uint, void> OnLog;
         public delegate* unmanaged[Cdecl]<void*, ulong, long> CreateOnceTimer;
         public delegate* unmanaged[Cdecl]<void*, long, int> CancelTimer;
+        public delegate* unmanaged[Cdecl]<void*, byte*, uint, byte*, uint, uint, byte*, uint, int> ForwardStubCall;
     }
 
     [StructLayout(LayoutKind.Sequential)]

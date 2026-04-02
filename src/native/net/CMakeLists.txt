@@ -11,6 +11,8 @@ add_library(net STATIC
     message/HeartbeatCodec.h
     message/PacketCodec.cpp
     message/PacketCodec.h
+    message/RelayCodec.cpp
+    message/RelayCodec.h
     message/RegisterCodec.cpp
     message/RegisterCodec.h
     net.cpp

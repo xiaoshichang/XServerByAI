@@ -4,6 +4,7 @@
 #include "ServerNode.h"
 #include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
+#include "message/RelayCodec.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -81,10 +82,24 @@ class GameNode final : public ServerNode
                                          std::uint32_t message_length);
     static std::int64_t HandleManagedCreateOnceTimerCallback(void* context, std::uint64_t delay_ms);
     static std::int32_t HandleManagedCancelTimerCallback(void* context, std::int64_t timer_id);
+    static std::int32_t HandleManagedForwardStubCallCallback(
+        void* context,
+        const std::uint8_t* target_game_node_id_utf8,
+        std::uint32_t target_game_node_id_length,
+        const std::uint8_t* target_stub_type_utf8,
+        std::uint32_t target_stub_type_length,
+        std::uint32_t msg_id,
+        const std::uint8_t* payload,
+        std::uint32_t payload_length);
     void HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry);
     void HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message);
     [[nodiscard]] std::int64_t CreateManagedOnceTimer(std::uint64_t delay_ms);
     [[nodiscard]] std::int32_t CancelManagedTimer(std::int64_t timer_id);
+    [[nodiscard]] std::int32_t ForwardManagedStubCall(
+        std::string_view target_game_node_id,
+        std::string_view target_stub_type,
+        std::uint32_t msg_id,
+        std::span<const std::byte> payload);
     void HandleManagedTimerFired(std::int64_t timer_id);
     void HandleClusterNodesOnlineNotify(const xs::net::PacketView& packet);
     void HandleServerStubOwnershipSync(const xs::net::PacketView& packet);

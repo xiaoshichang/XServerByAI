@@ -6,6 +6,7 @@
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
+#include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
 
 #include <asio/io_context.hpp>
@@ -741,6 +742,39 @@ std::vector<std::byte> EncodeServerStubOwnershipSyncPacket(
     XS_CHECK(xs::net::EncodePacket(header, body, packet) == xs::net::PacketCodecErrorCode::None);
     return packet;
 }
+
+std::vector<std::byte> EncodeRelayForwardStubCallPacket(std::string_view source_game_node_id,
+                                                        std::string_view target_game_node_id,
+                                                        std::string_view target_stub_type,
+                                                        std::uint32_t stub_call_msg_id,
+                                                        std::span<const std::byte> payload)
+{
+    const xs::net::RelayForwardStubCall relay_message{
+        .source_game_node_id = std::string(source_game_node_id),
+        .target_game_node_id = std::string(target_game_node_id),
+        .target_stub_type = std::string(target_stub_type),
+        .stub_call_msg_id = stub_call_msg_id,
+        .relay_flags = 0u,
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    };
+
+    std::size_t wire_size = 0u;
+    XS_CHECK(
+        xs::net::GetRelayForwardStubCallWireSize(relay_message, &wire_size) == xs::net::RelayCodecErrorCode::None);
+
+    std::vector<std::byte> body(wire_size);
+    XS_CHECK(xs::net::EncodeRelayForwardStubCall(relay_message, body) == xs::net::RelayCodecErrorCode::None);
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + body.size());
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        xs::net::kRelayForwardStubCallMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(body.size()));
+    XS_CHECK(xs::net::EncodePacket(header, body, packet) == xs::net::PacketCodecErrorCode::None);
+    return packet;
+}
+
 void TestGameNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-real-gm");
@@ -2127,6 +2161,331 @@ void TestGameNodeSkipsServiceReadyReportWhenNoStubIsOwned()
     CleanupTestDirectory(base_path);
 }
 
+void TestGameNodeForwardsRemoteStubCallThroughGate()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-game-forward-stub-call-through-gate");
+
+    RawZmqSocket gm_router(ZMQ_ROUTER);
+    RawZmqSocket gate_router(ZMQ_ROUTER);
+    XS_CHECK(gm_router.IsValid());
+    XS_CHECK(gate_router.IsValid());
+
+    const std::string gm_endpoint = gm_router.BindLoopbackTcp();
+    const std::string gate_endpoint = gate_router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+    XS_CHECK(!gate_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(
+            base_path,
+            ParsePortFromTcpEndpoint(gm_endpoint),
+            AcquireLoopbackPort(),
+            &config_path,
+            {ParsePortFromTcpEndpoint(gate_endpoint)},
+            AcquireLoopbackPort()))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::vector<std::byte> gm_routing_id;
+    bool gm_register_accepted = false;
+    bool all_nodes_online_sent = false;
+    bool gate_register_accepted = false;
+    bool gate_heartbeat_accepted = false;
+    bool ownership_sync_sent = false;
+    bool forwarded_stub_call_received = false;
+    const xs::net::ServerStubOwnershipSync accepted_sync{
+        .assignment_epoch = 31u,
+        .status_flags = 0u,
+        .assignments =
+            {
+                xs::net::ServerStubOwnershipEntry{
+                    .entity_type = "OnlineStub",
+                    .entity_id = "unknown",
+                    .owner_game_node_id = "Game0",
+                    .entry_flags = 0u,
+                },
+                xs::net::ServerStubOwnershipEntry{
+                    .entity_type = "MatchStub",
+                    .entity_id = "unknown",
+                    .owner_game_node_id = "Game1",
+                    .entry_flags = 0u,
+                },
+            },
+        .server_now_unix_ms = CurrentUnixTimeMilliseconds(),
+    };
+
+    std::vector<std::vector<std::byte>> gm_frames;
+    std::vector<std::vector<std::byte>> gate_frames;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+    while (std::chrono::steady_clock::now() < deadline && !forwarded_stub_call_received)
+    {
+        if (TryReceiveMultipartMessage(gm_router.socket(), &gm_frames))
+        {
+            XS_CHECK(gm_frames.size() == 2U);
+            if (gm_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gm_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    gm_routing_id = gm_frames[0];
+                    gm_register_accepted = true;
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], EncodeHeartbeatSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+                else if (packet.header.msg_id == xs::net::kInnerGameGateMeshReadyReportMsgId && !ownership_sync_sent)
+                {
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], EncodeServerStubOwnershipSyncPacket(accepted_sync)));
+                    ownership_sync_sent = true;
+                }
+            }
+        }
+
+        if (gm_register_accepted && !all_nodes_online_sent && !gm_routing_id.empty())
+        {
+            XS_CHECK(SendRouterReply(gm_router.socket(), gm_routing_id, EncodeClusterNodesOnlineNotifyPacket(true)));
+            all_nodes_online_sent = true;
+        }
+
+        if (TryReceiveMultipartMessage(gate_router.socket(), &gate_frames))
+        {
+            XS_CHECK(gate_frames.size() == 2U);
+            if (gate_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gate_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    gate_register_accepted = true;
+                    XS_CHECK(SendRouterReply(gate_router.socket(), gate_frames[0], EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    gate_heartbeat_accepted = true;
+                    XS_CHECK(SendRouterReply(gate_router.socket(), gate_frames[0], EncodeHeartbeatSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+                else if (packet.header.msg_id == xs::net::kRelayForwardStubCallMsgId)
+                {
+                    xs::net::RelayForwardStubCall relay_message{};
+                    XS_CHECK(
+                        xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message) ==
+                        xs::net::RelayCodecErrorCode::None);
+                    XS_CHECK(relay_message.source_game_node_id == "Game0");
+                    XS_CHECK(relay_message.target_game_node_id == "Game1");
+                    XS_CHECK(relay_message.target_stub_type == "MatchStub");
+                    XS_CHECK(relay_message.stub_call_msg_id == 5101U);
+                    XS_CHECK(std::string(reinterpret_cast<const char*>(relay_message.payload.data()), relay_message.payload.size()) ==
+                             "online-startup-call");
+                    forwarded_stub_call_received = true;
+                    break;
+                }
+            }
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(gm_register_accepted);
+    XS_CHECK(all_nodes_online_sent);
+    XS_CHECK(gate_register_accepted);
+    XS_CHECK(gate_heartbeat_accepted);
+    XS_CHECK(ownership_sync_sent);
+    XS_CHECK(forwarded_stub_call_received);
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
+
+    CleanupTestDirectory(base_path);
+}
+
+void TestGameNodeAcceptsForwardedStubCallFromGate()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-game-accept-forwarded-stub-call");
+
+    RawZmqSocket gm_router(ZMQ_ROUTER);
+    RawZmqSocket gate_router(ZMQ_ROUTER);
+    XS_CHECK(gm_router.IsValid());
+    XS_CHECK(gate_router.IsValid());
+
+    const std::string gm_endpoint = gm_router.BindLoopbackTcp();
+    const std::string gate_endpoint = gate_router.BindLoopbackTcp();
+    XS_CHECK(!gm_endpoint.empty());
+    XS_CHECK(!gate_endpoint.empty());
+
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(
+            base_path,
+            ParsePortFromTcpEndpoint(gm_endpoint),
+            AcquireLoopbackPort(),
+            &config_path,
+            {ParsePortFromTcpEndpoint(gate_endpoint)},
+            AcquireLoopbackPort()))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    RunningGameNode game_node(config_path);
+    if (!game_node.Start())
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    std::vector<std::byte> gm_routing_id;
+    std::vector<std::byte> gate_routing_id;
+    bool gm_register_accepted = false;
+    bool all_nodes_online_sent = false;
+    bool gate_register_accepted = false;
+    bool gate_heartbeat_accepted = false;
+    bool ownership_sync_sent = false;
+    bool relay_sent = false;
+    std::chrono::steady_clock::time_point relay_sent_at{};
+    const xs::net::ServerStubOwnershipSync accepted_sync{
+        .assignment_epoch = 37u,
+        .status_flags = 0u,
+        .assignments =
+            {
+                xs::net::ServerStubOwnershipEntry{
+                    .entity_type = "MatchStub",
+                    .entity_id = "unknown",
+                    .owner_game_node_id = "Game0",
+                    .entry_flags = 0u,
+                },
+            },
+        .server_now_unix_ms = CurrentUnixTimeMilliseconds(),
+    };
+
+    std::vector<std::vector<std::byte>> gm_frames;
+    std::vector<std::vector<std::byte>> gate_frames;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        if (TryReceiveMultipartMessage(gm_router.socket(), &gm_frames))
+        {
+            XS_CHECK(gm_frames.size() == 2U);
+            if (gm_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gm_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    gm_routing_id = gm_frames[0];
+                    gm_register_accepted = true;
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], EncodeHeartbeatSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+                else if (packet.header.msg_id == xs::net::kInnerGameGateMeshReadyReportMsgId && !ownership_sync_sent)
+                {
+                    XS_CHECK(SendRouterReply(gm_router.socket(), gm_frames[0], EncodeServerStubOwnershipSyncPacket(accepted_sync)));
+                    ownership_sync_sent = true;
+                }
+            }
+        }
+
+        if (gm_register_accepted && !all_nodes_online_sent && !gm_routing_id.empty())
+        {
+            XS_CHECK(SendRouterReply(gm_router.socket(), gm_routing_id, EncodeClusterNodesOnlineNotifyPacket(true)));
+            all_nodes_online_sent = true;
+        }
+
+        if (TryReceiveMultipartMessage(gate_router.socket(), &gate_frames))
+        {
+            XS_CHECK(gate_frames.size() == 2U);
+            if (gate_frames.size() == 2U)
+            {
+                xs::net::PacketView packet{};
+                XS_CHECK(xs::net::DecodePacket(gate_frames[1], &packet) == xs::net::PacketCodecErrorCode::None);
+
+                if (packet.header.msg_id == xs::net::kInnerRegisterMsgId)
+                {
+                    gate_routing_id = gate_frames[0];
+                    gate_register_accepted = true;
+                    XS_CHECK(SendRouterReply(gate_router.socket(), gate_frames[0], EncodeRegisterSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+                else if (packet.header.msg_id == xs::net::kInnerHeartbeatMsgId)
+                {
+                    gate_heartbeat_accepted = true;
+                    XS_CHECK(SendRouterReply(gate_router.socket(), gate_frames[0], EncodeHeartbeatSuccessPacket(packet.header.seq, 500U, 1500U)));
+                }
+            }
+        }
+
+        if (ownership_sync_sent &&
+            gate_heartbeat_accepted &&
+            game_node.node().assignment_epoch() == accepted_sync.assignment_epoch &&
+            !relay_sent &&
+            !gate_routing_id.empty())
+        {
+            const std::string stub_payload_text = "forwarded-from-gate";
+            const std::span<const std::byte> stub_payload(
+                reinterpret_cast<const std::byte*>(stub_payload_text.data()),
+                stub_payload_text.size());
+            XS_CHECK(
+                SendRouterReply(
+                    gate_router.socket(),
+                    gate_routing_id,
+                    EncodeRelayForwardStubCallPacket("Game9", "Game0", "MatchStub", 5101U, stub_payload)));
+            relay_sent = true;
+            relay_sent_at = std::chrono::steady_clock::now();
+        }
+
+        if (relay_sent && std::chrono::steady_clock::now() - relay_sent_at >= std::chrono::milliseconds(800))
+        {
+            break;
+        }
+
+        if (game_node.run_completed())
+        {
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    XS_CHECK(gm_register_accepted);
+    XS_CHECK(all_nodes_online_sent);
+    XS_CHECK(gate_register_accepted);
+    XS_CHECK(gate_heartbeat_accepted);
+    XS_CHECK(ownership_sync_sent);
+    XS_CHECK(relay_sent);
+
+    game_node.StopAndJoin();
+    XS_CHECK_MSG(game_node.run_result() == xs::node::NodeErrorCode::None, game_node.run_error().data());
+    XS_CHECK(game_node.Uninit());
+
+    const std::filesystem::path log_dir = base_path / "logs";
+    XS_CHECK(DirectoryContainsRegularFile(log_dir));
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("MatchStub received call msgId=5101.") != std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
+
 void TestGameNodeRejectsHeartbeatResponseWithErrorFlag()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-game-gm-session-heartbeat-invalid-envelope");
@@ -2239,6 +2598,8 @@ int main()
     TestGameNodeNormalizesWildcardGateConnectorEndpoints();
     TestGameNodeReportsMeshReadyAndAppliesOwnershipAfterGateMeshCompletes();
     TestGameNodeSkipsServiceReadyReportWhenNoStubIsOwned();
+    TestGameNodeForwardsRemoteStubCallThroughGate();
+    TestGameNodeAcceptsForwardedStubCallFromGate();
     TestGameNodeRejectsHeartbeatResponseWithErrorFlag();
 
     if (g_failures != 0)

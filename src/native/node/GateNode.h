@@ -56,6 +56,9 @@ class GateNode final : public ServerNode
     void HandleGameHeartbeatMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
+    void HandleGameForwardStubCallMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
     void HandleClusterReadyNotify(const xs::net::PacketView& packet);
     void HandleRegisterResponse(const xs::net::PacketView& packet);
     void HandleHeartbeatResponse(const xs::net::PacketView& packet);

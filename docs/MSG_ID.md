@@ -58,6 +58,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `2000` | `Relay.ForwardToGame` | `Gate -> Game` | `gate` | `Active` | Gate 将客户端请求中继到已绑定 Game；响应复用同一 `msgId` |
 | `2001` | `Relay.PushToClient` | `Game -> Gate` | `game` | `Active` | Game 发起的单向下行推送，由 Gate 重新封装后发送给客户端 |
+| `2002` | `Relay.ForwardStubCall` | `Game -> Gate -> Game` | `gate` | `Active` | Game 按 `Mailbox` ownership 通过 Gate 单向转发 `ServerStub` 调用到目标 Game |
 
 **命名规范**
 1. 每个消息都应维护一个规范英文名，使用 `PascalCase` 片段并以 `.` 分隔，格式为 `<Area>.<Action>` 或 `<Area>.<Subject>.<Action>`。
