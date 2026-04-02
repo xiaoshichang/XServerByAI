@@ -58,6 +58,12 @@ class ClientNetwork final
     [[nodiscard]] const ClientSession* FindSession(std::uint64_t session_id) const noexcept;
     [[nodiscard]] ClientSession* FindSessionByConversation(std::uint32_t conversation) noexcept;
     [[nodiscard]] const ClientSession* FindSessionByConversation(std::uint32_t conversation) const noexcept;
+    [[nodiscard]] ClientSession* FindSessionByTransport(
+        std::uint32_t conversation,
+        const xs::net::Endpoint& remote_endpoint) noexcept;
+    [[nodiscard]] const ClientSession* FindSessionByTransport(
+        std::uint32_t conversation,
+        const xs::net::Endpoint& remote_endpoint) const noexcept;
     [[nodiscard]] bool RemoveSession(std::uint64_t session_id) noexcept;
 
     [[nodiscard]] bool initialized() const noexcept;

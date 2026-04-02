@@ -1,6 +1,7 @@
 #include "GateNode.h"
 #include "GmNode.h"
 #include "Json.h"
+#include "KcpPeer.h"
 #include "TestManagedConfigJson.h"
 #include "TimeUtils.h"
 #include "message/HeartbeatCodec.h"
@@ -12,6 +13,7 @@
 #include <asio/io_context.hpp>
 #include <asio/ip/address_v4.hpp>
 #include <asio/ip/tcp.hpp>
+#include <asio/ip/udp.hpp>
 
 #include <zmq.h>
 
@@ -185,6 +187,31 @@ std::uint16_t AcquireLoopbackPort()
     const std::uint16_t port = acceptor.local_endpoint().port();
     acceptor.close();
     return port;
+}
+
+std::vector<std::byte> BytesFromText(std::string_view value)
+{
+    std::vector<std::byte> bytes;
+    bytes.reserve(value.size());
+
+    for (const char character : value)
+    {
+        bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(character)));
+    }
+
+    return bytes;
+}
+
+void SendDatagrams(
+    asio::ip::udp::socket& socket,
+    const asio::ip::udp::endpoint& target,
+    const std::vector<std::vector<std::byte>>& datagrams)
+{
+    for (const auto& datagram : datagrams)
+    {
+        const std::size_t sent = socket.send_to(asio::buffer(datagram), target);
+        XS_CHECK(sent == datagram.size());
+    }
 }
 
 xs::core::Json MakeClusterConfigJson(
@@ -907,6 +934,7 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
     XS_CHECK(!gate_node.node().cluster_ready());
     XS_CHECK(gate_node.node().cluster_ready_epoch() == 0U);
     XS_CHECK(!gate_node.node().client_network_running());
+    XS_CHECK(gate_node.node().client_network_session_count() == 0U);
 
     std::vector<std::vector<std::byte>> router_frames;
     bool register_accepted = false;
@@ -979,6 +1007,29 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
             gate_node.node().cluster_ready_epoch() == 7U &&
             gate_node.node().client_network_running();
     }));
+    XS_CHECK(gate_node.node().client_network_session_count() == 0U);
+
+    asio::io_context client_io_context;
+    asio::ip::udp::socket client_socket(
+        client_io_context,
+        asio::ip::udp::endpoint(asio::ip::address_v4::loopback(), 0U));
+    const asio::ip::udp::endpoint gate_client_endpoint(asio::ip::address_v4::loopback(), 4000U);
+
+    xs::core::KcpConfig client_kcp_config;
+    client_kcp_config.no_congestion_window = true;
+
+    xs::net::KcpPeer client_peer({
+        .conversation = 21U,
+        .config = client_kcp_config,
+    });
+    XS_CHECK_MSG(client_peer.valid(), client_peer.last_error_message().data());
+    XS_CHECK(client_peer.Send(BytesFromText("gate-client-first-payload")) == xs::net::KcpPeerErrorCode::None);
+    XS_CHECK(client_peer.Flush(0U) == xs::net::KcpPeerErrorCode::None);
+    SendDatagrams(client_socket, gate_client_endpoint, client_peer.ConsumeOutgoingDatagrams());
+
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gate_node]() {
+        return gate_node.node().client_network_session_count() == 1U;
+    }));
 
     gate_node.StopAndJoin();
     XS_CHECK_MSG(gate_node.run_result() == xs::node::NodeErrorCode::None, gate_node.run_error().data());
@@ -990,6 +1041,8 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
     const std::string log_text = ReadDirectoryText(log_dir);
     XS_CHECK(log_text.find("Gate node accepted GM cluster ready notify.") != std::string::npos);
     XS_CHECK(log_text.find("Client network started.") != std::string::npos);
+    XS_CHECK(log_text.find("Client session created.") != std::string::npos);
+    XS_CHECK(log_text.find("Client network received a client payload.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }

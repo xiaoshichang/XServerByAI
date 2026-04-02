@@ -218,6 +218,11 @@ bool GateNode::client_network_running() const noexcept
     return client_network_ != nullptr && client_network_->running();
 }
 
+std::size_t GateNode::client_network_session_count() const noexcept
+{
+    return client_network_ != nullptr ? client_network_->session_count() : 0U;
+}
+
 xs::core::ProcessType GateNode::role_process_type() const noexcept
 {
     return xs::core::ProcessType::Gate;
@@ -418,6 +423,7 @@ NodeErrorCode GateNode::OnUninit()
 
     ResetGameSessionStates();
     ResetGmSessionState();
+    ResetClusterReadyState();
 
     if (client_network_ != nullptr)
     {
@@ -1122,87 +1128,63 @@ void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
 
     if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
     {
-        const std::array<xs::core::LogContextField, 4> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
-            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-        };
         session->last_protocol_error = "GM clusterReady notify envelope is invalid.";
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify with an invalid envelope.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify with an invalid envelope.");
         return;
     }
 
     if (!session->registered)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"registered", session->registered ? "true" : "false"},
-        };
         session->last_protocol_error = "GM clusterReady notify arrived before Gate registration completed.";
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify before registration completed.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready notify before registration completed.");
         return;
     }
 
     xs::net::ClusterReadyNotify notify{};
-    const xs::net::InnerClusterCodecErrorCode decode_result =
-        xs::net::DecodeClusterReadyNotify(packet.payload, &notify);
+    const xs::net::InnerClusterCodecErrorCode decode_result = xs::net::DecodeClusterReadyNotify(packet.payload, &notify);
     if (decode_result != xs::net::InnerClusterCodecErrorCode::None)
     {
-        const std::array<xs::core::LogContextField, 3> context{
-            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
-            xs::core::LogContextField{
-                "codecError",
-                std::string(xs::net::InnerClusterCodecErrorMessage(decode_result)),
-            },
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-        };
         session->last_protocol_error = std::string(xs::net::InnerClusterCodecErrorMessage(decode_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM cluster ready notify.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode GM cluster ready notify.");
         return;
     }
 
     if (notify.ready_epoch < cluster_ready_epoch_)
     {
-        const std::array<xs::core::LogContextField, 5> context{
-            xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
-            xs::core::LogContextField{"currentReadyEpoch", ToString(cluster_ready_epoch_)},
-            xs::core::LogContextField{"clusterReady", notify.cluster_ready ? "true" : "false"},
-            xs::core::LogContextField{"nodeId", std::string(node_id())},
-            xs::core::LogContextField{"clientNetworkRunning", client_network_running() ? "true" : "false"},
-        };
-        logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored stale GM cluster ready notify.", context);
+        logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored stale GM cluster ready notify.");
         return;
     }
 
-    cluster_ready_epoch_ = notify.ready_epoch;
-    cluster_ready_ = notify.cluster_ready;
-    last_cluster_ready_server_now_unix_ms_ = notify.server_now_unix_ms;
-    session->last_protocol_error.clear();
+    if (!notify.cluster_ready)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored GM cluster ready=false notify in M4-02 scope.");
+        return;
+    }
 
     if (client_network_ != nullptr)
     {
-        const NodeErrorCode client_result = cluster_ready_ ? client_network_->Run() : client_network_->Stop();
+        const NodeErrorCode client_result = client_network_->Run();
         if (client_result != NodeErrorCode::None)
         {
             session->last_protocol_error = std::string(client_network_->last_error_message());
-
-            const std::array<xs::core::LogContextField, 5> context{
-                xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
-                xs::core::LogContextField{"clusterReady", notify.cluster_ready ? "true" : "false"},
-                xs::core::LogContextField{"nodeId", std::string(node_id())},
-                xs::core::LogContextField{"clientNetworkRunning", client_network_->running() ? "true" : "false"},
+            const std::array<xs::core::LogContextField, 5> context
+            {
                 xs::core::LogContextField{"clientNetworkError", session->last_protocol_error},
             };
             logger().Log(xs::core::LogLevel::Error, "inner", "Gate node failed to apply GM cluster ready notify to client network.", context);
             return;
         }
+        logger().Log(xs::core::LogLevel::Info, "inner", "Gate Open.");
     }
+
+    cluster_ready_epoch_ = notify.ready_epoch;
+    cluster_ready_ = true;
+    last_cluster_ready_server_now_unix_ms_ = notify.server_now_unix_ms;
+    session->last_protocol_error.clear();
 
     const std::array<xs::core::LogContextField, 6> context{
         xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
-        xs::core::LogContextField{"clusterReady", notify.cluster_ready ? "true" : "false"},
+        xs::core::LogContextField{"clusterReady", "true"},
         xs::core::LogContextField{"statusFlags", std::to_string(notify.status_flags)},
         xs::core::LogContextField{"serverNowUnixMs", ToString(notify.server_now_unix_ms)},
         xs::core::LogContextField{"nodeId", std::string(node_id())},
@@ -1569,7 +1551,6 @@ void GateNode::ResetGmSessionState()
     InnerNetworkSession* session = gm_session();
     if (session == nullptr)
     {
-        ResetClusterReadyState();
         return;
     }
 
@@ -1582,7 +1563,6 @@ void GateNode::ResetGmSessionState()
     session->heartbeat_timeout_ms = 0U;
     session->last_server_now_unix_ms = 0U;
     session->last_heartbeat_at_unix_ms = 0U;
-    ResetClusterReadyState();
 }
 
 void GateNode::ResetGameSessionStates()
@@ -1626,19 +1606,6 @@ void GateNode::ResetClusterReadyState()
     cluster_ready_epoch_ = 0U;
     last_cluster_ready_server_now_unix_ms_ = 0U;
     cluster_ready_ = false;
-
-    if (client_network_ != nullptr && client_network_->running())
-    {
-        const NodeErrorCode result = client_network_->Stop();
-        if (result != NodeErrorCode::None)
-        {
-            InnerNetworkSession* session = gm_session();
-            if (session != nullptr)
-            {
-                session->last_protocol_error = std::string(client_network_->last_error_message());
-            }
-        }
-    }
 }
 
 void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)

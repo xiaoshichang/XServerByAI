@@ -3,6 +3,7 @@
 #include "ClientNetwork.h"
 #include "ServerNode.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -30,6 +31,7 @@ class GateNode final : public ServerNode
     [[nodiscard]] bool cluster_ready() const noexcept;
     [[nodiscard]] std::uint64_t cluster_ready_epoch() const noexcept;
     [[nodiscard]] bool client_network_running() const noexcept;
+    [[nodiscard]] std::size_t client_network_session_count() const noexcept;
 
   protected:
     [[nodiscard]] xs::core::ProcessType role_process_type() const noexcept override;
