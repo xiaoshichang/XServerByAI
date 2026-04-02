@@ -72,6 +72,21 @@ endif()
 add_library(xs::thirdparty::asio ALIAS xs_thirdparty_asio)
 
 ###############################
+# kcp
+###############################
+set(XS_KCP_ROOT "${CMAKE_CURRENT_LIST_DIR}/kcp")
+if (NOT EXISTS "${XS_KCP_ROOT}/ikcp.h" OR NOT EXISTS "${XS_KCP_ROOT}/ikcp.c")
+    message(FATAL_ERROR "Vendored KCP sources were not found under ${XS_KCP_ROOT}.")
+endif()
+
+add_library(xs_thirdparty_kcp STATIC
+    "${XS_KCP_ROOT}/ikcp.c"
+)
+set_source_files_properties("${XS_KCP_ROOT}/ikcp.c" PROPERTIES LANGUAGE CXX)
+target_include_directories(xs_thirdparty_kcp PUBLIC "${XS_KCP_ROOT}")
+add_library(xs::thirdparty::kcp ALIAS xs_thirdparty_kcp)
+
+###############################
 # dotnet_host
 ###############################
 set(XS_DOTNET_HOST_ROOT "${CMAKE_CURRENT_LIST_DIR}/dotnet_host")

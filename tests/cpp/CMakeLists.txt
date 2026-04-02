@@ -54,6 +54,17 @@ target_link_libraries(xs_net_packet_tests PRIVATE net)
 add_test(NAME xs_net_packet_tests COMMAND xs_net_packet_tests)
 
 ###############################
+# xs_net_kcp_peer_tests
+###############################
+add_executable(xs_net_kcp_peer_tests
+    kcp_peer_tests.cpp
+)
+
+target_link_libraries(xs_net_kcp_peer_tests PRIVATE net)
+
+add_test(NAME xs_net_kcp_peer_tests COMMAND xs_net_kcp_peer_tests)
+
+###############################
 # xs_net_message_dispatcher_tests
 ###############################
 add_executable(xs_net_message_dispatcher_tests
@@ -244,6 +255,28 @@ add_test(
     NAME xs_node_inner_network_session_manager_tests
     COMMAND xs_node_inner_network_session_manager_tests
 )
+
+###############################
+# xs_node_client_session_tests
+###############################
+add_executable(xs_node_client_session_tests
+    node_client_session_tests.cpp
+)
+
+target_link_libraries(xs_node_client_session_tests PRIVATE node)
+
+add_test(NAME xs_node_client_session_tests COMMAND xs_node_client_session_tests)
+
+###############################
+# xs_node_client_network_tests
+###############################
+add_executable(xs_node_client_network_tests
+    node_client_network_tests.cpp
+)
+
+target_link_libraries(xs_node_client_network_tests PRIVATE node)
+
+add_test(NAME xs_node_client_network_tests COMMAND xs_node_client_network_tests)
 
 ###############################
 # Managed runtime test assets
@@ -444,6 +477,8 @@ xs_use_managed_runtime_assets(xs_node_gate_gm_session_tests)
 xs_use_managed_runtime_assets(xs_node_game_gm_session_tests)
 
 xs_copy_windows_nethost_dll(xs_node_create_helper_tests)
+xs_copy_windows_nethost_dll(xs_node_client_session_tests)
+xs_copy_windows_nethost_dll(xs_node_client_network_tests)
 xs_copy_windows_nethost_dll(xs_node_gm_node_tests)
 xs_copy_windows_nethost_dll(xs_node_gm_register_tests)
 xs_copy_windows_nethost_dll(xs_node_game_node_tests)

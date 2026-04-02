@@ -989,7 +989,7 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
 
     const std::string log_text = ReadDirectoryText(log_dir);
     XS_CHECK(log_text.find("Gate node accepted GM cluster ready notify.") != std::string::npos);
-    XS_CHECK(log_text.find("Client network placeholder started.") != std::string::npos);
+    XS_CHECK(log_text.find("Client network started.") != std::string::npos);
 
     CleanupTestDirectory(base_path);
 }

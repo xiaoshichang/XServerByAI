@@ -1,5 +1,6 @@
 #include "BinarySerialization.h"
 #include "ByteOrder.h"
+#include "KcpPeer.h"
 #include "MessageDispatcher.h"
 #include "PacketHeader.h"
 #include "message/InnerClusterCodec.h"
@@ -25,6 +26,8 @@ static_assert(std::is_default_constructible_v<xs::net::PacketView>, "PacketView 
 static_assert(std::is_default_constructible_v<xs::net::MessageDispatcher>, "MessageDispatcher must remain default constructible.");
 static_assert(std::is_copy_constructible_v<xs::net::MessageHandler>, "MessageHandler must remain copy constructible.");
 static_assert(std::is_default_constructible_v<xs::net::Endpoint>, "Endpoint must remain default constructible.");
+static_assert(std::is_default_constructible_v<xs::net::KcpPeerOptions>, "KcpPeerOptions must remain default constructible.");
+static_assert(std::is_default_constructible_v<xs::net::KcpPeerRuntimeState>, "KcpPeerRuntimeState must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::LoadSnapshot>, "LoadSnapshot must remain default constructible.");
 static_assert(std::is_default_constructible_v<xs::net::ClusterReadyNotify>, "ClusterReadyNotify must remain default constructible.");
 static_assert(

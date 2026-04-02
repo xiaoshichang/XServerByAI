@@ -2,6 +2,8 @@ add_library(net STATIC
     BinarySerialization.cpp
     BinarySerialization.h
     ByteOrder.h
+    KcpPeer.cpp
+    KcpPeer.h
     MessageDispatcher.cpp
     MessageDispatcher.h
     message/InnerClusterCodec.cpp
@@ -20,4 +22,4 @@ add_library(net STATIC
 )
 
 target_include_directories(net PUBLIC ${CMAKE_CURRENT_LIST_DIR})
-target_link_libraries(net PUBLIC xs::thirdparty::asio)
+target_link_libraries(net PUBLIC core xs::thirdparty::asio xs::thirdparty::kcp)
