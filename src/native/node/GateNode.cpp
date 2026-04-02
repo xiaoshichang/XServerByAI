@@ -330,6 +330,7 @@ NodeErrorCode GateNode::OnInit()
         });
 
     ClientNetworkOptions client_options;
+    client_options.owner_node_id = std::string(node_id());
     client_options.listen_endpoint = BuildEndpointText(client_endpoint);
     client_options.kcp = cluster_config().kcp;
     client_network_ = std::make_unique<ClientNetwork>(event_loop(), logger(), std::move(client_options));

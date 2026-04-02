@@ -1,4 +1,6 @@
 add_library(node STATIC
+    ClientSession.cpp
+    ClientSession.h
     ClientNetwork.cpp
     ClientNetwork.h
     GameNode.cpp
