@@ -2,7 +2,6 @@
 # Start the local cluster first, then run:
 # dotnet run --project client/XServer.Client/XServer.Client.csproj --script client/demo.txt
 
-login demo-player dev-token
+login http://127.0.0.1:4101 demo-player dev-token
 connect
 status
-

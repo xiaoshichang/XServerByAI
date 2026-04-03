@@ -61,11 +61,10 @@ public sealed class ClientRuntimeState
         LastLoginExpiresAt = expiresAt;
     }
 
-    public bool TryGetCachedLoginProfile(string configPath, string gateNodeId, out ResolvedClientProfile profile)
+    public bool TryGetCachedLoginProfile(string configPath, out ResolvedClientProfile profile)
     {
         if (LastLoginProfile is not null &&
-            string.Equals(Path.GetFullPath(LastLoginProfile.ConfigPath), Path.GetFullPath(configPath), StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(LastLoginProfile.GateNodeId, gateNodeId, StringComparison.Ordinal))
+            string.Equals(Path.GetFullPath(LastLoginProfile.ConfigPath), Path.GetFullPath(configPath), StringComparison.OrdinalIgnoreCase))
         {
             profile = LastLoginProfile;
             return true;
@@ -164,7 +163,7 @@ public sealed class ClientRuntimeState
         if (Avatar is null)
         {
             throw new InvalidOperationException(
-                "The simulated client does not have a local Avatar yet. Run login <account> <password> first.");
+                "The simulated client does not have a local Avatar yet. Run login <url> <account> <password> first.");
         }
     }
 }

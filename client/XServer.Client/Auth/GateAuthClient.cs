@@ -14,20 +14,18 @@ public sealed class GateAuthClient
     }
 
     public async Task<GateLoginGrant> LoginAsync(
-        string host,
-        int port,
-        string gateNodeId,
+        string url,
+        string fallbackGateNodeId,
         string account,
         string password,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(host);
-        ArgumentException.ThrowIfNullOrWhiteSpace(gateNodeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fallbackGateNodeId);
         ArgumentException.ThrowIfNullOrWhiteSpace(account);
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(port);
 
-        using HttpRequestMessage request = new(HttpMethod.Post, new UriBuilder(Uri.UriSchemeHttp, host, port, "/login").Uri)
+        using HttpRequestMessage request = new(HttpMethod.Post, BuildLoginUri(url))
         {
             Content = new StringContent(
                 JsonSerializer.Serialize(new { account, password }),
@@ -42,7 +40,32 @@ public sealed class GateAuthClient
             throw new InvalidOperationException(BuildErrorMessage((int)response.StatusCode, body));
         }
 
-        return ParseGrant(body, gateNodeId);
+        return ParseGrant(body, fallbackGateNodeId);
+    }
+
+    private static Uri BuildLoginUri(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+        {
+            throw new ArgumentException($"Invalid login url '{url}'.", nameof(url));
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("login url must use http or https.", nameof(url));
+        }
+
+        if (string.IsNullOrEmpty(uri.AbsolutePath) || uri.AbsolutePath == "/")
+        {
+            UriBuilder builder = new(uri)
+            {
+                Path = "/login",
+            };
+            return builder.Uri;
+        }
+
+        return uri;
     }
 
     private static GateLoginGrant ParseGrant(string body, string fallbackGateNodeId)

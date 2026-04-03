@@ -10,6 +10,8 @@ namespace XServer.Client.App;
 
 public sealed class ClientConsoleApp
 {
+    private const string DefaultGate1AuthUrl = "http://127.0.0.1:4101";
+    private const string DefaultGate1NodeId = "Gate1";
     private const uint DefaultMoveMsgId = 45011U;
     private const uint DefaultBuyWeaponMsgId = 45012U;
 
@@ -142,10 +144,11 @@ public sealed class ClientConsoleApp
 
         ResolvedClientProfile configuredProfile = ClusterClientConfigLoader.Load(effectiveOptions);
         ResolvedClientProfile profile = configuredProfile;
-        if (!command.HasOption("host") &&
+        if (!command.HasOption("gate") &&
+            !command.HasOption("host") &&
             !command.HasOption("port") &&
             !command.HasOption("conversation") &&
-            _state.TryGetCachedLoginProfile(configuredProfile.ConfigPath, configuredProfile.GateNodeId, out ResolvedClientProfile cachedLoginProfile))
+            _state.TryGetCachedLoginProfile(configuredProfile.ConfigPath, out ResolvedClientProfile cachedLoginProfile))
         {
             profile = cachedLoginProfile;
         }
@@ -188,19 +191,18 @@ public sealed class ClientConsoleApp
     {
         ClientLaunchOptions effectiveOptions = _launchOptions.WithOverrides(
             configPath: command.GetOptionalString("config"),
-            gateNodeId: command.GetOptionalString("gate"));
+            gateNodeId: DefaultGate1NodeId);
 
         ResolvedClientProfile baseProfile = ClusterClientConfigLoader.Load(effectiveOptions);
-        (string account, string password) = ResolveLoginCredentials(command);
+        (string loginUrl, string account, string password) = ResolveLoginRequest(command);
         long playerId = command.GetInt32OrDefault("playerId", 10001);
         string? avatarId = command.GetOptionalString("avatarId");
 
         using HttpClient httpClient = new();
         GateAuthClient authClient = new(httpClient);
         GateLoginGrant grant = await authClient.LoginAsync(
-            baseProfile.AuthHost,
-            baseProfile.AuthPort,
-            effectiveOptions.GateNodeId,
+            loginUrl,
+            DefaultGate1NodeId,
             account,
             password,
             cancellationToken);
@@ -324,7 +326,7 @@ public sealed class ClientConsoleApp
             "  disconnect",
             "  status",
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
-            "  login <account> <password> [config=path] [gate=Gate0]",
+            "  login <url> <account> <password> [config=path]",
             "  move [x=1] [y=2] [z=0] [msgId=45011] [localApply=true]",
             "  buyWeapon [weaponId=rifle] [count=1] [msgId=45012] [localApply=true]",
             "  script path=client/demo.txt [continueOnError=true]",
@@ -332,8 +334,10 @@ public sealed class ClientConsoleApp
             "",
             "Notes:",
             "  login prepares the local Avatar automatically after the HTTP grant succeeds.",
+            $"  demo default login url is {DefaultGate1AuthUrl} (Gate1 auth).",
             "  move/buyWeapon use temporary test-range msgIds by default and can be overridden.",
             "  connect reads configs/local-dev.json and Gate0 by default.",
+            "  After login, connect without overrides reuses the most recent granted KCP endpoint.",
             "  If the Gate config binds clientNetwork.listenEndpoint.host to 0.0.0.0, the simulator dials 127.0.0.1 by default.");
         await _output.WriteLineAsync(helpText);
     }
@@ -390,19 +394,22 @@ public sealed class ClientConsoleApp
         if (!_state.HasAvatar)
         {
             throw new InvalidOperationException(
-                "No local Avatar is ready. Run login <account> <password> before move/buyWeapon.");
+                "No local Avatar is ready. Run login <url> <account> <password> before move/buyWeapon.");
         }
     }
 
-    private static (string Account, string Password) ResolveLoginCredentials(ParsedCommand command)
+    private static (string Url, string Account, string Password) ResolveLoginRequest(ParsedCommand command)
     {
-        if (command.Positionals.Count == 2)
+        if (command.Positionals.Count == 3)
         {
-            string account = command.Positionals[0];
-            string password = command.Positionals[1];
-            if (!string.IsNullOrWhiteSpace(account) && !string.IsNullOrWhiteSpace(password))
+            string url = command.Positionals[0];
+            string account = command.Positionals[1];
+            string password = command.Positionals[2];
+            if (!string.IsNullOrWhiteSpace(url) &&
+                !string.IsNullOrWhiteSpace(account) &&
+                !string.IsNullOrWhiteSpace(password))
             {
-                return (account, password);
+                return (url, account, password);
             }
         }
 
@@ -410,10 +417,11 @@ public sealed class ClientConsoleApp
         string? optionPassword = command.GetOptionalString("password");
         if (!string.IsNullOrWhiteSpace(optionAccount) && !string.IsNullOrWhiteSpace(optionPassword))
         {
-            return (optionAccount, optionPassword);
+            return (DefaultGate1AuthUrl, optionAccount, optionPassword);
         }
 
-        throw new ArgumentException("login expects account and password, for example: login demo-account dev-password");
+        throw new ArgumentException(
+            $"login expects url, account and password, for example: login {DefaultGate1AuthUrl} demo-account dev-password");
     }
 
     private static PacketFlags ParsePacketFlags(string? text)

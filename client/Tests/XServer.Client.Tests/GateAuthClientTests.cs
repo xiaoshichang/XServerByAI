@@ -39,8 +39,7 @@ public sealed class GateAuthClientTests
         GateAuthClient client = new(httpClient);
 
         GateLoginGrant grant = await client.LoginAsync(
-            "127.0.0.1",
-            4100,
+            "http://127.0.0.1:4100",
             "Gate0",
             "demo-account",
             "secret",
@@ -89,8 +88,7 @@ public sealed class GateAuthClientTests
 
         InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => client.LoginAsync(
-                "127.0.0.1",
-                4100,
+                "http://127.0.0.1:4100",
                 "Gate0",
                 "demo-account",
                 "bad-secret",
