@@ -52,6 +52,11 @@
 3. `start` 命令按 `GM -> Game[*] -> Gate[*]` 顺序拉起节点，并通过 `GM` 的本地 HTTP `GET /healthz` / `GET /status` 做最小启动探活。
 4. `kill` 命令当前只覆盖 Windows，按“配置路径 + `NodeID` + `xserver-node.exe`”精确匹配并强制终止本机进程，不接入优雅退出流程。
 
+**客户端模拟器**
+1. 顶层 `client/` 目录用于放置独立的客户端侧代码、脚本与客户端测试，不混入 `src/managed/` 的服务端业务项目。
+2. 当前 `M4-03` 已提供 `client/XServer.Client/` 控制台模拟客户端，用于连接 `Gate` 的 `ClientNetwork` KCP 入口、构造基础协议包并通过 REPL / 脚本模拟登录、移动、购买武器等行为。
+3. `client/demo.txt` 提供一个最小脚本示例，可用于本地集群联调与回归演示。
+
 **配置模型**
 1. 顶层配置块固定为 `env`、`logging`、`kcp`、`managed`、`gm`、`gate`、`game`。
 2. `logging`、`kcp` 与 `managed` 是集群级公共配置。

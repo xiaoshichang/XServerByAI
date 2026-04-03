@@ -1,0 +1,11 @@
+# Example M4-03 client simulator script.
+# Start the local cluster first, then run:
+# dotnet run --project client/XServer.Client/XServer.Client.csproj --script client/demo.txt
+
+connect
+status
+login player=demo-player token=demo-token localSuccess=true
+move x=12 y=8 z=0
+buyWeapon weaponId=rifle count=1
+send msgId=45050 text="raw client payload from script"
+status
