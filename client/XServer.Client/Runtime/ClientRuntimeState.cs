@@ -164,7 +164,7 @@ public sealed class ClientRuntimeState
         if (Avatar is null)
         {
             throw new InvalidOperationException(
-                "The simulated client does not have a local Avatar yet. Run login with localSuccess=true first.");
+                "The simulated client does not have a local Avatar yet. Run login <account> <password> first.");
         }
     }
 }

@@ -10,7 +10,6 @@ namespace XServer.Client.App;
 
 public sealed class ClientConsoleApp
 {
-    private const uint DefaultLoginMsgId = 45001U;
     private const uint DefaultMoveMsgId = 45011U;
     private const uint DefaultBuyWeaponMsgId = 45012U;
 
@@ -192,9 +191,7 @@ public sealed class ClientConsoleApp
             gateNodeId: command.GetOptionalString("gate"));
 
         ResolvedClientProfile baseProfile = ClusterClientConfigLoader.Load(effectiveOptions);
-        string account = command.GetStringOrDefault("account", "dev-account");
-        string password = command.GetStringOrDefault("password", "dev-password");
-        bool localSuccess = command.GetBooleanOrDefault("localSuccess", false);
+        (string account, string password) = ResolveLoginCredentials(command);
         long playerId = command.GetInt32OrDefault("playerId", 10001);
         string? avatarId = command.GetOptionalString("avatarId");
 
@@ -214,18 +211,9 @@ public sealed class ClientConsoleApp
             grant.Conversation,
             "http login");
         _state.StoreLoginGrant(grant.Account, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
-
-        if (localSuccess)
-        {
-            _state.MarkLocalAvatarReady(playerId, avatarId);
-            await _output.WriteLineAsync(
-                $"http login succeeded account={grant.Account} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Avatar prepared.");
-        }
-        else
-        {
-            await _output.WriteLineAsync(
-                $"http login succeeded account={grant.Account} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. run connect to open the KCP session.");
-        }
+        _state.MarkLocalAvatarReady(playerId, avatarId);
+        await _output.WriteLineAsync(
+            $"http login succeeded account={grant.Account} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Avatar prepared; run connect to open the KCP session.");
     }
 
     private async Task HandleMoveAsync(ParsedCommand command, CancellationToken cancellationToken)
@@ -336,14 +324,15 @@ public sealed class ClientConsoleApp
             "  disconnect",
             "  status",
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
-            "  login [account=dev-account] [password=dev-password] [config=path] [gate=Gate0] [localSuccess=true] [playerId=10001] [avatarId=avatar:dev-account]",
+            "  login <account> <password> [config=path] [gate=Gate0]",
             "  move [x=1] [y=2] [z=0] [msgId=45011] [localApply=true]",
             "  buyWeapon [weaponId=rifle] [count=1] [msgId=45012] [localApply=true]",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
             "",
             "Notes:",
-            "  login/move/buyWeapon use temporary test-range msgIds by default and can be overridden.",
+            "  login prepares the local Avatar automatically after the HTTP grant succeeds.",
+            "  move/buyWeapon use temporary test-range msgIds by default and can be overridden.",
             "  connect reads configs/local-dev.json and Gate0 by default.",
             "  If the Gate config binds clientNetwork.listenEndpoint.host to 0.0.0.0, the simulator dials 127.0.0.1 by default.");
         await _output.WriteLineAsync(helpText);
@@ -401,8 +390,30 @@ public sealed class ClientConsoleApp
         if (!_state.HasAvatar)
         {
             throw new InvalidOperationException(
-                "No local Avatar is ready. Run login with localSuccess=true before move/buyWeapon in M4-03.");
+                "No local Avatar is ready. Run login <account> <password> before move/buyWeapon.");
         }
+    }
+
+    private static (string Account, string Password) ResolveLoginCredentials(ParsedCommand command)
+    {
+        if (command.Positionals.Count == 2)
+        {
+            string account = command.Positionals[0];
+            string password = command.Positionals[1];
+            if (!string.IsNullOrWhiteSpace(account) && !string.IsNullOrWhiteSpace(password))
+            {
+                return (account, password);
+            }
+        }
+
+        string? optionAccount = command.GetOptionalString("account");
+        string? optionPassword = command.GetOptionalString("password");
+        if (!string.IsNullOrWhiteSpace(optionAccount) && !string.IsNullOrWhiteSpace(optionPassword))
+        {
+            return (optionAccount, optionPassword);
+        }
+
+        throw new ArgumentException("login expects account and password, for example: login demo-account dev-password");
     }
 
     private static PacketFlags ParsePacketFlags(string? text)

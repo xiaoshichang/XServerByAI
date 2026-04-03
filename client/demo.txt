@@ -2,10 +2,7 @@
 # Start the local cluster first, then run:
 # dotnet run --project client/XServer.Client/XServer.Client.csproj --script client/demo.txt
 
-login account=demo-player password=dev-token localSuccess=true
+login demo-player dev-token
 connect
 status
-move x=12 y=8 z=0
-buyWeapon weaponId=rifle count=1
-send msgId=45050 text="raw client payload from script"
-status
+
