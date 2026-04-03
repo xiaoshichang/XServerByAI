@@ -21,7 +21,7 @@ Execute one feature test flow in a repeatable way for XServerByAI.
 - `scripts/build-native.ps1`
   Run this script for every feature test. It executes the complete native verification flow from the repo root: `cmake -S . -B build -DXS_BUILD_TESTS=ON`, `cmake --build build --config Debug`, and `ctest --test-dir build -C Debug --output-on-failure`.
 - `scripts/build-managed.ps1`
-  Run this script when the feature development commit modifies the managed solution or projects. It sets `DOTNET_CLI_HOME`, `NUGET_PACKAGES`, and `DOTNET_SKIP_FIRST_TIME_EXPERIENCE` to repo-local paths, then runs `dotnet build .\XServerByAI.Managed.sln -m:1 -c Debug`.
+  Run this script when the feature development commit modifies the managed solution or projects. It sets `DOTNET_CLI_HOME`, `NUGET_PACKAGES`, and related .NET CLI environment variables to repo-local paths, then runs `dotnet build .\XServerByAI.Managed.sln -m:1 -c Debug`, `dotnet test .\XServerByAI.Managed.sln -m:1 -c Debug --no-build --no-restore`, and `dotnet test .\client\Tests\XServer.Client.Tests\XServer.Client.Tests.csproj -m:1 -c Debug`.
 
 ## Examples
 - `test-feature M1-01`
