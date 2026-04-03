@@ -1,3 +1,4 @@
+using System.IO;
 using XServer.Client.Configuration;
 using XServer.Managed.Foundation.Protocol;
 
@@ -8,8 +9,10 @@ public sealed class ClientRuntimeState
     public ClientLifecycleState LifecycleState { get; private set; } = ClientLifecycleState.Disconnected;
     public ResolvedClientProfile? Profile { get; private set; }
     public string? LocalEndpointText { get; private set; }
-    public string? PlayerName { get; private set; }
-    public string? LoginToken { get; private set; }
+    public string? LastLoginAccount { get; private set; }
+    public ResolvedClientProfile? LastLoginProfile { get; private set; }
+    public DateTimeOffset? LastLoginIssuedAt { get; private set; }
+    public DateTimeOffset? LastLoginExpiresAt { get; private set; }
     public AvatarView? Avatar { get; private set; }
     public uint NextPacketSequence { get; private set; } = 1U;
     public int SentPacketCount { get; private set; }
@@ -17,8 +20,9 @@ public sealed class ClientRuntimeState
     public DateTimeOffset? LastSentAt { get; private set; }
     public DateTimeOffset? LastReceivedAt { get; private set; }
 
-    public bool IsConnected => LifecycleState != ClientLifecycleState.Disconnected;
+    public bool IsConnected => LifecycleState != ClientLifecycleState.Disconnected && Profile is not null;
     public bool HasAvatar => Avatar is not null;
+    public bool HasCachedLoginGrant => LastLoginProfile is not null;
 
     public void MarkConnected(ResolvedClientProfile profile, string? localEndpointText)
     {
@@ -30,9 +34,6 @@ public sealed class ClientRuntimeState
         LastSentAt = null;
         LastReceivedAt = null;
         NextPacketSequence = 1U;
-        PlayerName = null;
-        LoginToken = null;
-        Avatar = null;
     }
 
     public void MarkDisconnected()
@@ -40,14 +41,38 @@ public sealed class ClientRuntimeState
         Profile = null;
         LocalEndpointText = null;
         LifecycleState = ClientLifecycleState.Disconnected;
-        PlayerName = null;
-        LoginToken = null;
         Avatar = null;
         NextPacketSequence = 1U;
         SentPacketCount = 0;
         ReceivedPacketCount = 0;
         LastSentAt = null;
         LastReceivedAt = null;
+    }
+
+    public void StoreLoginGrant(
+        string account,
+        ResolvedClientProfile profile,
+        DateTimeOffset issuedAt,
+        DateTimeOffset expiresAt)
+    {
+        LastLoginAccount = account;
+        LastLoginProfile = profile;
+        LastLoginIssuedAt = issuedAt;
+        LastLoginExpiresAt = expiresAt;
+    }
+
+    public bool TryGetCachedLoginProfile(string configPath, string gateNodeId, out ResolvedClientProfile profile)
+    {
+        if (LastLoginProfile is not null &&
+            string.Equals(Path.GetFullPath(LastLoginProfile.ConfigPath), Path.GetFullPath(configPath), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(LastLoginProfile.GateNodeId, gateNodeId, StringComparison.Ordinal))
+        {
+            profile = LastLoginProfile;
+            return true;
+        }
+
+        profile = null!;
+        return false;
     }
 
     public uint AllocatePacketSequence()
@@ -74,26 +99,15 @@ public sealed class ClientRuntimeState
         LastReceivedAt = DateTimeOffset.UtcNow;
     }
 
-    public void MarkLoginStarted(string playerName, string token)
+    public void MarkLocalAvatarReady(long playerId, string? avatarId = null)
     {
-        EnsureConnected();
-        PlayerName = playerName;
-        LoginToken = token;
-        LifecycleState = ClientLifecycleState.LoginPending;
-    }
-
-    public void MarkLoginSucceeded(long playerId, string? avatarId = null)
-    {
-        EnsureConnected();
-
-        string resolvedPlayerName = PlayerName ?? "unknown-player";
+        string resolvedLoginAccount = LastLoginAccount ?? "unknown-player";
         Avatar = new AvatarView
         {
-            AvatarId = avatarId ?? $"avatar:{resolvedPlayerName}",
+            AvatarId = avatarId ?? $"avatar:{resolvedLoginAccount}",
             PlayerId = playerId,
-            DisplayName = resolvedPlayerName,
+            DisplayName = resolvedLoginAccount,
         };
-        LifecycleState = ClientLifecycleState.AvatarReady;
     }
 
     public void UpdateAvatarPosition(float x, float y, float z)
@@ -125,7 +139,7 @@ public sealed class ClientRuntimeState
             $"KCP: pendingAck={pendingAckCount}, nextSendSn={nextKcpSendSequence}, nextRecvSn={nextKcpReceiveSequence}",
             $"LastSentAt: {LastSentAt?.ToString("O") ?? "<none>"}",
             $"LastReceivedAt: {LastReceivedAt?.ToString("O") ?? "<none>"}",
-            $"Login: player={PlayerName ?? "<none>"}, token={(string.IsNullOrEmpty(LoginToken) ? "<none>" : "<set>")}",
+            $"Auth: account={LastLoginAccount ?? "<none>"}, cached={(HasCachedLoginGrant ? LastLoginProfile!.DisplayEndpoint : "<none>")}, expiresAt={LastLoginExpiresAt?.ToString("O") ?? "<none>"}",
         ];
 
         if (Avatar is null)
@@ -145,20 +159,12 @@ public sealed class ClientRuntimeState
         return string.Join(Environment.NewLine, lines);
     }
 
-    private void EnsureConnected()
-    {
-        if (!IsConnected)
-        {
-            throw new InvalidOperationException("The simulated client is not connected.");
-        }
-    }
-
     private void EnsureAvatarReady()
     {
-        if (LifecycleState != ClientLifecycleState.AvatarReady || Avatar is null)
+        if (Avatar is null)
         {
             throw new InvalidOperationException(
-                "The simulated client does not have a ready avatar yet. Send login with localSuccess=true first.");
+                "The simulated client does not have a local Avatar yet. Run login with localSuccess=true first.");
         }
     }
 }

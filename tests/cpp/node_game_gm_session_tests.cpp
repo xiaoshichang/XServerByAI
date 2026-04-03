@@ -218,6 +218,11 @@ xs::core::Json MakeClusterConfigJson(
                  {"listenEndpoint",
                   xs::core::Json{{"host", std::string(gate_inner_host)}, {"port", effective_gate_inner_ports[index]}}},
              }},
+            {"authNetwork",
+             xs::core::Json{
+                 {"listenEndpoint",
+                  xs::core::Json{{"host", "0.0.0.0"}, {"port", static_cast<std::uint16_t>(4100U + index)}}},
+             }},
             {"clientNetwork",
              xs::core::Json{
                  {"listenEndpoint",

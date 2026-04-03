@@ -47,6 +47,14 @@ void ClearError(std::string& error_message) noexcept
     error_message.clear();
 }
 
+void ClearOptionalError(std::string* error_message) noexcept
+{
+    if (error_message != nullptr)
+    {
+        error_message->clear();
+    }
+}
+
 NodeErrorCode SetError(
     std::string& error_message,
     NodeErrorCode code,
@@ -538,6 +546,51 @@ class ClientNetwork::Impl final
         return NodeErrorCode::None;
     }
 
+    [[nodiscard]] bool CanOpenSession(
+        std::uint32_t conversation,
+        const xs::net::Endpoint& remote_endpoint,
+        std::string* error_message)
+    {
+        if (!options_.session_admission_handler)
+        {
+            ClearOptionalError(error_message);
+            return true;
+        }
+
+        if (options_.session_admission_handler(conversation, remote_endpoint, error_message))
+        {
+            ClearOptionalError(error_message);
+            return true;
+        }
+
+        if (error_message != nullptr && error_message->empty())
+        {
+            *error_message = "Client network session admission was rejected.";
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool HandleSessionOpened(ClientSession& session, std::string* error_message)
+    {
+        if (!options_.session_opened_handler)
+        {
+            ClearOptionalError(error_message);
+            return true;
+        }
+
+        if (options_.session_opened_handler(session, error_message))
+        {
+            ClearOptionalError(error_message);
+            return true;
+        }
+
+        if (error_message != nullptr && error_message->empty())
+        {
+            *error_message = "Client network session-open handler rejected the session.";
+        }
+        return false;
+    }
+
     [[nodiscard]] ClientSession* FindSession(std::uint64_t session_id) noexcept
     {
         const auto iterator = sessions_.find(session_id);
@@ -763,6 +816,19 @@ class ClientNetwork::Impl final
         ClientSession* session = FindSessionByTransport(conversation, remote_endpoint);
         if (session == nullptr)
         {
+            std::string admission_error;
+            if (!CanOpenSession(conversation, remote_endpoint, &admission_error))
+            {
+                const std::array<xs::core::LogContextField, 4> context{
+                    xs::core::LogContextField{"ownerNodeId", options_.owner_node_id},
+                    xs::core::LogContextField{"conversation", std::to_string(conversation)},
+                    xs::core::LogContextField{"remoteEndpoint", ToEndpointText(remote_endpoint)},
+                    xs::core::LogContextField{"error", admission_error},
+                };
+                logger_.Log(xs::core::LogLevel::Warn, "client.kcp", "Client network rejected an incoming datagram for a new session.", context);
+                return;
+            }
+
             const NodeErrorCode create_result = CreateSession(conversation, remote_endpoint, &created_session_id, now_unix_ms);
             if (create_result != NodeErrorCode::None)
             {
@@ -778,6 +844,22 @@ class ClientNetwork::Impl final
 
             session = FindSession(created_session_id);
             session_created = true;
+            if (session != nullptr)
+            {
+                std::string session_open_error;
+                if (!HandleSessionOpened(*session, &session_open_error))
+                {
+                    (void)RemoveSession(created_session_id);
+                    const std::array<xs::core::LogContextField, 4> context{
+                        xs::core::LogContextField{"ownerNodeId", options_.owner_node_id},
+                        xs::core::LogContextField{"conversation", std::to_string(conversation)},
+                        xs::core::LogContextField{"remoteEndpoint", ToEndpointText(remote_endpoint)},
+                        xs::core::LogContextField{"error", session_open_error},
+                    };
+                    logger_.Log(xs::core::LogLevel::Warn, "client.kcp", "Client network rejected a newly created session.", context);
+                    return;
+                }
+            }
         }
 
         if (session == nullptr)

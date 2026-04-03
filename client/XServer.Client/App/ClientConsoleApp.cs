@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using XServer.Client.Auth;
 using XServer.Client.Configuration;
 using XServer.Client.Runtime;
 using XServer.Client.Transport;
@@ -140,7 +141,16 @@ public sealed class ClientConsoleApp
             portOverride: command.HasOption("port") ? command.GetInt32OrDefault("port", 0) : null,
             conversation: command.HasOption("conversation") ? command.GetUInt32OrDefault("conversation", 0U) : null);
 
-        ResolvedClientProfile profile = ClusterClientConfigLoader.Load(effectiveOptions);
+        ResolvedClientProfile configuredProfile = ClusterClientConfigLoader.Load(effectiveOptions);
+        ResolvedClientProfile profile = configuredProfile;
+        if (!command.HasOption("host") &&
+            !command.HasOption("port") &&
+            !command.HasOption("conversation") &&
+            _state.TryGetCachedLoginProfile(configuredProfile.ConfigPath, configuredProfile.GateNodeId, out ResolvedClientProfile cachedLoginProfile))
+        {
+            profile = cachedLoginProfile;
+        }
+
         await DisposeTransportAsync();
 
         ClientTransport transport = new(profile);
@@ -177,46 +187,44 @@ public sealed class ClientConsoleApp
 
     private async Task HandleLoginAsync(ParsedCommand command, CancellationToken cancellationToken)
     {
-        ClientTransport transport = RequireTransport();
-        string player = command.GetStringOrDefault("player", "dev-player");
-        string token = command.GetStringOrDefault("token", "dev-token");
-        uint msgId = command.GetUInt32OrDefault("msgId", DefaultLoginMsgId);
+        ClientLaunchOptions effectiveOptions = _launchOptions.WithOverrides(
+            configPath: command.GetOptionalString("config"),
+            gateNodeId: command.GetOptionalString("gate"));
+
+        ResolvedClientProfile baseProfile = ClusterClientConfigLoader.Load(effectiveOptions);
+        string account = command.GetStringOrDefault("account", "dev-account");
+        string password = command.GetStringOrDefault("password", "dev-password");
         bool localSuccess = command.GetBooleanOrDefault("localSuccess", false);
         long playerId = command.GetInt32OrDefault("playerId", 10001);
         string? avatarId = command.GetOptionalString("avatarId");
 
-        _state.MarkLoginStarted(player, token);
+        using HttpClient httpClient = new();
+        GateAuthClient authClient = new(httpClient);
+        GateLoginGrant grant = await authClient.LoginAsync(
+            baseProfile.AuthHost,
+            baseProfile.AuthPort,
+            effectiveOptions.GateNodeId,
+            account,
+            password,
+            cancellationToken);
 
-        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
-            new
-            {
-                action = "login",
-                player,
-                token,
-                clientTimeUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            });
-
-        PacketHeader header = PacketCodec.CreateHeader(
-            msgId,
-            _state.AllocatePacketSequence(),
-            PacketFlags.None,
-            checked((uint)payload.Length));
-
-        await transport.SendPacketAsync(header, payload, cancellationToken);
-        _state.RecordSentPacket(header);
+        ResolvedClientProfile grantedProfile = baseProfile.WithKcpSession(
+            grant.KcpHost,
+            grant.KcpPort,
+            grant.Conversation,
+            "http login");
+        _state.StoreLoginGrant(grant.Account, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
 
         if (localSuccess)
         {
-            _state.MarkLoginSucceeded(playerId, avatarId);
+            _state.MarkLocalAvatarReady(playerId, avatarId);
             await _output.WriteLineAsync(
-                "login request sent and local login success applied. A local Avatar view was created; " +
-                "server-side Avatar authority remains a later milestone.");
+                $"http login succeeded account={grant.Account} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Avatar prepared.");
         }
         else
         {
             await _output.WriteLineAsync(
-                "login request sent. Client state moved to LoginPending. " +
-                "Use localSuccess=true if you want to create a local Avatar view in M4-03.");
+                $"http login succeeded account={grant.Account} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. run connect to open the KCP session.");
         }
     }
 
@@ -328,7 +336,7 @@ public sealed class ClientConsoleApp
             "  disconnect",
             "  status",
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
-            "  login [player=dev-player] [token=dev-token] [msgId=45001] [localSuccess=true] [playerId=10001] [avatarId=avatar:dev-player]",
+            "  login [account=dev-account] [password=dev-password] [config=path] [gate=Gate0] [localSuccess=true] [playerId=10001] [avatarId=avatar:dev-account]",
             "  move [x=1] [y=2] [z=0] [msgId=45011] [localApply=true]",
             "  buyWeapon [weaponId=rifle] [count=1] [msgId=45012] [localApply=true]",
             "  script path=client/demo.txt [continueOnError=true]",

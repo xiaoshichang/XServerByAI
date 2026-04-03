@@ -1,10 +1,12 @@
 #pragma once
 
 #include "ClientNetwork.h"
+#include "GateAuthHttpService.h"
 #include "ServerNode.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <span>
 #include <string>
@@ -45,6 +47,14 @@ class GateNode final : public ServerNode
         std::uint64_t started_at_unix_ms{0U};
     };
 
+    struct ClientConversationReservation final
+    {
+        std::string account{};
+        std::string remote_address{};
+        std::uint64_t issued_at_unix_ms{0U};
+        std::uint64_t expires_at_unix_ms{0U};
+    };
+
     void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
     void HandleGmConnectionStateChanged(ipc::ZmqConnectionState state);
     void HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload);
@@ -72,6 +82,17 @@ class GateNode final : public ServerNode
     void StartOrResetHeartbeatTimer(std::uint32_t interval_ms);
     void CancelHeartbeatTimer() noexcept;
     [[nodiscard]] std::uint32_t ConsumeNextInnerSequence() noexcept;
+    [[nodiscard]] std::uint32_t ConsumeNextClientConversation() noexcept;
+    [[nodiscard]] GateAuthLoginResult HandleAuthLogin(const GateAuthLoginRequest& request);
+    [[nodiscard]] bool CanOpenClientSession(
+        std::uint32_t conversation,
+        const xs::net::Endpoint& remote_endpoint,
+        std::string* error_message);
+    [[nodiscard]] bool HandleClientSessionOpened(
+        ClientSession& session,
+        std::string* error_message);
+    void PruneExpiredClientConversationReservations(std::uint64_t now_unix_ms) noexcept;
+    [[nodiscard]] std::string ResolveAdvertisedClientHost(std::string_view remote_address) const;
     [[nodiscard]] const xs::core::GateNodeConfig* gate_config() const noexcept;
     [[nodiscard]] InnerNetworkSession* remote_session(std::string_view remote_node_id) noexcept;
     [[nodiscard]] const InnerNetworkSession* remote_session(std::string_view remote_node_id) const noexcept;
@@ -79,9 +100,12 @@ class GateNode final : public ServerNode
     [[nodiscard]] const InnerNetworkSession* gm_session() const noexcept;
 
     std::unique_ptr<ClientNetwork> client_network_{};
+    std::unique_ptr<GateAuthHttpService> auth_http_service_{};
+    std::map<std::uint32_t, ClientConversationReservation, std::less<>> client_conversation_reservations_{};
     RuntimeState runtime_state_{};
     std::uint64_t cluster_ready_epoch_{0U};
     std::uint64_t last_cluster_ready_server_now_unix_ms_{0U};
+    std::uint32_t next_client_conversation_{1U};
     bool cluster_ready_{false};
 };
 

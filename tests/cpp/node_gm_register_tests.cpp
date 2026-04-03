@@ -149,6 +149,11 @@ xs::core::Json MakeClusterConfigJson(
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", 7000}}},
                    }},
+                  {"authNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4100}}},
+                   }},
                   {"clientNetwork",
                    xs::core::Json{
                        {"listenEndpoint",

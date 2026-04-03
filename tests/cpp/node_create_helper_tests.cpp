@@ -115,6 +115,11 @@ xs::core::Json MakeValidClusterConfigJson(const std::filesystem::path& base_path
                        {"listenEndpoint",
                         xs::core::Json{{"host", "0.0.0.0"}, {"port", 7000}}},
                    }},
+                  {"authNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4100}}},
+                   }},
                   {"clientNetwork",
                    xs::core::Json{
                        {"listenEndpoint",

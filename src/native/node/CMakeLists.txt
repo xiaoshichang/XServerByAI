@@ -5,6 +5,8 @@ add_library(node STATIC
     ClientNetwork.h
     GameNode.cpp
     GameNode.h
+    GateAuthHttpService.cpp
+    GateAuthHttpService.h
     GmControlHttpService.cpp
     GmControlHttpService.h
     GateNode.cpp

@@ -122,6 +122,11 @@ xs::core::Json MakeValidClusterConfigJson()
                        {"listenEndpoint",
                         xs::core::Json{{"host", "0.0.0.0"}, {"port", 7000}}},
                    }},
+                  {"authNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4100}}},
+                   }},
                   {"clientNetwork",
                    xs::core::Json{
                        {"listenEndpoint",
@@ -341,6 +346,8 @@ void TestLoadNodeConfigForGate()
     {
         XS_CHECK(gate_node_config->inner_network_listen_endpoint.host == "0.0.0.0");
         XS_CHECK(gate_node_config->inner_network_listen_endpoint.port == 7000);
+        XS_CHECK(gate_node_config->auth_network_listen_endpoint.host == "0.0.0.0");
+        XS_CHECK(gate_node_config->auth_network_listen_endpoint.port == 4100);
         XS_CHECK(gate_node_config->client_network_listen_endpoint.host == "0.0.0.0");
         XS_CHECK(gate_node_config->client_network_listen_endpoint.port == 4000);
     }
@@ -496,6 +503,28 @@ void TestLoadNodeConfigRejectsMissingGateClientNetwork()
 
     CleanupTestDirectory(base_path);
 }
+void TestLoadNodeConfigRejectsMissingGateAuthNetwork()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("config-missing-gate-auth-network");
+    const std::filesystem::path file_path = base_path / "config.json";
+    xs::core::Json config_json = MakeValidClusterConfigJson();
+    config_json["gate"]["Gate0"].erase("authNetwork");
+    if (!WriteJsonFile(file_path, config_json))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    xs::core::ClusterConfig cluster_config;
+    std::string error_message;
+    const xs::core::ConfigErrorCode success =
+        xs::core::LoadClusterConfigFile(file_path, &cluster_config, &error_message);
+
+    XS_CHECK(success == xs::core::ConfigErrorCode::MissingRequiredField);
+    XS_CHECK_MSG(error_message.find("gate.Gate0.authNetwork") != std::string::npos, error_message.c_str());
+
+    CleanupTestDirectory(base_path);
+}
 
 void TestLoadNodeConfigRejectsMissingGmControlNetwork()
 {
@@ -537,6 +566,7 @@ int main()
     TestLoadNodeConfigRejectsUnknownLoggingField();
     TestLoadNodeConfigRejectsInvalidGateNodeId();
     TestLoadNodeConfigRejectsMissingGateClientNetwork();
+    TestLoadNodeConfigRejectsMissingGateAuthNetwork();
     TestLoadNodeConfigRejectsMissingGmControlNetwork();
 
     if (g_failures != 0)

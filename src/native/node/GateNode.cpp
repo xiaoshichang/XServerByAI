@@ -1,13 +1,13 @@
 #include "GateNode.h"
 
 #include "BinarySerialization.h"
+#include "ClientSession.h"
 #include "InnerNetwork.h"
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
 #include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
-
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -31,6 +31,7 @@ constexpr std::uint16_t kErrorResponseFlags =
     kResponseFlags | static_cast<std::uint16_t>(xs::net::PacketFlag::Error);
 constexpr std::uint32_t kDefaultHeartbeatIntervalMs = 5000U;
 constexpr std::uint32_t kDefaultHeartbeatTimeoutMs = 15000U;
+constexpr std::uint64_t kConversationReservationLifetimeMs = 30000U;
 
 constexpr std::int32_t kInnerProcessTypeInvalid = 3000;
 constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
@@ -69,6 +70,40 @@ std::string NormalizeConnectorHost(std::string_view host)
 std::string BuildConnectorTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
     return "tcp://" + NormalizeConnectorHost(endpoint.host) + ":" + std::to_string(endpoint.port);
+}
+
+std::string NormalizeClientAddress(std::string_view host)
+{
+    std::string normalized;
+    if (host.size() >= 2U && host.front() == '[' && host.back() == ']')
+    {
+        normalized = std::string(host.substr(1U, host.size() - 2U));
+    }
+    else
+    {
+        normalized = std::string(host);
+    }
+
+    constexpr std::string_view kIpv4MappedPrefix = "::ffff:";
+    if (normalized.rfind(kIpv4MappedPrefix, 0U) == 0U)
+    {
+        normalized.erase(0U, kIpv4MappedPrefix.size());
+    }
+
+    return normalized;
+}
+
+bool IsWildcardBindHost(std::string_view host) noexcept
+{
+    return host == "0.0.0.0" || host == "::" || host == "[::]" || host == "localhost";
+}
+
+void ClearOptionalError(std::string* error_message) noexcept
+{
+    if (error_message != nullptr)
+    {
+        error_message->clear();
+    }
 }
 
 std::string ToString(std::uint64_t value)
@@ -260,6 +295,19 @@ NodeErrorCode GateNode::OnInit()
             "Gate innerNetwork.listenEndpoint.port must be greater than zero.");
     }
 
+    const xs::core::EndpointConfig& auth_endpoint = config->auth_network_listen_endpoint;
+    if (auth_endpoint.host.empty())
+    {
+        return SetError(NodeErrorCode::ConfigLoadFailed, "Gate authNetwork.listenEndpoint.host must not be empty.");
+    }
+
+    if (auth_endpoint.port == 0U)
+    {
+        return SetError(
+            NodeErrorCode::ConfigLoadFailed,
+            "Gate authNetwork.listenEndpoint.port must be greater than zero.");
+    }
+
     const xs::core::EndpointConfig& client_endpoint = config->client_network_listen_endpoint;
     if (client_endpoint.host.empty())
     {
@@ -277,7 +325,9 @@ NodeErrorCode GateNode::OnInit()
     runtime_state_.started_at_unix_ms = CurrentUnixTimeMilliseconds();
     cluster_ready_epoch_ = 0U;
     last_cluster_ready_server_now_unix_ms_ = 0U;
+    next_client_conversation_ = 1U;
     cluster_ready_ = false;
+    client_conversation_reservations_.clear();
 
     inner_network_remote_sessions().Clear();
     const InnerNetworkSessionManagerErrorCode session_result =
@@ -339,11 +389,27 @@ NodeErrorCode GateNode::OnInit()
     client_options.owner_node_id = std::string(node_id());
     client_options.listen_endpoint = BuildEndpointText(client_endpoint);
     client_options.kcp = cluster_config().kcp;
+    client_options.session_admission_handler =
+        [this](std::uint32_t conversation, const xs::net::Endpoint& remote_endpoint, std::string* error_message) {
+            return CanOpenClientSession(conversation, remote_endpoint, error_message);
+        };
+    client_options.session_opened_handler = [this](ClientSession& session, std::string* error_message) {
+        return HandleClientSessionOpened(session, error_message);
+    };
     client_network_ = std::make_unique<ClientNetwork>(event_loop(), logger(), std::move(client_options));
+
+    GateAuthHttpServiceOptions auth_options;
+    auth_options.listen_endpoint = auth_endpoint;
+    auth_options.node_id = std::string(node_id());
+    auth_options.login_handler = [this](const GateAuthLoginRequest& request) {
+        return HandleAuthLogin(request);
+    };
+    auth_http_service_ = std::make_unique<GateAuthHttpService>(event_loop(), logger(), std::move(auth_options));
 
     const NodeErrorCode inner_result = InitInnerNetwork(std::move(inner_options));
     if (inner_result != NodeErrorCode::None)
     {
+        auth_http_service_.reset();
         client_network_.reset();
         inner_network_remote_sessions().Clear();
         return inner_result;
@@ -364,9 +430,22 @@ NodeErrorCode GateNode::OnInit()
     {
         const std::string error_message = std::string(client_network_->last_error_message());
         (void)UninitInnerNetwork();
+        auth_http_service_.reset();
         client_network_.reset();
         inner_network_remote_sessions().Clear();
         return SetError(client_result, error_message);
+    }
+
+    const NodeErrorCode auth_result = auth_http_service_->Init();
+    if (auth_result != NodeErrorCode::None)
+    {
+        const std::string error_message = std::string(auth_http_service_->last_error_message());
+        (void)client_network_->Uninit();
+        (void)UninitInnerNetwork();
+        auth_http_service_.reset();
+        client_network_.reset();
+        inner_network_remote_sessions().Clear();
+        return SetError(auth_result, error_message);
     }
 
     const std::array<xs::core::LogContextField, 5> context{
@@ -384,7 +463,7 @@ NodeErrorCode GateNode::OnInit()
 
 NodeErrorCode GateNode::OnRun()
 {
-    if (inner_network() == nullptr || client_network_ == nullptr)
+    if (inner_network() == nullptr || client_network_ == nullptr || auth_http_service_ == nullptr)
     {
         return SetError(NodeErrorCode::InvalidArgument, "Gate node must be initialized before Run().");
     }
@@ -395,7 +474,7 @@ NodeErrorCode GateNode::OnRun()
         return inner_result;
     }
 
-    const std::array<xs::core::LogContextField, 5> context{
+    const std::array<xs::core::LogContextField, 6> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{
             "gmInnerState",
@@ -407,6 +486,7 @@ NodeErrorCode GateNode::OnRun()
         },
         xs::core::LogContextField{"clusterReady", cluster_ready_ ? "true" : "false"},
         xs::core::LogContextField{"clientNetworkRunning", client_network_->running() ? "true" : "false"},
+        xs::core::LogContextField{"authNetworkRunning", auth_http_service_->running() ? "true" : "false"},
     };
     logger().Log(xs::core::LogLevel::Info, "runtime", "Gate node entered runtime state.", context);
 
@@ -424,6 +504,17 @@ NodeErrorCode GateNode::OnUninit()
     ResetGameSessionStates();
     ResetGmSessionState();
     ResetClusterReadyState();
+
+    if (auth_http_service_ != nullptr)
+    {
+        const NodeErrorCode result = auth_http_service_->Uninit();
+        const std::string error_message = std::string(auth_http_service_->last_error_message());
+        auth_http_service_.reset();
+        if (result != NodeErrorCode::None)
+        {
+            return SetError(result, error_message);
+        }
+    }
 
     if (client_network_ != nullptr)
     {
@@ -1167,28 +1258,47 @@ void GateNode::HandleClusterReadyNotify(const xs::net::PacketView& packet)
         if (client_result != NodeErrorCode::None)
         {
             session->last_protocol_error = std::string(client_network_->last_error_message());
-            const std::array<xs::core::LogContextField, 5> context
-            {
+            const std::array<xs::core::LogContextField, 1> context{
                 xs::core::LogContextField{"clientNetworkError", session->last_protocol_error},
             };
             logger().Log(xs::core::LogLevel::Error, "inner", "Gate node failed to apply GM cluster ready notify to client network.", context);
             return;
         }
-        logger().Log(xs::core::LogLevel::Info, "inner", "Gate Open.");
     }
+
+    if (auth_http_service_ != nullptr)
+    {
+        const NodeErrorCode auth_result = auth_http_service_->Run();
+        if (auth_result != NodeErrorCode::None)
+        {
+            session->last_protocol_error = std::string(auth_http_service_->last_error_message());
+            if (client_network_ != nullptr)
+            {
+                (void)client_network_->Stop();
+            }
+            const std::array<xs::core::LogContextField, 1> context{
+                xs::core::LogContextField{"authNetworkError", session->last_protocol_error},
+            };
+            logger().Log(xs::core::LogLevel::Error, "inner", "Gate node failed to apply GM cluster ready notify to auth network.", context);
+            return;
+        }
+    }
+
+    logger().Log(xs::core::LogLevel::Info, "inner", "Gate client admission endpoints opened.");
 
     cluster_ready_epoch_ = notify.ready_epoch;
     cluster_ready_ = true;
     last_cluster_ready_server_now_unix_ms_ = notify.server_now_unix_ms;
     session->last_protocol_error.clear();
 
-    const std::array<xs::core::LogContextField, 6> context{
+    const std::array<xs::core::LogContextField, 7> context{
         xs::core::LogContextField{"readyEpoch", ToString(notify.ready_epoch)},
         xs::core::LogContextField{"clusterReady", "true"},
         xs::core::LogContextField{"statusFlags", std::to_string(notify.status_flags)},
         xs::core::LogContextField{"serverNowUnixMs", ToString(notify.server_now_unix_ms)},
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"clientNetworkRunning", client_network_running() ? "true" : "false"},
+        xs::core::LogContextField{"authNetworkRunning", auth_http_service_ != nullptr && auth_http_service_->running() ? "true" : "false"},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Gate node accepted GM cluster ready notify.", context);
 }
@@ -1605,7 +1715,9 @@ void GateNode::ResetClusterReadyState()
 {
     cluster_ready_epoch_ = 0U;
     last_cluster_ready_server_now_unix_ms_ = 0U;
+    next_client_conversation_ = 1U;
     cluster_ready_ = false;
+    client_conversation_reservations_.clear();
 }
 
 void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
@@ -1679,6 +1791,215 @@ std::uint32_t GateNode::ConsumeNextInnerSequence() noexcept
     }
 
     return seq;
+}
+
+std::uint32_t GateNode::ConsumeNextClientConversation() noexcept
+{
+    std::uint32_t candidate = next_client_conversation_ == 0U ? 1U : next_client_conversation_;
+    const std::uint32_t start = candidate;
+    while (candidate == 0U ||
+           client_conversation_reservations_.contains(candidate) ||
+           (client_network_ != nullptr && client_network_->FindSessionByConversation(candidate) != nullptr))
+    {
+        ++candidate;
+        if (candidate == 0U)
+        {
+            candidate = 1U;
+        }
+
+        if (candidate == start)
+        {
+            return 0U;
+        }
+    }
+
+    next_client_conversation_ = candidate + 1U;
+    if (next_client_conversation_ == 0U)
+    {
+        next_client_conversation_ = 1U;
+    }
+
+    return candidate;
+}
+
+GateAuthLoginResult GateNode::HandleAuthLogin(const GateAuthLoginRequest& request)
+{
+    GateAuthLoginResult result;
+    if (!cluster_ready_ || client_network_ == nullptr || !client_network_->running())
+    {
+        result.status_code = 503;
+        result.error = "Gate client admission is not ready.";
+        return result;
+    }
+
+    const xs::core::GateNodeConfig* config = gate_config();
+    if (config == nullptr)
+    {
+        result.status_code = 500;
+        result.error = "Gate node configuration is unavailable.";
+        return result;
+    }
+
+    const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
+    PruneExpiredClientConversationReservations(now_unix_ms);
+
+    const std::uint32_t conversation = ConsumeNextClientConversation();
+    if (conversation == 0U)
+    {
+        result.status_code = 503;
+        result.error = "Gate has no available client conversations.";
+        return result;
+    }
+
+    const std::string remote_address = NormalizeClientAddress(request.remote_address);
+    const std::uint64_t expires_at_unix_ms = now_unix_ms + kConversationReservationLifetimeMs;
+    client_conversation_reservations_[conversation] = ClientConversationReservation{
+        .account = request.account,
+        .remote_address = remote_address,
+        .issued_at_unix_ms = now_unix_ms,
+        .expires_at_unix_ms = expires_at_unix_ms,
+    };
+
+    result.success = true;
+    result.status_code = 200;
+    result.gate_node_id = std::string(node_id());
+    result.kcp_host = ResolveAdvertisedClientHost(remote_address);
+    result.kcp_port = config->client_network_listen_endpoint.port;
+    result.conversation = conversation;
+    result.issued_at_unix_ms = now_unix_ms;
+    result.expires_at_unix_ms = expires_at_unix_ms;
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"account", request.account},
+        xs::core::LogContextField{"conversation", std::to_string(conversation)},
+        xs::core::LogContextField{"remoteAddress", remote_address},
+        xs::core::LogContextField{"expiresAtUnixMs", ToString(expires_at_unix_ms)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "auth.http", "Gate issued a client conversation reservation.", context);
+    return result;
+}
+
+bool GateNode::CanOpenClientSession(
+    std::uint32_t conversation,
+    const xs::net::Endpoint& remote_endpoint,
+    std::string* error_message)
+{
+    const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
+    PruneExpiredClientConversationReservations(now_unix_ms);
+
+    const auto iterator = client_conversation_reservations_.find(conversation);
+    if (iterator == client_conversation_reservations_.end())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Conversation was not issued by Gate HTTP login.";
+        }
+        return false;
+    }
+
+    if (iterator->second.expires_at_unix_ms != 0U && iterator->second.expires_at_unix_ms <= now_unix_ms)
+    {
+        client_conversation_reservations_.erase(iterator);
+        if (error_message != nullptr)
+        {
+            *error_message = "Conversation reservation expired before the KCP session opened.";
+        }
+        return false;
+    }
+
+    const std::string remote_address = NormalizeClientAddress(remote_endpoint.host);
+    if (!iterator->second.remote_address.empty() && remote_address != iterator->second.remote_address)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Conversation remote address did not match the HTTP login source.";
+        }
+        return false;
+    }
+
+    ClearOptionalError(error_message);
+    return true;
+}
+
+bool GateNode::HandleClientSessionOpened(
+    ClientSession& session,
+    std::string* error_message)
+{
+    const auto iterator = client_conversation_reservations_.find(session.conversation());
+    if (iterator == client_conversation_reservations_.end())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Conversation reservation was missing when the client session opened.";
+        }
+        return false;
+    }
+
+    const std::string remote_address = NormalizeClientAddress(session.remote_endpoint().host);
+    if (!iterator->second.remote_address.empty() && remote_address != iterator->second.remote_address)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Conversation remote address changed before the client session opened.";
+        }
+        return false;
+    }
+
+    const ClientSessionErrorCode activate_result = session.Activate(CurrentUnixTimeMilliseconds());
+    if (activate_result != ClientSessionErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(session.last_error_message());
+        }
+        return false;
+    }
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"account", iterator->second.account},
+        xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+        xs::core::LogContextField{"conversation", std::to_string(session.conversation())},
+        xs::core::LogContextField{"remoteEndpoint", session.remote_endpoint().host + ':' + std::to_string(session.remote_endpoint().port)},
+    };
+    logger().Log(xs::core::LogLevel::Info, "auth.http", "Gate admitted an authenticated client session.", context);
+
+    client_conversation_reservations_.erase(iterator);
+    ClearOptionalError(error_message);
+    return true;
+}
+
+void GateNode::PruneExpiredClientConversationReservations(std::uint64_t now_unix_ms) noexcept
+{
+    for (auto iterator = client_conversation_reservations_.begin(); iterator != client_conversation_reservations_.end();)
+    {
+        if (iterator->second.expires_at_unix_ms != 0U && iterator->second.expires_at_unix_ms <= now_unix_ms)
+        {
+            iterator = client_conversation_reservations_.erase(iterator);
+            continue;
+        }
+
+        ++iterator;
+    }
+}
+
+std::string GateNode::ResolveAdvertisedClientHost(std::string_view remote_address) const
+{
+    const xs::core::GateNodeConfig* config = gate_config();
+    if (config == nullptr)
+    {
+        return std::string(remote_address);
+    }
+
+    if (IsWildcardBindHost(config->client_network_listen_endpoint.host))
+    {
+        return remote_address.empty()
+            ? NormalizeConnectorHost(config->client_network_listen_endpoint.host)
+            : std::string(remote_address);
+    }
+
+    return NormalizeClientAddress(config->client_network_listen_endpoint.host);
 }
 
 const xs::core::GateNodeConfig* GateNode::gate_config() const noexcept

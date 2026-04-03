@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -24,11 +25,22 @@ namespace xs::node
 
 class ClientSession;
 
+using ClientNetworkSessionAdmissionHandler = std::function<bool(
+    std::uint32_t conversation,
+    const xs::net::Endpoint& remote_endpoint,
+    std::string* error_message)>;
+
+using ClientNetworkSessionOpenedHandler = std::function<bool(
+    ClientSession& session,
+    std::string* error_message)>;
+
 struct ClientNetworkOptions
 {
     std::string owner_node_id{};
     std::string listen_endpoint{};
     xs::core::KcpConfig kcp{};
+    ClientNetworkSessionAdmissionHandler session_admission_handler{};
+    ClientNetworkSessionOpenedHandler session_opened_handler{};
 };
 
 class ClientNetwork final

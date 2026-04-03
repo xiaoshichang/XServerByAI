@@ -450,12 +450,150 @@ void TestClientNetworkReceivesUdpAndCreatesSessionsByTransportKey()
     CleanupTestDirectory(base_path);
 }
 
+void TestClientNetworkRejectsUnauthorizedNewSessions()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-client-network-authz");
+    const std::filesystem::path log_dir = base_path / "logs";
+
+    xs::core::Logger logger(MakeLoggerOptions(log_dir));
+    xs::core::MainEventLoop event_loop({.thread_name = "node-client-network-authz-tests"});
+
+    std::atomic_int opened_session_count{0};
+
+    xs::node::ClientNetworkOptions options;
+    options.owner_node_id = "Gate0";
+    options.listen_endpoint = "127.0.0.1:" + std::to_string(AcquireLoopbackUdpPort());
+    options.kcp.no_congestion_window = true;
+    options.session_admission_handler = [](std::uint32_t conversation, const xs::net::Endpoint& remote_endpoint, std::string* error_message) {
+        if (conversation != 17U)
+        {
+            if (error_message != nullptr)
+            {
+                *error_message = "Conversation 17 was expected for this test.";
+            }
+            return false;
+        }
+
+        if (remote_endpoint.host != "127.0.0.1")
+        {
+            if (error_message != nullptr)
+            {
+                *error_message = "Only loopback clients are authorized in this test.";
+            }
+            return false;
+        }
+
+        return true;
+    };
+    options.session_opened_handler = [&opened_session_count](xs::node::ClientSession& session, std::string* error_message) {
+        const xs::node::ClientSessionErrorCode activate_result = session.Activate(1234U);
+        if (activate_result != xs::node::ClientSessionErrorCode::None)
+        {
+            if (error_message != nullptr)
+            {
+                *error_message = std::string(session.last_error_message());
+            }
+            return false;
+        }
+
+        ++opened_session_count;
+        return true;
+    };
+
+    xs::node::ClientNetwork network(event_loop, logger, options);
+    XS_CHECK_MSG(network.Init() == xs::node::NodeErrorCode::None, network.last_error_message().data());
+    XS_CHECK_MSG(network.Run() == xs::node::NodeErrorCode::None, network.last_error_message().data());
+
+    std::atomic_bool loop_started{false};
+    xs::core::MainEventLoopErrorCode loop_result = xs::core::MainEventLoopErrorCode::None;
+    std::string loop_error;
+    std::thread loop_thread([&]() {
+        xs::core::MainEventLoopHooks hooks;
+        hooks.on_start = [&loop_started](xs::core::MainEventLoop&, std::string*) {
+            loop_started.store(true);
+            return xs::core::MainEventLoopErrorCode::None;
+        };
+        loop_result = event_loop.Run(std::move(hooks), &loop_error);
+    });
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&loop_started]() {
+        return loop_started.load();
+    }));
+
+    asio::io_context client_io_context;
+    const asio::ip::udp::endpoint server_endpoint(
+        asio::ip::address_v4::loopback(),
+        static_cast<std::uint16_t>(std::stoul(std::string(options.listen_endpoint.substr(options.listen_endpoint.rfind(':') + 1U)))));
+
+    asio::ip::udp::socket unauthorized_socket(
+        client_io_context,
+        asio::ip::udp::endpoint(asio::ip::address_v4::loopback(), 0U));
+    unauthorized_socket.non_blocking(true);
+
+    xs::net::KcpPeer unauthorized_peer({
+        .conversation = 11U,
+        .config = options.kcp,
+    });
+    XS_CHECK_MSG(unauthorized_peer.valid(), unauthorized_peer.last_error_message().data());
+    XS_CHECK(unauthorized_peer.Send(BytesFromText("unauthorized")) == xs::net::KcpPeerErrorCode::None);
+    XS_CHECK(unauthorized_peer.Flush(0U) == xs::net::KcpPeerErrorCode::None);
+    SendDatagrams(unauthorized_socket, server_endpoint, unauthorized_peer.ConsumeOutgoingDatagrams());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    XS_CHECK(network.session_count() == 0U);
+    XS_CHECK(opened_session_count.load() == 0);
+
+    asio::ip::udp::socket authorized_socket(
+        client_io_context,
+        asio::ip::udp::endpoint(asio::ip::address_v4::loopback(), 0U));
+    authorized_socket.non_blocking(true);
+
+    xs::net::KcpPeer authorized_peer({
+        .conversation = 17U,
+        .config = options.kcp,
+    });
+    XS_CHECK_MSG(authorized_peer.valid(), authorized_peer.last_error_message().data());
+    XS_CHECK(authorized_peer.Send(BytesFromText("authorized")) == xs::net::KcpPeerErrorCode::None);
+    XS_CHECK(authorized_peer.Flush(0U) == xs::net::KcpPeerErrorCode::None);
+    SendDatagrams(authorized_socket, server_endpoint, authorized_peer.ConsumeOutgoingDatagrams());
+
+    const xs::net::Endpoint authorized_endpoint = MakeEndpoint(
+        authorized_socket.local_endpoint().address().to_string(),
+        authorized_socket.local_endpoint().port());
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&network, &opened_session_count, &authorized_endpoint]() {
+        return network.session_count() == 1U &&
+            opened_session_count.load() == 1 &&
+            network.FindSessionByTransport(17U, authorized_endpoint) != nullptr;
+    }));
+
+    const xs::node::ClientSession* session = network.FindSessionByTransport(17U, authorized_endpoint);
+    XS_CHECK(session != nullptr);
+    if (session != nullptr)
+    {
+        XS_CHECK(session->session_state() == xs::node::ClientSessionState::Active);
+        XS_CHECK(session->authenticated_at_unix_ms() == 1234U);
+    }
+
+    event_loop.RequestStop();
+    loop_thread.join();
+    XS_CHECK_MSG(loop_result == xs::core::MainEventLoopErrorCode::None, loop_error.c_str());
+
+    XS_CHECK(network.Stop() == xs::node::NodeErrorCode::None);
+    XS_CHECK(network.Uninit() == xs::node::NodeErrorCode::None);
+
+    logger.Flush();
+    const std::string log_text = ReadDirectoryText(log_dir);
+    XS_CHECK(log_text.find("Client network rejected an incoming datagram for a new session.") != std::string::npos);
+    XS_CHECK(log_text.find("Client session created.") != std::string::npos);
+
+    CleanupTestDirectory(base_path);
+}
 } // namespace
 
 int main()
 {
     TestClientNetworkCreatesIndexesAndRemovesSessions();
     TestClientNetworkReceivesUdpAndCreatesSessionsByTransportKey();
+    TestClientNetworkRejectsUnauthorizedNewSessions();
 
     if (g_failures != 0)
     {

@@ -18,22 +18,31 @@ public static class ClusterClientConfigLoader
         JsonElement kcpElement = GetRequiredProperty(root, "kcp", "root");
         JsonElement gateElement = GetRequiredProperty(root, "gate", "root");
         JsonElement gateInstanceElement = GetRequiredProperty(gateElement, options.GateNodeId, "gate");
+
+        JsonElement authNetworkElement = GetRequiredProperty(gateInstanceElement, "authNetwork", $"gate.{options.GateNodeId}");
+        JsonElement authListenEndpointElement = GetRequiredProperty(
+            authNetworkElement,
+            "listenEndpoint",
+            $"gate.{options.GateNodeId}.authNetwork");
+
         JsonElement clientNetworkElement = GetRequiredProperty(gateInstanceElement, "clientNetwork", $"gate.{options.GateNodeId}");
-        JsonElement listenEndpointElement = GetRequiredProperty(
+        JsonElement clientListenEndpointElement = GetRequiredProperty(
             clientNetworkElement,
             "listenEndpoint",
             $"gate.{options.GateNodeId}.clientNetwork");
 
-        string configuredHost = GetRequiredString(listenEndpointElement, "host", "listenEndpoint");
-        int configuredPort = GetRequiredPositiveInt32(listenEndpointElement, "port", "listenEndpoint");
-        string host = options.HostOverride ?? NormalizeDialHost(configuredHost);
-        int port = options.PortOverride ?? configuredPort;
+        string configuredAuthHost = GetRequiredString(authListenEndpointElement, "host", "authNetwork.listenEndpoint");
+        int configuredAuthPort = GetRequiredPositiveInt32(authListenEndpointElement, "port", "authNetwork.listenEndpoint");
+        string configuredClientHost = GetRequiredString(clientListenEndpointElement, "host", "clientNetwork.listenEndpoint");
+        int configuredClientPort = GetRequiredPositiveInt32(clientListenEndpointElement, "port", "clientNetwork.listenEndpoint");
 
+        string host = options.HostOverride ?? NormalizeDialHost(configuredClientHost);
+        int port = options.PortOverride ?? configuredClientPort;
         string endpointSource = options.HostOverride is not null || options.PortOverride is not null
             ? "command-line override"
-            : configuredHost == host
+            : configuredClientHost == host
                 ? "cluster config"
-                : $"cluster config ({configuredHost} normalized for dial)";
+                : $"cluster config ({configuredClientHost} normalized for dial)";
 
         return new ResolvedClientProfile(
             configPath,
@@ -42,6 +51,8 @@ public static class ClusterClientConfigLoader
             port,
             options.Conversation,
             ParseKcpOptions(kcpElement),
+            NormalizeDialHost(configuredAuthHost),
+            configuredAuthPort,
             endpointSource);
     }
 

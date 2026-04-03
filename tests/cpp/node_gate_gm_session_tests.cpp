@@ -14,6 +14,7 @@
 #include <asio/ip/address_v4.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/ip/udp.hpp>
+#include <asio/write.hpp>
 
 #include <zmq.h>
 
@@ -27,6 +28,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -213,6 +215,130 @@ void SendDatagrams(
         XS_CHECK(sent == datagram.size());
     }
 }
+struct HttpResponse final
+{
+    int status_code{0};
+    std::string body{};
+};
+
+bool CanConnectLoopbackTcp(std::uint16_t port)
+{
+    asio::io_context io_context;
+    asio::ip::tcp::socket socket(io_context);
+    std::error_code error_code;
+    socket.connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), port), error_code);
+    if (!error_code)
+    {
+        socket.close();
+    }
+
+    return !error_code;
+}
+
+bool TrySendHttpJsonRequest(
+    std::uint16_t port,
+    std::string_view path,
+    const xs::core::Json& body,
+    HttpResponse* response,
+    std::string* error_message)
+{
+    if (response == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "HTTP response output must not be null.";
+        }
+        return false;
+    }
+
+    response->status_code = 0;
+    response->body.clear();
+
+    asio::io_context io_context;
+    asio::ip::tcp::socket socket(io_context);
+    std::error_code error_code;
+    socket.connect(asio::ip::tcp::endpoint(asio::ip::address_v4::loopback(), port), error_code);
+    if (error_code)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = error_code.message();
+        }
+        return false;
+    }
+
+    const std::string body_text = body.dump();
+    std::ostringstream request_stream;
+    request_stream << "POST " << path << " HTTP/1.1\r\n";
+    request_stream << "Host: 127.0.0.1\r\n";
+    request_stream << "Content-Type: application/json\r\n";
+    request_stream << "Content-Length: " << body_text.size() << "\r\n";
+    request_stream << "Connection: close\r\n\r\n";
+    request_stream << body_text;
+    const std::string request_text = request_stream.str();
+
+    asio::write(socket, asio::buffer(request_text), error_code);
+    if (error_code)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = error_code.message();
+        }
+        return false;
+    }
+
+    std::string raw_response;
+    std::array<char, 2048> buffer{};
+    while (true)
+    {
+        const std::size_t bytes_read = socket.read_some(asio::buffer(buffer), error_code);
+        if (error_code == asio::error::eof)
+        {
+            raw_response.append(buffer.data(), bytes_read);
+            break;
+        }
+
+        if (error_code)
+        {
+            if (error_message != nullptr)
+            {
+                *error_message = error_code.message();
+            }
+            return false;
+        }
+
+        raw_response.append(buffer.data(), bytes_read);
+    }
+
+    const std::size_t status_line_end = raw_response.find("\r\n");
+    if (status_line_end == std::string::npos)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "HTTP response status line was missing.";
+        }
+        return false;
+    }
+
+    std::istringstream status_stream(raw_response.substr(0U, status_line_end));
+    std::string http_version;
+    if (!(status_stream >> http_version >> response->status_code))
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "HTTP response status line was invalid.";
+        }
+        return false;
+    }
+
+    const std::size_t body_offset = raw_response.find("\r\n\r\n");
+    response->body = body_offset == std::string::npos ? std::string() : raw_response.substr(body_offset + 4U);
+    if (error_message != nullptr)
+    {
+        error_message->clear();
+    }
+    return true;
+}
 
 xs::core::Json MakeClusterConfigJson(
     const std::filesystem::path& base_path,
@@ -288,6 +414,11 @@ xs::core::Json MakeClusterConfigJson(
                    xs::core::Json{
                        {"listenEndpoint",
                         xs::core::Json{{"host", "127.0.0.1"}, {"port", gate_inner_port}}},
+                   }},
+                  {"authNetwork",
+                   xs::core::Json{
+                       {"listenEndpoint",
+                        xs::core::Json{{"host", "0.0.0.0"}, {"port", 4100}}},
                    }},
                   {"clientNetwork",
                    xs::core::Json{
@@ -907,6 +1038,8 @@ void TestGateNodeRegistersAndRefreshesHeartbeatAgainstRealGm()
 void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gate-gm-session-cluster-ready");
+    const std::uint16_t gate_auth_port = 4100U;
+    const std::uint16_t gate_kcp_port = 4000U;
 
     RawZmqSocket router(ZMQ_ROUTER);
     XS_CHECK(router.IsValid());
@@ -935,6 +1068,7 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
     XS_CHECK(gate_node.node().cluster_ready_epoch() == 0U);
     XS_CHECK(!gate_node.node().client_network_running());
     XS_CHECK(gate_node.node().client_network_session_count() == 0U);
+    XS_CHECK(!CanConnectLoopbackTcp(gate_auth_port));
 
     std::vector<std::vector<std::byte>> router_frames;
     bool register_accepted = false;
@@ -971,6 +1105,7 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
                     xs::net::DecodeHeartbeatRequest(packet.payload, &request) == xs::net::HeartbeatCodecErrorCode::None);
                 XS_CHECK(!gate_node.node().cluster_ready());
                 XS_CHECK(!gate_node.node().client_network_running());
+                XS_CHECK(!CanConnectLoopbackTcp(gate_auth_port));
 
                 heartbeat_accepted = true;
                 const std::vector<std::byte> response =
@@ -986,7 +1121,7 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
             }
         }
 
-        if (cluster_ready_sent && gate_node.node().client_network_running())
+        if (cluster_ready_sent && gate_node.node().client_network_running() && CanConnectLoopbackTcp(gate_auth_port))
         {
             break;
         }
@@ -1002,10 +1137,11 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
     XS_CHECK(register_accepted);
     XS_CHECK(heartbeat_accepted);
     XS_CHECK(cluster_ready_sent);
-    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gate_node]() {
+    XS_CHECK(WaitUntil(std::chrono::seconds(2), [&gate_node, gate_auth_port]() {
         return gate_node.node().cluster_ready() &&
             gate_node.node().cluster_ready_epoch() == 7U &&
-            gate_node.node().client_network_running();
+            gate_node.node().client_network_running() &&
+            CanConnectLoopbackTcp(gate_auth_port);
     }));
     XS_CHECK(gate_node.node().client_network_session_count() == 0U);
 
@@ -1013,13 +1149,46 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
     asio::ip::udp::socket client_socket(
         client_io_context,
         asio::ip::udp::endpoint(asio::ip::address_v4::loopback(), 0U));
-    const asio::ip::udp::endpoint gate_client_endpoint(asio::ip::address_v4::loopback(), 4000U);
+    const asio::ip::udp::endpoint gate_client_endpoint(asio::ip::address_v4::loopback(), gate_kcp_port);
 
     xs::core::KcpConfig client_kcp_config;
     client_kcp_config.no_congestion_window = true;
 
-    xs::net::KcpPeer client_peer({
+    xs::net::KcpPeer unauthorized_peer({
         .conversation = 21U,
+        .config = client_kcp_config,
+    });
+    XS_CHECK_MSG(unauthorized_peer.valid(), unauthorized_peer.last_error_message().data());
+    XS_CHECK(unauthorized_peer.Send(BytesFromText("gate-client-unauthorized")) == xs::net::KcpPeerErrorCode::None);
+    XS_CHECK(unauthorized_peer.Flush(0U) == xs::net::KcpPeerErrorCode::None);
+    SendDatagrams(client_socket, gate_client_endpoint, unauthorized_peer.ConsumeOutgoingDatagrams());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    XS_CHECK(gate_node.node().client_network_session_count() == 0U);
+
+    HttpResponse login_response;
+    std::string http_error;
+    XS_CHECK(TrySendHttpJsonRequest(
+        gate_auth_port,
+        "/login",
+        xs::core::Json{{"account", "dev-account"}, {"password", "dev-password"}},
+        &login_response,
+        &http_error));
+    XS_CHECK_MSG(http_error.empty(), http_error.c_str());
+    XS_CHECK(login_response.status_code == 200);
+
+    xs::core::Json login_json;
+    std::string json_error;
+    XS_CHECK(xs::core::TryParseJson(login_response.body, &login_json, &json_error) == xs::core::JsonErrorCode::None);
+    XS_CHECK(login_json.at("gateNodeId") == "Gate0");
+    XS_CHECK(login_json.at("account") == "dev-account");
+    XS_CHECK(login_json.at("kcp").at("host") == "127.0.0.1");
+    XS_CHECK(login_json.at("kcp").at("port") == gate_kcp_port);
+    const std::uint32_t conversation = login_json.at("kcp").at("conversation").get<std::uint32_t>();
+    XS_CHECK(conversation != 0U);
+
+    xs::net::KcpPeer client_peer({
+        .conversation = conversation,
         .config = client_kcp_config,
     });
     XS_CHECK_MSG(client_peer.valid(), client_peer.last_error_message().data());
@@ -1040,7 +1209,10 @@ void TestGateNodeOpensClientNetworkOnlyAfterClusterReadyNotify()
 
     const std::string log_text = ReadDirectoryText(log_dir);
     XS_CHECK(log_text.find("Gate node accepted GM cluster ready notify.") != std::string::npos);
-    XS_CHECK(log_text.find("Client network started.") != std::string::npos);
+    XS_CHECK(log_text.find("Gate client admission endpoints opened.") != std::string::npos);
+    XS_CHECK(log_text.find("Gate issued a client conversation reservation.") != std::string::npos);
+    XS_CHECK(log_text.find("Gate admitted an authenticated client session.") != std::string::npos);
+    XS_CHECK(log_text.find("Client network rejected an incoming datagram for a new session.") != std::string::npos);
     XS_CHECK(log_text.find("Client session created.") != std::string::npos);
     XS_CHECK(log_text.find("Client network received a client payload.") != std::string::npos);
 

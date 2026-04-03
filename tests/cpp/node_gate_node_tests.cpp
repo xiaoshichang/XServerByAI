@@ -105,6 +105,9 @@ xs::core::Json MakeClusterConfigJson(
             {"listenEndpoint", {{"host", "127.0.0.1"}, {"port", 7000}}},
         };
     }
+    gate_instance["authNetwork"] = xs::core::Json{
+        {"listenEndpoint", {{"host", "0.0.0.0"}, {"port", 4100}}},
+    };
     gate_instance["clientNetwork"] = xs::core::Json{
         {"listenEndpoint", {{"host", "0.0.0.0"}, {"port", 4000}}},
     };
@@ -516,6 +519,36 @@ void TestGateNodeRejectsMissingGmInnerNetworkEndpointConfig()
     CleanupTestDirectory(base_path);
 }
 
+void TestGateNodeRejectsMissingGateAuthNetworkEndpointConfig()
+{
+    const std::filesystem::path base_path = PrepareTestDirectory("node-gate-node-missing-gate-auth");
+    std::filesystem::path config_path;
+    if (!WriteRuntimeConfig(base_path, true, true, 5000u, 5100u, &config_path))
+    {
+        CleanupTestDirectory(base_path);
+        return;
+    }
+
+    xs::core::Json config_json;
+    std::string error_message;
+    XS_CHECK(xs::core::TryLoadJsonFile(config_path, &config_json, &error_message) == xs::core::JsonErrorCode::None);
+    config_json["gate"]["Gate0"].erase("authNetwork");
+    XS_CHECK(xs::core::SaveJsonFile(config_path, config_json, &error_message) == xs::core::JsonErrorCode::None);
+
+    xs::node::GateNode node({
+        .config_path = config_path,
+        .node_id = "Gate0",
+    });
+
+    const xs::node::NodeErrorCode result = node.Init();
+
+    XS_CHECK(result == xs::node::NodeErrorCode::ConfigLoadFailed);
+    XS_CHECK_MSG(
+        std::string(node.last_error_message()).find("gate.Gate0.authNetwork") != std::string::npos,
+        node.last_error_message().data());
+
+    CleanupTestDirectory(base_path);
+}
 void TestGateNodeRejectsMissingGateInnerNetworkEndpointConfig()
 {
     const std::filesystem::path base_path = PrepareTestDirectory("node-gate-node-missing-gate-inner");
@@ -632,6 +665,7 @@ int main()
 {
     TestGateNodeRejectsMissingGmInnerNetworkEndpointConfig();
     TestGateNodeRejectsMissingGateInnerNetworkEndpointConfig();
+    TestGateNodeRejectsMissingGateAuthNetworkEndpointConfig();
     TestGateNodeConnectsToGmAndStopsCleanly();
 
     if (g_failures != 0)

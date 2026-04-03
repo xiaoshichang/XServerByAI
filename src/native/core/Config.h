@@ -78,6 +78,7 @@ struct GmConfig
 struct GateConfig
 {
     EndpointConfig inner_network_listen_endpoint;
+    EndpointConfig auth_network_listen_endpoint;
     EndpointConfig client_network_listen_endpoint;
 };
 
@@ -111,6 +112,7 @@ struct GmNodeConfig final : NodeConfig
 struct GateNodeConfig final : NodeConfig
 {
     EndpointConfig inner_network_listen_endpoint{};
+    EndpointConfig auth_network_listen_endpoint{};
     EndpointConfig client_network_listen_endpoint{};
 };
 

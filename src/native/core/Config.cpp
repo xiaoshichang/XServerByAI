@@ -975,8 +975,9 @@ bool ParseGateConfig(
     std::string_view path,
     std::string* error_message)
 {
-    static constexpr std::array<std::string_view, 2> kAllowedFields{
+    static constexpr std::array<std::string_view, 3> kAllowedFields{
         "innerNetwork",
+        "authNetwork",
         "clientNetwork",
     };
 
@@ -1002,8 +1003,14 @@ bool ParseGateConfig(
 
     GateConfig config;
     const Json* inner_network = nullptr;
+    const Json* auth_network = nullptr;
     const Json* client_network = nullptr;
     if (!GetRequiredMember(value, "innerNetwork", &inner_network, path, error_message))
+    {
+        return false;
+    }
+
+    if (!GetRequiredMember(value, "authNetwork", &auth_network, path, error_message))
     {
         return false;
     }
@@ -1017,6 +1024,15 @@ bool ParseGateConfig(
             *inner_network,
             &config.inner_network_listen_endpoint,
             JoinPath(path, "innerNetwork"),
+            error_message))
+    {
+        return false;
+    }
+
+    if (!ParseListenEndpointContainer(
+            *auth_network,
+            &config.auth_network_listen_endpoint,
+            JoinPath(path, "authNetwork"),
             error_message))
     {
         return false;
@@ -1336,6 +1352,7 @@ ConfigErrorCode SelectNodeConfig(
 
         auto node_config = std::make_unique<GateNodeConfig>();
         node_config->inner_network_listen_endpoint = iterator->second.inner_network_listen_endpoint;
+        node_config->auth_network_listen_endpoint = iterator->second.auth_network_listen_endpoint;
         node_config->client_network_listen_endpoint = iterator->second.client_network_listen_endpoint;
         *output = std::move(node_config);
         break;
