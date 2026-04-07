@@ -16,19 +16,19 @@ public sealed class GateAuthClient
     public async Task<GateLoginGrant> LoginAsync(
         string url,
         string fallbackGateNodeId,
-        string account,
+        string accountId,
         string password,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(url);
         ArgumentException.ThrowIfNullOrWhiteSpace(fallbackGateNodeId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(account);
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
 
         using HttpRequestMessage request = new(HttpMethod.Post, BuildLoginUri(url))
         {
             Content = new StringContent(
-                JsonSerializer.Serialize(new { account, password }),
+                JsonSerializer.Serialize(new { account = accountId, password }),
                 Encoding.UTF8,
                 "application/json"),
         };
@@ -75,7 +75,7 @@ public sealed class GateAuthClient
         JsonElement kcpElement = GetRequiredProperty(root, "kcp", "root");
 
         string gateNodeId = TryGetOptionalString(root, "gateNodeId") ?? fallbackGateNodeId;
-        string account = GetRequiredString(root, "account", "root");
+        string accountId = GetRequiredString(root, "account", "root");
         string kcpHost = GetRequiredString(kcpElement, "host", "root.kcp");
         int kcpPort = GetRequiredPositiveInt32(kcpElement, "port", "root.kcp");
         uint conversation = GetRequiredPositiveUInt32(kcpElement, "conversation", "root.kcp");
@@ -84,7 +84,7 @@ public sealed class GateAuthClient
 
         return new GateLoginGrant(
             gateNodeId,
-            account,
+            accountId,
             kcpHost,
             kcpPort,
             conversation,

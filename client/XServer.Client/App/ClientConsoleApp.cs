@@ -194,16 +194,16 @@ public sealed class ClientConsoleApp
             gateNodeId: DefaultGate1NodeId);
 
         ResolvedClientProfile baseProfile = ClusterClientConfigLoader.Load(effectiveOptions);
-        (string loginUrl, string account, string password) = ResolveLoginRequest(command);
-        long playerId = command.GetInt32OrDefault("playerId", 10001);
+        (string loginUrl, string accountId, string password) = ResolveLoginRequest(command);
         string? avatarId = command.GetOptionalString("avatarId");
+        string? avatarName = command.GetOptionalString("avatarName");
 
         using HttpClient httpClient = new();
         GateAuthClient authClient = new(httpClient);
         GateLoginGrant grant = await authClient.LoginAsync(
             loginUrl,
             DefaultGate1NodeId,
-            account,
+            accountId,
             password,
             cancellationToken);
 
@@ -212,10 +212,10 @@ public sealed class ClientConsoleApp
             grant.KcpPort,
             grant.Conversation,
             "http login");
-        _state.StoreLoginGrant(grant.Account, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
-        _state.MarkLocalAvatarReady(playerId, avatarId);
+        _state.StoreLoginGrant(grant.AccountId, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
+        _state.MarkLocalAvatarReady(avatarId, avatarName);
         await _output.WriteLineAsync(
-            $"http login succeeded account={grant.Account} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Avatar prepared; run connect to open the KCP session.");
+            $"http login succeeded account={grant.AccountId} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Account cached and Avatar bound; run connect to open the KCP session.");
     }
 
     private async Task HandleMoveAsync(ParsedCommand command, CancellationToken cancellationToken)
@@ -326,14 +326,14 @@ public sealed class ClientConsoleApp
             "  disconnect",
             "  status",
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
-            "  login <url> <account> <password> [config=path]",
+            "  login <url> <account> <password> [config=path] [avatarId=avatar:demo-account] [avatarName=Hero]",
             "  move [x=1] [y=2] [z=0] [msgId=45011] [localApply=true]",
             "  buyWeapon [weaponId=rifle] [count=1] [msgId=45012] [localApply=true]",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
             "",
             "Notes:",
-            "  login prepares the local Avatar automatically after the HTTP grant succeeds.",
+            "  login caches the local Account automatically after the HTTP grant succeeds, then prepares and binds a local Avatar.",
             $"  demo default login url is {DefaultGate1AuthUrl} (Gate1 auth).",
             "  move/buyWeapon use temporary test-range msgIds by default and can be overridden.",
             "  connect reads configs/local-dev.json and Gate0 by default.",
@@ -394,7 +394,7 @@ public sealed class ClientConsoleApp
         if (!_state.HasAvatar)
         {
             throw new InvalidOperationException(
-                "No local Avatar is ready. Run login <url> <account> <password> before move/buyWeapon.");
+                "No local Avatar is bound to the current Account. Run login <url> <account> <password> before move/buyWeapon.");
         }
     }
 

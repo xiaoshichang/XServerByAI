@@ -2,8 +2,8 @@ namespace XServer.Client.Runtime;
 
 public sealed class AvatarView
 {
+    public required string AccountId { get; init; }
     public required string AvatarId { get; init; }
-    public required long PlayerId { get; init; }
     public required string DisplayName { get; init; }
     public float PositionX { get; set; }
     public float PositionY { get; set; }

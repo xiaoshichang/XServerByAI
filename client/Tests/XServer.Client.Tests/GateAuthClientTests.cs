@@ -56,7 +56,7 @@ public sealed class GateAuthClientTests
         Assert.Equal("secret", requestDocument.RootElement.GetProperty("password").GetString());
 
         Assert.Equal("Gate0", grant.GateNodeId);
-        Assert.Equal("demo-account", grant.Account);
+        Assert.Equal("demo-account", grant.AccountId);
         Assert.Equal("127.0.0.1", grant.KcpHost);
         Assert.Equal(4000, grant.KcpPort);
         Assert.Equal(321U, grant.Conversation);
