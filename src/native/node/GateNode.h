@@ -55,6 +55,21 @@ class GateNode final : public ServerNode
         std::uint64_t expires_at_unix_ms{0U};
     };
 
+    struct ClientSessionRecord final
+    {
+        std::uint64_t session_id{0U};
+        std::uint32_t conversation{0U};
+        std::string account_id{};
+        std::string avatar_id{};
+        std::string avatar_name{};
+        std::string game_node_id{};
+        std::string gate_node_id{};
+        std::uint32_t pending_select_avatar_seq{0U};
+        std::uint64_t authenticated_at_unix_ms{0U};
+        std::uint64_t last_active_unix_ms{0U};
+        bool closed{false};
+    };
+
     void HandleConnectorStateChanged(std::string_view remote_node_id, ipc::ZmqConnectionState state);
     void HandleGmConnectionStateChanged(ipc::ZmqConnectionState state);
     void HandleConnectorMessage(std::string_view remote_node_id, std::span<const std::byte> payload);
@@ -66,6 +81,9 @@ class GateNode final : public ServerNode
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
     void HandleGameHeartbeatMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
+    void HandleGameAvatarEntityCreateResultMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
     void HandleGameForwardStubCallMessage(
@@ -91,6 +109,35 @@ class GateNode final : public ServerNode
     [[nodiscard]] bool HandleClientSessionOpened(
         ClientSession& session,
         std::string* error_message);
+    void HandleClientPayloadReceived(
+        ClientSession& session,
+        std::span<const std::byte> payload);
+    [[nodiscard]] bool TryRegisterAuthenticatedClientSession(
+        const ClientConversationReservation& reservation,
+        ClientSession& session,
+        std::string* error_message);
+    [[nodiscard]] bool HandleClientSelectAvatarPacket(
+        ClientSession& session,
+        const xs::net::PacketView& packet,
+        std::string* error_message);
+    [[nodiscard]] bool SendClientSelectAvatarResult(
+        std::uint64_t session_id,
+        std::uint32_t request_seq,
+        bool success,
+        std::string_view account_id,
+        std::string_view avatar_id,
+        std::string_view avatar_name,
+        std::string_view game_node_id,
+        std::string_view error_message,
+        std::string* transport_error_message);
+    [[nodiscard]] bool SendCreateAvatarEntityRequest(
+        const ClientSessionRecord& session_record,
+        std::string_view avatar_name,
+        std::string* error_message);
+    [[nodiscard]] std::string ResolveAvatarGameNodeId() const;
+    void ClearClientSessionRecord(std::uint64_t session_id) noexcept;
+    [[nodiscard]] ClientSessionRecord* client_session_record(std::uint64_t session_id) noexcept;
+    [[nodiscard]] const ClientSessionRecord* client_session_record(std::uint64_t session_id) const noexcept;
     void PruneExpiredClientConversationReservations(std::uint64_t now_unix_ms) noexcept;
     [[nodiscard]] std::string ResolveAdvertisedClientHost(std::string_view remote_address) const;
     [[nodiscard]] const xs::core::GateNodeConfig* gate_config() const noexcept;
@@ -102,6 +149,9 @@ class GateNode final : public ServerNode
     std::unique_ptr<ClientNetwork> client_network_{};
     std::unique_ptr<GateAuthHttpService> auth_http_service_{};
     std::map<std::uint32_t, ClientConversationReservation, std::less<>> client_conversation_reservations_{};
+    std::map<std::uint64_t, ClientSessionRecord, std::less<>> client_session_records_{};
+    std::map<std::string, std::uint64_t, std::less<>> session_ids_by_account_{};
+    std::map<std::string, std::uint64_t, std::less<>> session_ids_by_avatar_{};
     RuntimeState runtime_state_{};
     std::uint64_t cluster_ready_epoch_{0U};
     std::uint64_t last_cluster_ready_server_now_unix_ms_{0U};

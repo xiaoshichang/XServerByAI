@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>XServer.Managed.Framework.Tests</AssemblyName>
     <RootNamespace>XServer.Managed.Framework.Tests</RootNamespace>
   </PropertyGroup>

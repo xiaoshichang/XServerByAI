@@ -2,6 +2,7 @@
 
 #include "InnerNetwork.h"
 #include "ManagedRuntimeHost.h"
+#include "Json.h"
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
@@ -35,6 +36,17 @@ constexpr std::int64_t kManagedNativeCreateTimerFailed = static_cast<std::int64_
 constexpr std::int32_t kManagedNativeCallbackInvalidArgument = -1;
 constexpr std::int32_t kManagedNativeCallbackOperationFailed = -2;
 constexpr std::int32_t kManagedNativeCallbackTargetNodeUnavailable = 4;
+constexpr std::uint32_t kGateCreateAvatarEntityMsgId = 2003U;
+constexpr std::uint32_t kGameAvatarEntityCreateResultMsgId = 2004U;
+
+struct AvatarCreateRequestPayload final
+{
+    std::string account_id{};
+    std::string avatar_id{};
+    std::string avatar_name{};
+    std::string gate_node_id{};
+    std::uint64_t session_id{0U};
+};
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -65,6 +77,141 @@ std::string BuildConnectorTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 std::string ToString(std::uint64_t value)
 {
     return std::to_string(value);
+}
+
+bool TryReadRequiredJsonString(
+    const xs::core::Json& object,
+    std::string_view key,
+    std::string* output,
+    std::string* error_message)
+{
+    if (output == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create JSON string output must not be null.";
+        }
+        return false;
+    }
+
+    const auto iterator = object.find(std::string(key));
+    if (iterator == object.end() || !iterator->is_string())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create payload is missing string field '" + std::string(key) + "'.";
+        }
+        return false;
+    }
+
+    *output = iterator->get<std::string>();
+    if (output->empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create payload field '" + std::string(key) + "' must not be empty.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool TryReadRequiredJsonUInt64(
+    const xs::core::Json& object,
+    std::string_view key,
+    std::uint64_t* output,
+    std::string* error_message)
+{
+    if (output == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create JSON integer output must not be null.";
+        }
+        return false;
+    }
+
+    const auto iterator = object.find(std::string(key));
+    if (iterator == object.end() || !iterator->is_number_unsigned())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create payload is missing unsigned integer field '" + std::string(key) + "'.";
+        }
+        return false;
+    }
+
+    *output = iterator->get<std::uint64_t>();
+    if (*output == 0U)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create payload field '" + std::string(key) + "' must be greater than zero.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool TryParseAvatarCreateRequestPayload(
+    std::span<const std::byte> payload,
+    AvatarCreateRequestPayload* output,
+    std::string* error_message)
+{
+    if (output == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create request output must not be null.";
+        }
+        return false;
+    }
+
+    const std::string payload_text(reinterpret_cast<const char*>(payload.data()), payload.size());
+    xs::core::Json payload_json;
+    std::string json_error;
+    if (xs::core::TryParseJson(payload_text, &payload_json, &json_error) != xs::core::JsonErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create payload was not valid JSON: " + json_error;
+        }
+        return false;
+    }
+
+    if (!payload_json.is_object())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar create payload must be a JSON object.";
+        }
+        return false;
+    }
+
+    AvatarCreateRequestPayload request;
+    if (!TryReadRequiredJsonString(payload_json, "accountId", &request.account_id, error_message) ||
+        !TryReadRequiredJsonString(payload_json, "avatarId", &request.avatar_id, error_message) ||
+        !TryReadRequiredJsonString(payload_json, "gateNodeId", &request.gate_node_id, error_message) ||
+        !TryReadRequiredJsonUInt64(payload_json, "sessionId", &request.session_id, error_message))
+    {
+        return false;
+    }
+
+    const auto avatar_name_iterator = payload_json.find("avatarName");
+    if (avatar_name_iterator != payload_json.end() && avatar_name_iterator->is_string())
+    {
+        request.avatar_name = avatar_name_iterator->get<std::string>();
+    }
+
+    if (request.avatar_name.empty())
+    {
+        request.avatar_name = request.avatar_id;
+    }
+
+    *output = std::move(request);
+    return true;
 }
 
 std::string DescribeManagedHostError(xs::host::ManagedHostErrorCode code)
@@ -1011,6 +1158,20 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         return;
     }
 
+    if (packet.header.msg_id == kGateCreateAvatarEntityMsgId)
+    {
+        if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+        {
+            session->last_protocol_error = "Gate create-avatar envelope is invalid.";
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node ignored Gate create-avatar request with an invalid envelope.");
+            return;
+        }
+
+        HandleGateCreateAvatarEntity(gate_node_id, packet);
+        return;
+    }
+
     if (packet.header.seq == xs::net::kPacketSeqNone)
     {
         log_invalid_response_envelope("Gate response envelope is invalid.",
@@ -1052,6 +1213,165 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
     }
 
     logger().Log(xs::core::LogLevel::Info, "inner", "Game node ignored an unsupported Gate response packet.");
+}
+
+void GameNode::HandleGateCreateAvatarEntity(std::string_view gate_node_id, const xs::net::PacketView& packet)
+{
+    InnerNetworkSession* session = remote_session(gate_node_id);
+    if (session == nullptr)
+    {
+        return;
+    }
+
+    AvatarCreateRequestPayload request_payload;
+    std::string request_error;
+    if (!TryParseAvatarCreateRequestPayload(packet.payload, &request_payload, &request_error))
+    {
+        session->last_protocol_error = std::move(request_error);
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node failed to decode Gate create-avatar payload before dispatching to managed runtime.");
+        return;
+    }
+
+    if (!managed_exports_loaded_ || managed_exports_.on_message == nullptr)
+    {
+        session->last_protocol_error = "Game managed runtime is unavailable for create-avatar request.";
+        if (!SendGateAvatarEntityCreateResult(gate_node_id, packet.payload, false, session->last_protocol_error))
+        {
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node failed to report create-avatar setup failure back to Gate.");
+        }
+        logger().Log(xs::core::LogLevel::Warn, "runtime",
+                     "Game node cannot dispatch create-avatar request before managed exports are ready.");
+        return;
+    }
+
+    const xs::host::ManagedMessageView managed_message{
+        .struct_size = sizeof(xs::host::ManagedMessageView),
+        .msg_id = packet.header.msg_id,
+        .seq = packet.header.seq,
+        .flags = packet.header.flags,
+        .session_id = 0u,
+        .player_id = 0u,
+        .payload = reinterpret_cast<const std::uint8_t*>(packet.payload.data()),
+        .payload_length = static_cast<std::uint32_t>(packet.payload.size()),
+        .reserved0 = 0u,
+    };
+    const std::int32_t managed_result = managed_exports_.on_message(&managed_message);
+    if (managed_result != 0)
+    {
+        session->last_protocol_error =
+            "Game managed runtime rejected create-avatar request with error code " + std::to_string(managed_result) + ".";
+        if (!SendGateAvatarEntityCreateResult(gate_node_id, packet.payload, false, session->last_protocol_error))
+        {
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node failed to report managed create-avatar failure back to Gate.");
+        }
+        logger().Log(xs::core::LogLevel::Warn, "runtime",
+                     "Game node observed a managed create-avatar failure.");
+        return;
+    }
+
+    session->last_protocol_error.clear();
+    if (!SendGateAvatarEntityCreateResult(gate_node_id, packet.payload, true, {}))
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node created AvatarEntity locally but failed to report success back to Gate.");
+        return;
+    }
+    logger().Log(xs::core::LogLevel::Info, "runtime", "Game node created avatar entity from Gate request.");
+}
+
+bool GameNode::SendGateAvatarEntityCreateResult(
+    std::string_view gate_node_id,
+    std::span<const std::byte> request_payload,
+    bool success,
+    std::string_view error_message)
+{
+    if (inner_network() == nullptr)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node cannot send create-avatar result because the inner network is unavailable.");
+        return false;
+    }
+
+    InnerNetworkSession* gate_session = remote_session(gate_node_id);
+    if (gate_session == nullptr)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node cannot send create-avatar result because the target Gate session was not found.");
+        return false;
+    }
+
+    if (gate_session->process_type != xs::core::ProcessType::Gate ||
+        gate_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !gate_session->registered ||
+        !gate_session->inner_network_ready)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"gateNodeId", gate_session->node_id},
+            xs::core::LogContextField{"connectionState", std::string(ipc::ZmqConnectionStateName(gate_session->connection_state))},
+            xs::core::LogContextField{"registered", gate_session->registered ? "true" : "false"},
+            xs::core::LogContextField{"innerNetworkReady", gate_session->inner_network_ready ? "true" : "false"},
+            xs::core::LogContextField{"success", success ? "true" : "false"},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node cannot send create-avatar result because the target Gate session is not ready.", context);
+        return false;
+    }
+
+    AvatarCreateRequestPayload request;
+    std::string parse_error;
+    if (!TryParseAvatarCreateRequestPayload(request_payload, &request, &parse_error))
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node could not build create-avatar result because the original request payload was invalid.");
+        return false;
+    }
+
+    xs::core::Json payload_json{
+        {"action", "createAvatarResult"},
+        {"success", success},
+        {"sessionId", request.session_id},
+        {"accountId", request.account_id},
+        {"avatarId", request.avatar_id},
+        {"avatarName", request.avatar_name},
+        {"gameNodeId", std::string(node_id())},
+        {"gateNodeId", request.gate_node_id},
+    };
+    if (!success && !error_message.empty())
+    {
+        payload_json["error"] = std::string(error_message);
+    }
+
+    const std::string payload_text = payload_json.dump();
+    const std::span<const std::byte> payload_bytes(
+        reinterpret_cast<const std::byte*>(payload_text.data()),
+        payload_text.size());
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        kGameAvatarEntityCreateResultMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(payload_bytes.size()));
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload_bytes.size());
+    const xs::net::PacketCodecErrorCode encode_result = xs::net::EncodePacket(header, payload_bytes, packet);
+    if (encode_result != xs::net::PacketCodecErrorCode::None)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node failed to encode create-avatar result packet for Gate.");
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(gate_node_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node failed to send create-avatar result packet back to Gate.");
+        return false;
+    }
+
+    return true;
 }
 
 void GameNode::HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry)

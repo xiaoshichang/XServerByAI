@@ -3,6 +3,7 @@
 #include "BinarySerialization.h"
 #include "ClientSession.h"
 #include "InnerNetwork.h"
+#include "Json.h"
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
 #include "message/PacketCodec.h"
@@ -10,6 +11,7 @@
 #include "message/RegisterCodec.h"
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -32,6 +34,9 @@ constexpr std::uint16_t kErrorResponseFlags =
 constexpr std::uint32_t kDefaultHeartbeatIntervalMs = 5000U;
 constexpr std::uint32_t kDefaultHeartbeatTimeoutMs = 15000U;
 constexpr std::uint64_t kConversationReservationLifetimeMs = 30000U;
+constexpr std::uint32_t kClientSelectAvatarMsgId = 45013U;
+constexpr std::uint32_t kGateCreateAvatarEntityMsgId = 2003U;
+constexpr std::uint32_t kGameAvatarEntityCreateResultMsgId = 2004U;
 
 constexpr std::int32_t kInnerProcessTypeInvalid = 3000;
 constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
@@ -213,6 +218,142 @@ xs::net::Endpoint ToNetEndpoint(const xs::core::EndpointConfig& endpoint)
     };
 }
 
+bool IsCanonicalGuidText(std::string_view text) noexcept
+{
+    if (text.size() != 36U)
+    {
+        return false;
+    }
+
+    for (std::size_t index = 0; index < text.size(); ++index)
+    {
+        const char ch = text[index];
+        const bool should_be_dash =
+            index == 8U || index == 13U || index == 18U || index == 23U;
+        if (should_be_dash)
+        {
+            if (ch != '-')
+            {
+                return false;
+            }
+
+            continue;
+        }
+
+        if (std::isxdigit(static_cast<unsigned char>(ch)) == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool TryReadRequiredJsonString(
+    const xs::core::Json& object,
+    std::string_view field_name,
+    std::string* output,
+    std::string* error_message)
+{
+    if (output == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON output string must not be null.";
+        }
+        return false;
+    }
+
+    const auto iterator = object.find(std::string(field_name));
+    if (iterator == object.end() || !iterator->is_string())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON field '" + std::string(field_name) + "' must be a string.";
+        }
+        return false;
+    }
+
+    *output = iterator->get<std::string>();
+    if (output->empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON field '" + std::string(field_name) + "' must not be empty.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool TryReadRequiredJsonUInt64(
+    const xs::core::Json& object,
+    std::string_view field_name,
+    std::uint64_t* output,
+    std::string* error_message)
+{
+    if (output == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON output integer must not be null.";
+        }
+        return false;
+    }
+
+    const auto iterator = object.find(std::string(field_name));
+    if (iterator == object.end() || !iterator->is_number_unsigned())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON field '" + std::string(field_name) + "' must be an unsigned integer.";
+        }
+        return false;
+    }
+
+    *output = iterator->get<std::uint64_t>();
+    if (*output == 0U)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON field '" + std::string(field_name) + "' must be greater than zero.";
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool TryReadRequiredJsonBoolean(
+    const xs::core::Json& object,
+    std::string_view field_name,
+    bool* output,
+    std::string* error_message)
+{
+    if (output == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON output boolean must not be null.";
+        }
+        return false;
+    }
+
+    const auto iterator = object.find(std::string(field_name));
+    if (iterator == object.end() || !iterator->is_boolean())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "JSON field '" + std::string(field_name) + "' must be a boolean.";
+        }
+        return false;
+    }
+
+    *output = iterator->get<bool>();
+    return true;
+}
+
 } // namespace
 
 GateNode::GateNode(NodeCommandLineArgs args)
@@ -328,6 +469,9 @@ NodeErrorCode GateNode::OnInit()
     next_client_conversation_ = 1U;
     cluster_ready_ = false;
     client_conversation_reservations_.clear();
+    client_session_records_.clear();
+    session_ids_by_account_.clear();
+    session_ids_by_avatar_.clear();
 
     inner_network_remote_sessions().Clear();
     const InnerNetworkSessionManagerErrorCode session_result =
@@ -396,6 +540,10 @@ NodeErrorCode GateNode::OnInit()
     client_options.session_opened_handler = [this](ClientSession& session, std::string* error_message) {
         return HandleClientSessionOpened(session, error_message);
     };
+    client_options.session_payload_handler =
+        [this](ClientSession& session, std::span<const std::byte> payload) {
+            HandleClientPayloadReceived(session, payload);
+        };
     client_network_ = std::make_unique<ClientNetwork>(event_loop(), logger(), std::move(client_options));
 
     GateAuthHttpServiceOptions auth_options;
@@ -717,6 +865,12 @@ void GateNode::HandleGameMessage(
         return;
     }
 
+    if (raw_header.msg_id == kGameAvatarEntityCreateResultMsgId)
+    {
+        HandleGameAvatarEntityCreateResultMessage(routing_id, payload);
+        return;
+    }
+
     if (raw_header.msg_id == xs::net::kRelayForwardStubCallMsgId)
     {
         HandleGameForwardStubCallMessage(routing_id, payload);
@@ -731,6 +885,268 @@ void GateNode::HandleGameMessage(
         xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload.size()))},
     };
     logger().Log(xs::core::LogLevel::Info, "inner", "Gate node ignored an unsupported Game inner packet.", context);
+}
+
+void GateNode::HandleGameAvatarEntityCreateResultMessage(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
+    xs::net::PacketView packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node dropped malformed Game create-avatar result packet.", context);
+        return;
+    }
+
+    if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored Game create-avatar result with an invalid envelope.", context);
+        return;
+    }
+
+    InnerNetworkSession* source_session = inner_network_remote_sessions().FindMutableByRoutingId(routing_id);
+    if (source_session == nullptr || !source_session->registered)
+    {
+        const std::array<xs::core::LogContextField, 3> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected create-avatar result from an unregistered Game.", context);
+        return;
+    }
+
+    xs::core::Json payload_json;
+    std::string json_error;
+    const std::string payload_text(reinterpret_cast<const char*>(packet.payload.data()), packet.payload.size());
+    if (xs::core::TryParseJson(payload_text, &payload_json, &json_error) != xs::core::JsonErrorCode::None || !payload_json.is_object())
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", source_session->node_id},
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"error", json_error.empty() ? "payload must be a JSON object" : json_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode create-avatar result payload from Game.", context);
+        return;
+    }
+
+    std::string action;
+    std::string account_id;
+    std::string avatar_id;
+    std::string avatar_name;
+    std::string game_node_id;
+    std::string gate_node_id;
+    std::string game_error;
+    std::uint64_t session_id = 0U;
+    bool success = false;
+    if (!TryReadRequiredJsonString(payload_json, "action", &action, &json_error) ||
+        !TryReadRequiredJsonBoolean(payload_json, "success", &success, &json_error) ||
+        !TryReadRequiredJsonUInt64(payload_json, "sessionId", &session_id, &json_error) ||
+        !TryReadRequiredJsonString(payload_json, "accountId", &account_id, &json_error) ||
+        !TryReadRequiredJsonString(payload_json, "avatarId", &avatar_id, &json_error) ||
+        !TryReadRequiredJsonString(payload_json, "gameNodeId", &game_node_id, &json_error) ||
+        !TryReadRequiredJsonString(payload_json, "gateNodeId", &gate_node_id, &json_error))
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", source_session->node_id},
+            xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+            xs::core::LogContextField{"error", json_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected incomplete create-avatar result payload from Game.", context);
+        return;
+    }
+
+    if (action != "createAvatarResult")
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected create-avatar result payload with an unexpected action.");
+        return;
+    }
+
+    const auto avatar_name_iterator = payload_json.find("avatarName");
+    if (avatar_name_iterator != payload_json.end() && avatar_name_iterator->is_string())
+    {
+        avatar_name = avatar_name_iterator->get<std::string>();
+    }
+    if (avatar_name.empty())
+    {
+        avatar_name = avatar_id;
+    }
+
+    const auto error_iterator = payload_json.find("error");
+    if (error_iterator != payload_json.end() && error_iterator->is_string())
+    {
+        game_error = error_iterator->get<std::string>();
+    }
+
+    if (gate_node_id != node_id())
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored create-avatar result addressed to another Gate node.");
+        return;
+    }
+
+    if (source_session->node_id != game_node_id)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected create-avatar result with a mismatched source Game node.");
+        return;
+    }
+
+    ClientSessionRecord* record = client_session_record(session_id);
+    if (record == nullptr)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored create-avatar result for a missing client session.");
+        return;
+    }
+
+    if (record->pending_select_avatar_seq == 0U)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored create-avatar result without a pending client select-avatar request.");
+        return;
+    }
+
+    const std::uint32_t request_seq = record->pending_select_avatar_seq;
+    const std::string response_avatar_name = record->avatar_name.empty() ? avatar_name : record->avatar_name;
+    const auto rollback_pending_selection = [this, record, session_id, request_seq, &account_id, &avatar_id, &response_avatar_name, &game_node_id](
+                                                std::string_view rollback_error,
+                                                bool notify_client)
+    {
+        if (!record->avatar_id.empty())
+        {
+            const auto avatar_iterator = session_ids_by_avatar_.find(record->avatar_id);
+            if (avatar_iterator != session_ids_by_avatar_.end() && avatar_iterator->second == session_id)
+            {
+                session_ids_by_avatar_.erase(avatar_iterator);
+            }
+        }
+
+        record->avatar_id.clear();
+        record->avatar_name.clear();
+        record->game_node_id.clear();
+        record->pending_select_avatar_seq = 0U;
+
+        if (notify_client)
+        {
+            std::string transport_error;
+            const bool notify_result = SendClientSelectAvatarResult(
+                session_id,
+                request_seq,
+                false,
+                account_id,
+                avatar_id,
+                response_avatar_name,
+                game_node_id,
+                rollback_error,
+                &transport_error);
+            if (!notify_result)
+            {
+                const std::array<xs::core::LogContextField, 5> context{
+                    xs::core::LogContextField{"nodeId", std::string(node_id())},
+                    xs::core::LogContextField{"sessionId", ToString(session_id)},
+                    xs::core::LogContextField{"accountId", account_id},
+                    xs::core::LogContextField{"avatarId", avatar_id},
+                    xs::core::LogContextField{"transportError", transport_error},
+                };
+                logger().Log(xs::core::LogLevel::Warn, "client.kcp", "Gate failed to notify the client about select-avatar rollback.", context);
+            }
+        }
+    };
+
+    if (!success)
+    {
+        rollback_pending_selection(
+            game_error.empty() ? std::string_view("Game failed to create AvatarEntity.") : std::string_view(game_error),
+            true);
+        return;
+    }
+
+    ClientSession* client_session = client_network_ != nullptr ? client_network_->FindSession(session_id) : nullptr;
+    if (client_session == nullptr)
+    {
+        rollback_pending_selection("Gate could not find the target client session for avatar confirmation.", false);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node could not find the target client session for create-avatar confirmation.");
+        return;
+    }
+
+    if (client_session->route_state() == ClientRouteState::Unassigned)
+    {
+        const ClientSessionErrorCode selecting_result = client_session->SetRouteSelecting();
+        if (selecting_result != ClientSessionErrorCode::None)
+        {
+            rollback_pending_selection(client_session->last_error_message(), true);
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to enter Selecting route state while confirming avatar creation.");
+            return;
+        }
+    }
+
+    if (client_session->route_state() == ClientRouteState::Selecting || client_session->route_state() == ClientRouteState::RouteLost)
+    {
+        const ClientSessionErrorCode bind_result = client_session->BindRoute(
+            ClientRouteTarget{
+                .game_node_id = game_node_id,
+                .inner_network_endpoint = source_session->inner_network_endpoint,
+                .route_epoch = cluster_ready_epoch_ == 0U ? 1U : cluster_ready_epoch_,
+            });
+        if (bind_result != ClientSessionErrorCode::None)
+        {
+            rollback_pending_selection(client_session->last_error_message(), true);
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to bind client route while confirming avatar creation.");
+            return;
+        }
+    }
+
+    record->pending_select_avatar_seq = 0U;
+    record->avatar_name = response_avatar_name;
+    record->game_node_id = game_node_id;
+    record->last_active_unix_ms = CurrentUnixTimeMilliseconds();
+
+    std::string transport_error;
+    const bool response_result = SendClientSelectAvatarResult(
+        session_id,
+        request_seq,
+        true,
+        account_id,
+        avatar_id,
+        response_avatar_name,
+        game_node_id,
+        {},
+        &transport_error);
+    if (!response_result)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sessionId", ToString(session_id)},
+            xs::core::LogContextField{"accountId", account_id},
+            xs::core::LogContextField{"avatarId", avatar_id},
+            xs::core::LogContextField{"transportError", transport_error},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "client.kcp", "Gate failed to send select-avatar success confirmation to the client.", context);
+        return;
+    }
+
+    const std::array<xs::core::LogContextField, 6> success_context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"sessionId", ToString(session_id)},
+        xs::core::LogContextField{"accountId", account_id},
+        xs::core::LogContextField{"avatarId", avatar_id},
+        xs::core::LogContextField{"avatarName", response_avatar_name},
+        xs::core::LogContextField{"gameNodeId", game_node_id},
+    };
+    logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate confirmed AvatarEntity creation back to the client.", success_context);
 }
 
 void GateNode::HandleGameForwardStubCallMessage(
@@ -1718,6 +2134,9 @@ void GateNode::ResetClusterReadyState()
     next_client_conversation_ = 1U;
     cluster_ready_ = false;
     client_conversation_reservations_.clear();
+    client_session_records_.clear();
+    session_ids_by_account_.clear();
+    session_ids_by_avatar_.clear();
 }
 
 void GateNode::StartOrResetHeartbeatTimer(std::uint32_t interval_ms)
@@ -1956,6 +2375,11 @@ bool GateNode::HandleClientSessionOpened(
         return false;
     }
 
+    if (!TryRegisterAuthenticatedClientSession(iterator->second, session, error_message))
+    {
+        return false;
+    }
+
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"account", iterator->second.account},
@@ -1968,6 +2392,498 @@ bool GateNode::HandleClientSessionOpened(
     client_conversation_reservations_.erase(iterator);
     ClearOptionalError(error_message);
     return true;
+}
+
+void GateNode::HandleClientPayloadReceived(
+    ClientSession& session,
+    std::span<const std::byte> payload)
+{
+    ClientSessionRecord* record = client_session_record(session.session_id());
+    if (record != nullptr)
+    {
+        record->last_active_unix_ms = CurrentUnixTimeMilliseconds();
+    }
+
+    xs::net::PacketView packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+            xs::core::LogContextField{"conversation", std::to_string(session.conversation())},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "client.kcp", "Gate dropped malformed client packet.", context);
+        return;
+    }
+
+    if (packet.header.msg_id == kClientSelectAvatarMsgId)
+    {
+        std::string handler_error;
+        if (!HandleClientSelectAvatarPacket(session, packet, &handler_error))
+        {
+            std::string transport_error;
+            (void)SendClientSelectAvatarResult(
+                session.session_id(),
+                packet.header.seq,
+                false,
+                record != nullptr ? std::string_view(record->account_id) : std::string_view{},
+                record != nullptr ? std::string_view(record->avatar_id) : std::string_view{},
+                record != nullptr ? std::string_view(record->avatar_name) : std::string_view{},
+                record != nullptr ? std::string_view(record->game_node_id) : std::string_view{},
+                handler_error,
+                &transport_error);
+            const std::array<xs::core::LogContextField, 5> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
+                xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+                xs::core::LogContextField{"conversation", std::to_string(session.conversation())},
+                xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+                xs::core::LogContextField{"error", handler_error},
+            };
+            logger().Log(xs::core::LogLevel::Warn, "client.kcp", "Gate rejected a client select-avatar request.", context);
+        }
+        return;
+    }
+
+    const std::array<xs::core::LogContextField, 5> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+        xs::core::LogContextField{"conversation", std::to_string(session.conversation())},
+        xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+        xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(packet.payload.size()))},
+    };
+    logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate ignored an unsupported client packet.", context);
+}
+
+bool GateNode::TryRegisterAuthenticatedClientSession(
+    const ClientConversationReservation& reservation,
+    ClientSession& session,
+    std::string* error_message)
+{
+    if (reservation.account.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Authenticated client session account must not be empty.";
+        }
+        return false;
+    }
+
+    if (const auto account_iterator = session_ids_by_account_.find(reservation.account);
+        account_iterator != session_ids_by_account_.end() &&
+        account_iterator->second != session.session_id())
+    {
+        ClearClientSessionRecord(account_iterator->second);
+    }
+
+    ClearClientSessionRecord(session.session_id());
+
+    const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
+    client_session_records_[session.session_id()] = ClientSessionRecord{
+        .session_id = session.session_id(),
+        .conversation = session.conversation(),
+        .account_id = reservation.account,
+        .avatar_id = {},
+        .avatar_name = {},
+        .game_node_id = {},
+        .gate_node_id = std::string(node_id()),
+        .pending_select_avatar_seq = 0U,
+        .authenticated_at_unix_ms = now_unix_ms,
+        .last_active_unix_ms = now_unix_ms,
+        .closed = false,
+    };
+    session_ids_by_account_[reservation.account] = session.session_id();
+
+    ClearOptionalError(error_message);
+    return true;
+}
+
+bool GateNode::HandleClientSelectAvatarPacket(
+    ClientSession& session,
+    const xs::net::PacketView& packet,
+    std::string* error_message)
+{
+    if (packet.header.flags != 0U || packet.header.seq == xs::net::kPacketSeqNone)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client select-avatar packet envelope is invalid.";
+        }
+        return false;
+    }
+
+    ClientSessionRecord* record = client_session_record(session.session_id());
+    if (record == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Authenticated client session record is missing.";
+        }
+        return false;
+    }
+
+    if (record->pending_select_avatar_seq != 0U)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client select-avatar request is already waiting for a server result.";
+        }
+        return false;
+    }
+
+    if (!record->avatar_id.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client session already has a bound avatar.";
+        }
+        return false;
+    }
+
+    xs::core::Json request_json;
+    std::string json_error;
+    const std::string request_text(
+        reinterpret_cast<const char*>(packet.payload.data()),
+        packet.payload.size());
+    if (xs::core::TryParseJson(request_text, &request_json, &json_error) != xs::core::JsonErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Select-avatar payload was not valid JSON: " + json_error;
+        }
+        return false;
+    }
+
+    if (!request_json.is_object())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Select-avatar payload must be a JSON object.";
+        }
+        return false;
+    }
+
+    std::string action;
+    if (!TryReadRequiredJsonString(request_json, "action", &action, error_message))
+    {
+        return false;
+    }
+
+    if (action != "selectAvatar")
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Select-avatar payload action must be 'selectAvatar'.";
+        }
+        return false;
+    }
+
+    std::string avatar_id;
+    if (!TryReadRequiredJsonString(request_json, "avatarId", &avatar_id, error_message))
+    {
+        return false;
+    }
+
+    if (!IsCanonicalGuidText(avatar_id))
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Select-avatar payload avatarId must be a canonical GUID string.";
+        }
+        return false;
+    }
+
+    std::string avatar_name;
+    const auto avatar_name_iterator = request_json.find("avatarName");
+    if (avatar_name_iterator != request_json.end() && avatar_name_iterator->is_string())
+    {
+        avatar_name = avatar_name_iterator->get<std::string>();
+    }
+    if (avatar_name.empty())
+    {
+        avatar_name = avatar_id;
+    }
+
+    if (const auto avatar_iterator = session_ids_by_avatar_.find(avatar_id);
+        avatar_iterator != session_ids_by_avatar_.end() &&
+        avatar_iterator->second != session.session_id())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Avatar is already bound to another active session.";
+        }
+        return false;
+    }
+
+    const std::string game_node_id = ResolveAvatarGameNodeId();
+    if (game_node_id.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "No ready Game node is available for avatar creation.";
+        }
+        return false;
+    }
+
+    ClientSessionRecord next_record = *record;
+    next_record.avatar_id = avatar_id;
+    next_record.avatar_name = avatar_name;
+    next_record.game_node_id = game_node_id;
+    next_record.pending_select_avatar_seq = packet.header.seq;
+    next_record.last_active_unix_ms = CurrentUnixTimeMilliseconds();
+
+    if (!SendCreateAvatarEntityRequest(next_record, avatar_name, error_message))
+    {
+        return false;
+    }
+
+    if (!record->avatar_id.empty() && record->avatar_id != avatar_id)
+    {
+        session_ids_by_avatar_.erase(record->avatar_id);
+    }
+
+    *record = std::move(next_record);
+    session_ids_by_account_[record->account_id] = session.session_id();
+    session_ids_by_avatar_[record->avatar_id] = session.session_id();
+
+    const std::array<xs::core::LogContextField, 6> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+        xs::core::LogContextField{"accountId", record->account_id},
+        xs::core::LogContextField{"avatarId", record->avatar_id},
+        xs::core::LogContextField{"gameNodeId", record->game_node_id},
+        xs::core::LogContextField{"routeState", std::string(ClientRouteStateName(session.route_state()))},
+    };
+    logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate queued avatar selection and is waiting for Game create confirmation.", context);
+
+    ClearOptionalError(error_message);
+    return true;
+}
+
+bool GateNode::SendClientSelectAvatarResult(
+    std::uint64_t session_id,
+    std::uint32_t request_seq,
+    bool success,
+    std::string_view account_id,
+    std::string_view avatar_id,
+    std::string_view avatar_name,
+    std::string_view game_node_id,
+    std::string_view error_message,
+    std::string* transport_error_message)
+{
+    if (request_seq == xs::net::kPacketSeqNone)
+    {
+        if (transport_error_message != nullptr)
+        {
+            *transport_error_message = "Client select-avatar response requires a non-zero request sequence.";
+        }
+        return false;
+    }
+
+    if (client_network_ == nullptr)
+    {
+        if (transport_error_message != nullptr)
+        {
+            *transport_error_message = "Gate client network is unavailable.";
+        }
+        return false;
+    }
+
+    xs::core::Json payload_json{
+        {"action", "selectAvatarResult"},
+        {"success", success},
+        {"sessionId", session_id},
+        {"accountId", std::string(account_id)},
+        {"avatarId", std::string(avatar_id)},
+        {"avatarName", std::string(avatar_name)},
+        {"gameNodeId", std::string(game_node_id)},
+    };
+    if (!success)
+    {
+        payload_json["error"] = std::string(error_message);
+    }
+
+    const std::string payload_text = payload_json.dump();
+    const std::span<const std::byte> payload_bytes(
+        reinterpret_cast<const std::byte*>(payload_text.data()),
+        payload_text.size());
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        kClientSelectAvatarMsgId,
+        request_seq,
+        success ? kResponseFlags : kErrorResponseFlags,
+        static_cast<std::uint32_t>(payload_bytes.size()));
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload_bytes.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload_bytes, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        if (transport_error_message != nullptr)
+        {
+            *transport_error_message = "Failed to encode client select-avatar result packet: " +
+                std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        }
+        return false;
+    }
+
+    const NodeErrorCode send_result = client_network_->SendPayload(session_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        if (transport_error_message != nullptr)
+        {
+            *transport_error_message = std::string(client_network_->last_error_message());
+        }
+        return false;
+    }
+
+    ClearOptionalError(transport_error_message);
+    return true;
+}
+
+bool GateNode::SendCreateAvatarEntityRequest(
+    const ClientSessionRecord& session_record,
+    std::string_view avatar_name,
+    std::string* error_message)
+{
+    if (inner_network() == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Gate inner network is unavailable.";
+        }
+        return false;
+    }
+
+    InnerNetworkSession* target_session = remote_session(session_record.game_node_id);
+    if (target_session == nullptr ||
+        target_session->process_type != xs::core::ProcessType::Game ||
+        target_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !target_session->registered ||
+        !target_session->inner_network_ready ||
+        target_session->routing_id.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Target Game node is unavailable for avatar creation.";
+        }
+        return false;
+    }
+
+    const xs::core::Json payload_json{
+        {"accountId", session_record.account_id},
+        {"avatarId", session_record.avatar_id},
+        {"avatarName", std::string(avatar_name)},
+        {"gateNodeId", session_record.gate_node_id},
+        {"sessionId", session_record.session_id},
+    };
+    const std::string payload_text = payload_json.dump();
+    const std::span<const std::byte> payload_bytes(
+        reinterpret_cast<const std::byte*>(payload_text.data()),
+        payload_text.size());
+    const xs::net::PacketHeader header = xs::net::MakePacketHeader(
+        kGateCreateAvatarEntityMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(payload_bytes.size()));
+
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + payload_bytes.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, payload_bytes, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Failed to encode create-avatar packet: " +
+                std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        }
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(target_session->routing_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(inner_network()->last_error_message());
+        }
+        return false;
+    }
+
+    const std::array<xs::core::LogContextField, 6> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"sessionId", ToString(session_record.session_id)},
+        xs::core::LogContextField{"accountId", session_record.account_id},
+        xs::core::LogContextField{"avatarId", session_record.avatar_id},
+        xs::core::LogContextField{"gameNodeId", session_record.game_node_id},
+        xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(payload_bytes.size()))},
+    };
+    logger().Log(xs::core::LogLevel::Info, "inner", "Gate requested AvatarEntity creation from Game.", context);
+
+    ClearOptionalError(error_message);
+    return true;
+}
+
+std::string GateNode::ResolveAvatarGameNodeId() const
+{
+    for (const auto& [game_node_id, game_config] : cluster_config().games)
+    {
+        (void)game_config;
+
+        const InnerNetworkSession* session = remote_session(game_node_id);
+        if (session == nullptr ||
+            session->process_type != xs::core::ProcessType::Game ||
+            session->connection_state != ipc::ZmqConnectionState::Connected ||
+            !session->registered ||
+            !session->inner_network_ready ||
+            session->routing_id.empty())
+        {
+            continue;
+        }
+
+        return game_node_id;
+    }
+
+    return {};
+}
+
+void GateNode::ClearClientSessionRecord(std::uint64_t session_id) noexcept
+{
+    const auto iterator = client_session_records_.find(session_id);
+    if (iterator == client_session_records_.end())
+    {
+        return;
+    }
+
+    if (!iterator->second.account_id.empty())
+    {
+        const auto account_iterator = session_ids_by_account_.find(iterator->second.account_id);
+        if (account_iterator != session_ids_by_account_.end() && account_iterator->second == session_id)
+        {
+            session_ids_by_account_.erase(account_iterator);
+        }
+    }
+
+    if (!iterator->second.avatar_id.empty())
+    {
+        const auto avatar_iterator = session_ids_by_avatar_.find(iterator->second.avatar_id);
+        if (avatar_iterator != session_ids_by_avatar_.end() && avatar_iterator->second == session_id)
+        {
+            session_ids_by_avatar_.erase(avatar_iterator);
+        }
+    }
+
+    client_session_records_.erase(iterator);
+}
+
+GateNode::ClientSessionRecord* GateNode::client_session_record(std::uint64_t session_id) noexcept
+{
+    const auto iterator = client_session_records_.find(session_id);
+    return iterator != client_session_records_.end() ? &iterator->second : nullptr;
+}
+
+const GateNode::ClientSessionRecord* GateNode::client_session_record(std::uint64_t session_id) const noexcept
+{
+    const auto iterator = client_session_records_.find(session_id);
+    return iterator != client_session_records_.end() ? &iterator->second : nullptr;
 }
 
 void GateNode::PruneExpiredClientConversationReservations(std::uint64_t now_unix_ms) noexcept

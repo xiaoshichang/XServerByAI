@@ -69,7 +69,6 @@ struct ClientSessionSnapshot
     std::uint32_t conversation{0U};
     xs::net::Endpoint remote_endpoint{};
     ClientSessionState session_state{ClientSessionState::Created};
-    std::uint64_t player_id{0U};
     ClientRouteState route_state{ClientRouteState::Unassigned};
     std::optional<ClientRouteTarget> route_target{};
     std::uint64_t connected_at_unix_ms{0U};
@@ -97,7 +96,6 @@ class ClientSession final
     [[nodiscard]] const xs::net::Endpoint& remote_endpoint() const noexcept;
     [[nodiscard]] ClientSessionState session_state() const noexcept;
     [[nodiscard]] ClientRouteState route_state() const noexcept;
-    [[nodiscard]] std::uint64_t player_id() const noexcept;
     [[nodiscard]] std::uint64_t connected_at_unix_ms() const noexcept;
     [[nodiscard]] std::uint64_t authenticated_at_unix_ms() const noexcept;
     [[nodiscard]] std::uint64_t last_active_unix_ms() const noexcept;
@@ -110,9 +108,7 @@ class ClientSession final
     [[nodiscard]] std::string_view last_error_message() const noexcept;
 
     [[nodiscard]] ClientSessionErrorCode BeginAuthentication() noexcept;
-    [[nodiscard]] ClientSessionErrorCode Activate(
-        std::uint64_t authenticated_at_unix_ms = 0U,
-        std::uint64_t player_id = 0U) noexcept;
+    [[nodiscard]] ClientSessionErrorCode Activate(std::uint64_t authenticated_at_unix_ms = 0U) noexcept;
     [[nodiscard]] ClientSessionErrorCode BeginClosing() noexcept;
     [[nodiscard]] ClientSessionErrorCode Close(
         std::int32_t close_reason_code,
@@ -135,7 +131,6 @@ class ClientSession final
     xs::net::KcpPeer kcp_{};
     ClientSessionState session_state_{ClientSessionState::Created};
     ClientRouteState route_state_{ClientRouteState::Unassigned};
-    std::uint64_t player_id_{0U};
     std::optional<ClientRouteTarget> route_target_{};
     std::uint64_t connected_at_unix_ms_{0U};
     std::uint64_t authenticated_at_unix_ms_{0U};

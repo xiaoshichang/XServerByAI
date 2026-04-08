@@ -16,6 +16,7 @@ namespace XServer.Managed.Framework.Runtime
         private readonly List<ServerStubEntity> _ownedServerStubs = [];
         private readonly Dictionary<string, ServerStubEntity> _ownedServerStubsByType =
             new(StringComparer.Ordinal);
+        private readonly Dictionary<Guid, AvatarEntity> _avatarsByEntityId = [];
         private IReadOnlyList<ServerStubOwnershipAssignment> _ownershipAssignments = Array.Empty<ServerStubOwnershipAssignment>();
 
         public GameNodeRuntimeState(
@@ -46,6 +47,8 @@ namespace XServer.Managed.Framework.Runtime
             _ownedServerStubs.Where(static stub => stub.IsReady).ToArray();
 
         public bool HasOwnedServerStubs => _ownedServerStubs.Count != 0;
+
+        public IReadOnlyList<AvatarEntity> AvatarEntities => _avatarsByEntityId.Values.ToArray();
 
         public bool IsLocalReady =>
             _ownedServerStubs.Count != 0 &&
@@ -248,6 +251,89 @@ namespace XServer.Managed.Framework.Runtime
             ClearOwnedServerStubs();
             _ownershipAssignments = Array.Empty<ServerStubOwnershipAssignment>();
             AssignmentEpoch = 0;
+        }
+
+        public bool TryCreateAvatarEntity(
+            AvatarEntitySpawnRequest request,
+            out AvatarEntity? avatar,
+            out string? error)
+        {
+            avatar = null;
+            error = null;
+
+            if (string.IsNullOrWhiteSpace(request.AccountId) ||
+                request.EntityId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(request.RouteGateNodeId) ||
+                request.SessionId == 0)
+            {
+                error = "Avatar spawn request is incomplete.";
+                return false;
+            }
+
+            if (_avatarsByEntityId.TryGetValue(request.EntityId, out AvatarEntity? existingAvatar))
+            {
+                if (!string.Equals(existingAvatar.AccountId, request.AccountId, StringComparison.Ordinal))
+                {
+                    error = $"Avatar entity '{request.EntityId:D}' is already owned by another account.";
+                    return false;
+                }
+
+                OnlineAvatarRegistration existingRegistration = new(
+                    existingAvatar.AccountId,
+                    existingAvatar.EntityId,
+                    request.SessionId,
+                    request.RouteGateNodeId,
+                    _nodeId,
+                    existingAvatar.DisplayName);
+                if (!OnlineStub.TryRegisterAvatar(existingRegistration, out string existingRegisterError))
+                {
+                    error = existingRegisterError;
+                    return false;
+                }
+
+                avatar = existingAvatar;
+                return true;
+            }
+
+            AvatarEntity createdAvatar = new();
+            createdAvatar.BindIdentity(
+                request.EntityId,
+                request.AccountId,
+                request.AvatarName,
+                request.RouteGateNodeId);
+            createdAvatar.SetStubCaller(this);
+            createdAvatar.SetNativeTimerScheduler(_nativeTimerScheduler);
+
+            EntityManagerErrorCode registerResult = _entityManager.Register(createdAvatar);
+            if (registerResult != EntityManagerErrorCode.None)
+            {
+                createdAvatar.SetStubCaller(null);
+                createdAvatar.SetNativeTimerScheduler(null);
+                error = EntityManagerError.Message(registerResult);
+                return false;
+            }
+
+            OnlineAvatarRegistration registration = new(
+                createdAvatar.AccountId,
+                createdAvatar.EntityId,
+                request.SessionId,
+                request.RouteGateNodeId,
+                _nodeId,
+                createdAvatar.DisplayName);
+            if (!OnlineStub.TryRegisterAvatar(registration, out string registerError))
+            {
+                _ = _entityManager.Unregister(createdAvatar.EntityId);
+                createdAvatar.Destroy();
+                createdAvatar.SetStubCaller(null);
+                createdAvatar.SetNativeTimerScheduler(null);
+                error = registerError;
+                return false;
+            }
+
+            createdAvatar.Activate();
+            _avatarsByEntityId.Add(createdAvatar.EntityId, createdAvatar);
+            avatar = createdAvatar;
+            return true;
         }
 
         private void ClearOwnedServerStubs()

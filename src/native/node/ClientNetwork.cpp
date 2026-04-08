@@ -546,6 +546,50 @@ class ClientNetwork::Impl final
         return NodeErrorCode::None;
     }
 
+    [[nodiscard]] NodeErrorCode SendPayload(
+        std::uint64_t session_id,
+        std::span<const std::byte> payload)
+    {
+        if (!running_)
+        {
+            return SetError(last_error_message_, NodeErrorCode::NodeRunFailed, "ClientNetwork must be running before SendPayload().");
+        }
+
+        if (payload.empty())
+        {
+            return SetError(last_error_message_, NodeErrorCode::InvalidArgument, "ClientNetwork SendPayload() requires a non-empty payload.");
+        }
+
+        ClientSession* session = FindSession(session_id);
+        if (session == nullptr)
+        {
+            return SetError(last_error_message_, NodeErrorCode::InvalidArgument, "ClientNetwork SendPayload() target session was not found.");
+        }
+
+        const xs::net::KcpPeerErrorCode send_result = session->kcp().Send(payload);
+        if (send_result != xs::net::KcpPeerErrorCode::None)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::NodeRunFailed,
+                "ClientNetwork failed to queue payload into KCP: " + std::string(session->kcp().last_error_message()));
+        }
+
+        const xs::net::KcpPeerErrorCode update_result = session->kcp().Update(CurrentKcpClockMilliseconds());
+        if (update_result != xs::net::KcpPeerErrorCode::None)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::NodeRunFailed,
+                "ClientNetwork failed to flush KCP payload: " + std::string(session->kcp().last_error_message()));
+        }
+
+        session->Touch(CurrentUnixTimeMilliseconds());
+        FlushPendingDatagrams(*session);
+        ClearError(last_error_message_);
+        return NodeErrorCode::None;
+    }
+
     [[nodiscard]] bool CanOpenSession(
         std::uint32_t conversation,
         const xs::net::Endpoint& remote_endpoint,
@@ -589,6 +633,14 @@ class ClientNetwork::Impl final
             *error_message = "Client network session-open handler rejected the session.";
         }
         return false;
+    }
+
+    void HandleSessionPayload(ClientSession& session, std::span<const std::byte> payload)
+    {
+        if (options_.session_payload_handler)
+        {
+            options_.session_payload_handler(session, payload);
+        }
     }
 
     [[nodiscard]] ClientSession* FindSession(std::uint64_t session_id) noexcept
@@ -899,6 +951,7 @@ class ClientNetwork::Impl final
             if (receive_result == xs::net::KcpPeerErrorCode::None)
             {
                 session->Touch(now_unix_ms);
+                HandleSessionPayload(*session, payload);
                 const std::array<xs::core::LogContextField, 5> context{
                     xs::core::LogContextField{"ownerNodeId", options_.owner_node_id},
                     xs::core::LogContextField{"sessionId", std::to_string(session->session_id())},
@@ -1052,6 +1105,15 @@ NodeErrorCode ClientNetwork::CreateSession(
 {
     return impl_ != nullptr
         ? impl_->CreateSession(conversation, remote_endpoint, session_id, connected_at_unix_ms)
+        : NodeErrorCode::InvalidArgument;
+}
+
+NodeErrorCode ClientNetwork::SendPayload(
+    std::uint64_t session_id,
+    std::span<const std::byte> payload)
+{
+    return impl_ != nullptr
+        ? impl_->SendPayload(session_id, payload)
         : NodeErrorCode::InvalidArgument;
 }
 

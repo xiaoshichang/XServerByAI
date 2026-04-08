@@ -171,6 +171,44 @@ namespace XServer.Managed.Framework.Tests
             Assert.True(runtimeState.EntityManager.Contains(currentEntityId));
             Assert.Equal(1, runtimeState.EntityManager.Count);
         }
+
+        [Fact]
+        public void GameNodeRuntimeState_CreatesAvatarEntity_BindsProxy_AndRegistersOnlineAvatar()
+        {
+            OnlineStub.ClearRegisteredAvatars();
+            try
+            {
+                GameNodeRuntimeState runtimeState = new("Game3");
+                Guid avatarEntityId = Guid.NewGuid();
+                AvatarEntitySpawnRequest request = new(
+                    avatarEntityId,
+                    "account-alpha",
+                    "Hero Alpha",
+                    "Gate7",
+                    42);
+
+                Assert.True(runtimeState.TryCreateAvatarEntity(request, out AvatarEntity? avatar, out string? error));
+                Assert.Null(error);
+                Assert.NotNull(avatar);
+                Assert.Equal(EntityLifecycleState.Active, avatar!.LifecycleState);
+                Assert.Equal(avatarEntityId, avatar.EntityId);
+                Assert.Equal("account-alpha", avatar.AccountId);
+                Assert.Equal("Hero Alpha", avatar.DisplayName);
+                Assert.NotNull(avatar.Proxy);
+                Assert.Equal("Gate7", avatar.Proxy!.RouteGateNodeId);
+                Assert.True(runtimeState.EntityManager.Contains(avatar.EntityId));
+                Assert.Single(runtimeState.EntityManager.SnapshotByType<AvatarEntity>());
+                Assert.True(OnlineStub.TryGetRegisteredAvatar(avatarEntityId, out OnlineAvatarRegistration registration));
+                Assert.Equal(avatar.EntityId, registration.EntityId);
+                Assert.Equal((ulong)42, registration.SessionId);
+                Assert.Equal("Gate7", registration.GateNodeId);
+                Assert.Equal("Game3", registration.GameNodeId);
+            }
+            finally
+            {
+                OnlineStub.ClearRegisteredAvatars();
+            }
+        }
     }
 
     internal sealed class IndependentEntity : ServerEntity

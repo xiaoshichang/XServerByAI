@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using XServer.Managed.Framework.Catalog;
 using XServer.Managed.Framework.Entities;
 using XServer.Managed.Framework.Runtime;
@@ -13,8 +14,14 @@ namespace XServer.Managed.Framework.Interop
         private const int RuntimeNotInitialized = -2;
         private const int IndexOutOfRange = -3;
         private const int BufferTooSmall = -4;
+        private const int RuntimeOperationFailed = -5;
         private const int OwnershipApplyErrorOffset = 1000;
+        private const uint CreateAvatarEntityMsgId = 2003u;
         private const string RuntimeLogCategory = "managed.runtime";
+        private static readonly JsonSerializerOptions ControlJsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
         private static ManagedNativeCallbacks s_nativeCallbacks;
         private static ManagedNativeStubCallTransport? s_nativeStubCallTransport;
         private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
@@ -77,6 +84,25 @@ namespace XServer.Managed.Framework.Interop
 
             try
             {
+                if (message->MsgId == CreateAvatarEntityMsgId)
+                {
+                    AvatarEntitySpawnRequest createRequest = BuildAvatarEntitySpawnRequest(
+                        message->Payload,
+                        message->PayloadLength);
+                    if (!s_runtimeState.TryCreateAvatarEntity(createRequest, out AvatarEntity? avatar, out string? error))
+                    {
+                        NativeLoggerBridge.Warn(
+                            RuntimeLogCategory,
+                            $"Game managed runtime rejected create-avatar request: {error ?? "unknown error"}");
+                        return RuntimeOperationFailed;
+                    }
+
+                    NativeLoggerBridge.Info(
+                        RuntimeLogCategory,
+                        $"Game managed runtime created AvatarEntity entityId={avatar!.EntityId} gate={createRequest.RouteGateNodeId}.");
+                    return 0;
+                }
+
                 if (message->MsgId != RelayStubCallCodec.ForwardStubCallMsgId)
                 {
                     return 0;
@@ -107,9 +133,11 @@ namespace XServer.Managed.Framework.Interop
 
                 return 0;
             }
-            catch
+            catch (Exception exception)
             {
-                NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed while handling forwarded stub call.");
+                NativeLoggerBridge.Warn(
+                    RuntimeLogCategory,
+                    $"Game managed runtime failed while handling an incoming native message: {exception.GetType().Name}: {exception.Message}");
                 return InvalidArgument;
             }
         }
@@ -308,6 +336,38 @@ namespace XServer.Managed.Framework.Interop
             }
 
             return s_runtimeState.ReadyServerStubs;
+        }
+
+        private static AvatarEntitySpawnRequest BuildAvatarEntitySpawnRequest(byte* payload, uint payloadLength)
+        {
+            if (payload == null && payloadLength != 0)
+            {
+                throw new ArgumentException("Avatar create payload pointer is invalid.");
+            }
+
+            AvatarCreatePayload? request = JsonSerializer.Deserialize<AvatarCreatePayload>(
+                new ReadOnlySpan<byte>(payload, checked((int)payloadLength)),
+                ControlJsonOptions);
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.AccountId) ||
+                string.IsNullOrWhiteSpace(request.AvatarId) ||
+                string.IsNullOrWhiteSpace(request.GateNodeId) ||
+                request.SessionId == 0)
+            {
+                throw new ArgumentException("Avatar create payload is incomplete.");
+            }
+
+            if (!Guid.TryParse(request.AvatarId, out Guid entityId) || entityId == Guid.Empty)
+            {
+                throw new ArgumentException("Avatar create payload avatarId must be a non-empty GUID.");
+            }
+
+            return new AvatarEntitySpawnRequest(
+                entityId,
+                request.AccountId,
+                string.IsNullOrWhiteSpace(request.AvatarName) ? entityId.ToString("D") : request.AvatarName,
+                request.GateNodeId,
+                request.SessionId);
         }
 
         private static ServerStubOwnershipSnapshot BuildOwnershipSnapshot(ManagedServerStubOwnershipSync* sync)
@@ -511,6 +571,19 @@ namespace XServer.Managed.Framework.Interop
             }
 
             return ReadUtf8(utf8, utf8Length);
+        }
+
+        private sealed class AvatarCreatePayload
+        {
+            public string? AccountId { get; init; }
+
+            public string? AvatarId { get; init; }
+
+            public string? AvatarName { get; init; }
+
+            public string? GateNodeId { get; init; }
+
+            public ulong SessionId { get; init; }
         }
     }
 }

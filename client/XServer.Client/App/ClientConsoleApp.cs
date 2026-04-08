@@ -14,6 +14,11 @@ public sealed class ClientConsoleApp
     private const string DefaultGate1NodeId = "Gate1";
     private const uint DefaultMoveMsgId = 45011U;
     private const uint DefaultBuyWeaponMsgId = 45012U;
+    private const uint DefaultSelectAvatarMsgId = 45013U;
+    private static readonly JsonSerializerOptions ControlJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
 
     private readonly ClientLaunchOptions _launchOptions;
     private readonly TextWriter _output;
@@ -21,6 +26,18 @@ public sealed class ClientConsoleApp
     private readonly ClientRuntimeState _state = new();
 
     private ClientTransport? _transport;
+
+    private sealed class SelectAvatarResponse
+    {
+        public string? Action { get; init; }
+        public bool Success { get; init; }
+        public string? AccountId { get; init; }
+        public string? AvatarId { get; init; }
+        public string? AvatarName { get; init; }
+        public string? GameNodeId { get; init; }
+        public ulong SessionId { get; init; }
+        public string? Error { get; init; }
+    }
 
     public ClientConsoleApp(ClientLaunchOptions launchOptions, TextWriter output, TextWriter error)
     {
@@ -112,6 +129,11 @@ public sealed class ClientConsoleApp
             await HandleLoginAsync(command, cancellationToken);
             return true;
 
+        case "selectavatar":
+        case "select-avatar":
+            await HandleSelectAvatarAsync(command, cancellationToken);
+            return true;
+
         case "move":
             await HandleMoveAsync(command, cancellationToken);
             return true;
@@ -195,8 +217,6 @@ public sealed class ClientConsoleApp
 
         ResolvedClientProfile baseProfile = ClusterClientConfigLoader.Load(effectiveOptions);
         (string loginUrl, string accountId, string password) = ResolveLoginRequest(command);
-        string? avatarId = command.GetOptionalString("avatarId");
-        string? avatarName = command.GetOptionalString("avatarName");
 
         using HttpClient httpClient = new();
         GateAuthClient authClient = new(httpClient);
@@ -213,9 +233,46 @@ public sealed class ClientConsoleApp
             grant.Conversation,
             "http login");
         _state.StoreLoginGrant(grant.AccountId, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
-        _state.MarkLocalAvatarReady(avatarId, avatarName);
         await _output.WriteLineAsync(
-            $"http login succeeded account={grant.AccountId} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Account cached and Avatar bound; run connect to open the KCP session.");
+            $"http login succeeded account={grant.AccountId} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Account cached; run connect to open the KCP session, then selectAvatar to enter game.");
+    }
+
+    private async Task HandleSelectAvatarAsync(ParsedCommand command, CancellationToken cancellationToken)
+    {
+        ClientTransport transport = RequireTransport();
+        EnsureAccountReady();
+
+        if (command.HasOption("avatarId") || command.HasOption("avatarName"))
+        {
+            throw new ArgumentException(
+                "selectAvatar no longer accepts avatarId/avatarName parameters. It now always uses temporary random placeholder data.");
+        }
+
+        string accountId = _state.Account!.AccountId;
+        AvatarView selectedAvatar = _state.CreateTemporaryAvatarSelection();
+        uint msgId = command.GetUInt32OrDefault("msgId", DefaultSelectAvatarMsgId);
+
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
+            new
+            {
+                action = "selectAvatar",
+                accountId,
+                avatarId = selectedAvatar.AvatarId,
+                avatarName = selectedAvatar.DisplayName,
+            });
+
+        PacketHeader header = PacketCodec.CreateHeader(
+            msgId,
+            _state.AllocatePacketSequence(),
+            PacketFlags.None,
+            checked((uint)payload.Length));
+
+        await transport.SendPacketAsync(header, payload, cancellationToken);
+        _state.RecordSentPacket(header);
+        _state.SelectAvatar(selectedAvatar);
+
+        await _output.WriteLineAsync(
+            $"selectAvatar request sent msgId={msgId} account={accountId} avatarId={selectedAvatar.AvatarId} avatarName={selectedAvatar.DisplayName}; waiting for server confirmation.");
     }
 
     private async Task HandleMoveAsync(ParsedCommand command, CancellationToken cancellationToken)
@@ -326,14 +383,18 @@ public sealed class ClientConsoleApp
             "  disconnect",
             "  status",
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
-            "  login <url> <account> <password> [config=path] [avatarId=avatar:demo-account] [avatarName=Hero]",
+            "  login <url> <account> <password> [config=path]",
+            "  selectAvatar [msgId=45013]",
             "  move [x=1] [y=2] [z=0] [msgId=45011] [localApply=true]",
             "  buyWeapon [weaponId=rifle] [count=1] [msgId=45012] [localApply=true]",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
             "",
             "Notes:",
-            "  login caches the local Account automatically after the HTTP grant succeeds, then prepares and binds a local Avatar.",
+            "  login caches the local Account after the HTTP grant succeeds, but does not auto-select an Avatar.",
+            "  selectAvatar sends a placeholder choose-avatar request to Gate and locally enters a waiting-for-confirmation state.",
+            "  selectAvatar now always generates temporary random avatarId/avatarName placeholders locally.",
+            "  Avatar-dependent commands become available only after Gate confirms AvatarEntity creation.",
             $"  demo default login url is {DefaultGate1AuthUrl} (Gate1 auth).",
             "  move/buyWeapon use temporary test-range msgIds by default and can be overridden.",
             "  connect reads configs/local-dev.json and Gate0 by default.",
@@ -376,6 +437,8 @@ public sealed class ClientConsoleApp
         _output.WriteLine(
             $"recv msgId={packet.Header.MsgId} seq={packet.Header.Seq} flags={packet.Header.Flags} " +
             $"payloadBytes={packet.Payload.Length} payload={payloadPreview}");
+
+        HandleControlPacket(packet);
     }
 
     private void HandleRawPayloadReceived(ReadOnlyMemory<byte> payload, string error)
@@ -394,7 +457,22 @@ public sealed class ClientConsoleApp
         if (!_state.HasAvatar)
         {
             throw new InvalidOperationException(
-                "No local Avatar is bound to the current Account. Run login <url> <account> <password> before move/buyWeapon.");
+                "No local Avatar is bound to the current Account. Run login <url> <account> <password>, connect, then selectAvatar before move/buyWeapon.");
+        }
+
+        if (!_state.HasConfirmedAvatar)
+        {
+            throw new InvalidOperationException(
+                "The selected Avatar is still waiting for server confirmation. Wait for the selectAvatar success response before move/buyWeapon.");
+        }
+    }
+
+    private void EnsureAccountReady()
+    {
+        if (!_state.HasAccount)
+        {
+            throw new InvalidOperationException(
+                "No local Account is cached yet. Run login <url> <account> <password> first.");
         }
     }
 
@@ -444,6 +522,56 @@ public sealed class ClientConsoleApp
         }
 
         return flags;
+    }
+
+    private void HandleControlPacket(PacketView packet)
+    {
+        if (packet.Header.MsgId != DefaultSelectAvatarMsgId ||
+            (packet.Header.Flags & PacketFlags.Response) == PacketFlags.None)
+        {
+            return;
+        }
+
+        SelectAvatarResponse? response;
+        try
+        {
+            response = JsonSerializer.Deserialize<SelectAvatarResponse>(packet.Payload.Span, ControlJsonOptions);
+        }
+        catch (JsonException)
+        {
+            _output.WriteLine("selectAvatar response arrived but the control payload could not be decoded.");
+            return;
+        }
+
+        if (response is null || !string.Equals(response.Action, "selectAvatarResult", StringComparison.Ordinal))
+        {
+            _output.WriteLine("selectAvatar response arrived but the control payload action was not recognized.");
+            return;
+        }
+
+        if ((packet.Header.Flags & PacketFlags.Error) != PacketFlags.None || !response.Success)
+        {
+            _state.ClearAvatarSelection();
+            _output.WriteLine(
+                $"selectAvatar failed account={response.AccountId ?? "<unknown>"} avatarId={response.AvatarId ?? "<unknown>"} error={response.Error ?? "unknown error"}");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(response.AccountId) || string.IsNullOrWhiteSpace(response.AvatarId))
+        {
+            _output.WriteLine("selectAvatar confirmation payload was incomplete.");
+            return;
+        }
+
+        if (!_state.ConfirmAvatarSelection(response.AccountId, response.AvatarId, response.AvatarName))
+        {
+            _output.WriteLine(
+                $"selectAvatar confirmation did not match the local pending selection account={response.AccountId} avatarId={response.AvatarId}");
+            return;
+        }
+
+        _output.WriteLine(
+            $"selectAvatar confirmed account={response.AccountId} avatarId={response.AvatarId} avatarName={response.AvatarName ?? response.AvatarId} game={response.GameNodeId ?? "<unknown>"} sessionId={response.SessionId}");
     }
 
     private static byte[] BuildPayloadBytes(ParsedCommand command)

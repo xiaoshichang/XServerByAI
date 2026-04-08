@@ -107,6 +107,12 @@ class GameNode final : public ServerNode
     void HandleHeartbeatResponse(const xs::net::PacketView& packet);
     void HandleGateRegisterResponse(std::string_view gate_node_id, const xs::net::PacketView& packet);
     void HandleGateHeartbeatResponse(std::string_view gate_node_id, const xs::net::PacketView& packet);
+    void HandleGateCreateAvatarEntity(std::string_view gate_node_id, const xs::net::PacketView& packet);
+    [[nodiscard]] bool SendGateAvatarEntityCreateResult(
+        std::string_view gate_node_id,
+        std::span<const std::byte> request_payload,
+        bool success,
+        std::string_view error_message);
     [[nodiscard]] bool SendRegisterRequest();
     [[nodiscard]] bool SendHeartbeatRequest();
     void OnAllGateConnected();

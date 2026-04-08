@@ -27,4 +27,9 @@ public sealed class AccountView
     {
         Avatar = avatar ?? throw new ArgumentNullException(nameof(avatar));
     }
+
+    public void ClearAvatar()
+    {
+        Avatar = null;
+    }
 }

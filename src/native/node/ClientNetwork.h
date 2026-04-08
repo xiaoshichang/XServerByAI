@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -34,6 +35,10 @@ using ClientNetworkSessionOpenedHandler = std::function<bool(
     ClientSession& session,
     std::string* error_message)>;
 
+using ClientNetworkSessionPayloadHandler = std::function<void(
+    ClientSession& session,
+    std::span<const std::byte> payload)>;
+
 struct ClientNetworkOptions
 {
     std::string owner_node_id{};
@@ -41,6 +46,7 @@ struct ClientNetworkOptions
     xs::core::KcpConfig kcp{};
     ClientNetworkSessionAdmissionHandler session_admission_handler{};
     ClientNetworkSessionOpenedHandler session_opened_handler{};
+    ClientNetworkSessionPayloadHandler session_payload_handler{};
 };
 
 class ClientNetwork final
@@ -66,6 +72,9 @@ class ClientNetwork final
         const xs::net::Endpoint& remote_endpoint,
         std::uint64_t* session_id = nullptr,
         std::uint64_t connected_at_unix_ms = 0U);
+    [[nodiscard]] NodeErrorCode SendPayload(
+        std::uint64_t session_id,
+        std::span<const std::byte> payload);
     [[nodiscard]] ClientSession* FindSession(std::uint64_t session_id) noexcept;
     [[nodiscard]] const ClientSession* FindSession(std::uint64_t session_id) const noexcept;
     [[nodiscard]] ClientSession* FindSessionByConversation(std::uint32_t conversation) noexcept;

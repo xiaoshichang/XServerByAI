@@ -6,5 +6,6 @@ public enum ClientLifecycleState
     Connected = 1,
     LoginPending = 2,
     LoggedIn = 3,
-    AvatarReady = 4,
+    AvatarSelecting = 4,
+    AvatarReady = 5,
 }

@@ -145,11 +145,6 @@ ClientRouteState ClientSession::route_state() const noexcept
     return route_state_;
 }
 
-std::uint64_t ClientSession::player_id() const noexcept
-{
-    return player_id_;
-}
-
 std::uint64_t ClientSession::connected_at_unix_ms() const noexcept
 {
     return connected_at_unix_ms_;
@@ -198,7 +193,6 @@ ClientSessionSnapshot ClientSession::snapshot() const
         .conversation = kcp_.conversation(),
         .remote_endpoint = remote_endpoint_,
         .session_state = session_state_,
-        .player_id = player_id_,
         .route_state = route_state_,
         .route_target = route_target_,
         .connected_at_unix_ms = connected_at_unix_ms_,
@@ -235,9 +229,7 @@ ClientSessionErrorCode ClientSession::BeginAuthentication() noexcept
     return ClientSessionErrorCode::None;
 }
 
-ClientSessionErrorCode ClientSession::Activate(
-    std::uint64_t authenticated_at_unix_ms,
-    std::uint64_t player_id) noexcept
+ClientSessionErrorCode ClientSession::Activate(std::uint64_t authenticated_at_unix_ms) noexcept
 {
     if (!valid_)
     {
@@ -258,7 +250,6 @@ ClientSessionErrorCode ClientSession::Activate(
         authenticated_at_unix_ms_ = authenticated_at_unix_ms;
     }
 
-    player_id_ = player_id;
     session_state_ = ClientSessionState::Active;
     ClearError();
     return ClientSessionErrorCode::None;

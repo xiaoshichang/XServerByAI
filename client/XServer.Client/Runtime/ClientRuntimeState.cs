@@ -24,6 +24,7 @@ public sealed class ClientRuntimeState
     public bool IsConnected => Profile is not null;
     public bool HasAccount => Account is not null;
     public bool HasAvatar => Avatar is not null;
+    public bool HasConfirmedAvatar => Avatar?.IsServerConfirmed ?? false;
     public bool HasCachedLoginGrant => Account?.HasCachedLoginGrant ?? false;
 
     public void MarkConnected(ResolvedClientProfile profile, string? localEndpointText)
@@ -105,18 +106,96 @@ public sealed class ClientRuntimeState
         LastReceivedAt = DateTimeOffset.UtcNow;
     }
 
-    public void MarkLocalAvatarReady(string? avatarId = null, string? avatarName = null)
+    public AvatarView CreateTemporaryAvatarSelection()
     {
         EnsureAccountReady();
 
         string accountId = Account!.AccountId;
-        string resolvedAvatarId = avatarId ?? $"avatar:{accountId}";
-        Account.BindAvatar(new AvatarView
+        string avatarId = Guid.NewGuid().ToString("D");
+        string avatarName = BuildTemporaryAvatarName(avatarId);
+        return new AvatarView
         {
             AccountId = accountId,
-            AvatarId = resolvedAvatarId,
-            DisplayName = avatarName ?? resolvedAvatarId,
-        });
+            AvatarId = avatarId,
+            DisplayName = avatarName,
+        };
+    }
+
+    public AvatarView SelectAvatar()
+    {
+        AvatarView avatar = CreateTemporaryAvatarSelection();
+        SelectAvatar(avatar);
+        return avatar;
+    }
+
+    public void SelectAvatar(AvatarView avatar)
+    {
+        ArgumentNullException.ThrowIfNull(avatar);
+        EnsureAccountReady();
+
+        if (!string.Equals(Account!.AccountId, avatar.AccountId, StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Avatar selection account does not match the current Account.", nameof(avatar));
+        }
+
+        if (string.IsNullOrWhiteSpace(avatar.AvatarId))
+        {
+            throw new ArgumentException("Avatar selection id must not be empty.", nameof(avatar));
+        }
+
+        if (string.IsNullOrWhiteSpace(avatar.DisplayName))
+        {
+            throw new ArgumentException("Avatar selection display name must not be empty.", nameof(avatar));
+        }
+
+        Account.BindAvatar(avatar);
+        RefreshLifecycleState();
+    }
+
+    public bool ConfirmAvatarSelection(string accountId, string avatarId, string? avatarName = null)
+    {
+        EnsureAccountReady();
+
+        AvatarView? currentAvatar = Avatar;
+        if (currentAvatar is null ||
+            !string.Equals(Account!.AccountId, accountId, StringComparison.Ordinal) ||
+            !string.Equals(currentAvatar.AvatarId, avatarId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(avatarName) &&
+            !string.Equals(currentAvatar.DisplayName, avatarName, StringComparison.Ordinal))
+        {
+            Account.BindAvatar(new AvatarView
+            {
+                AccountId = currentAvatar.AccountId,
+                AvatarId = currentAvatar.AvatarId,
+                DisplayName = avatarName,
+                PositionX = currentAvatar.PositionX,
+                PositionY = currentAvatar.PositionY,
+                PositionZ = currentAvatar.PositionZ,
+            });
+
+            foreach (KeyValuePair<string, int> entry in currentAvatar.WeaponInventory)
+            {
+                Account.Avatar!.WeaponInventory[entry.Key] = entry.Value;
+            }
+        }
+
+        Account.Avatar!.MarkServerConfirmed();
+        RefreshLifecycleState();
+        return true;
+    }
+
+    public void ClearAvatarSelection()
+    {
+        if (Account is null)
+        {
+            return;
+        }
+
+        Account.ClearAvatar();
         RefreshLifecycleState();
     }
 
@@ -157,10 +236,14 @@ public sealed class ClientRuntimeState
         }
         else
         {
+            string avatarConfirmedText = Account.Avatar is null
+                ? "<none>"
+                : Account.Avatar.IsServerConfirmed.ToString();
             lines.Add(
                 $"Account: id={Account.AccountId}, cached={(HasCachedLoginGrant ? LastLoginProfile!.DisplayEndpoint : "<none>")}, " +
                 $"issuedAt={LastLoginIssuedAt?.ToString("O") ?? "<none>"}, expiresAt={LastLoginExpiresAt?.ToString("O") ?? "<none>"}, " +
-                $"avatar={(Account.Avatar?.AvatarId ?? "<none>")}");
+                $"avatarSelection={(Account.Avatar?.AvatarId ?? "<waiting>")}, " +
+                $"avatarConfirmed={avatarConfirmedText}");
         }
 
         if (Avatar is null)
@@ -174,7 +257,7 @@ public sealed class ClientRuntimeState
                 : string.Join(", ", Avatar.WeaponInventory.Select(entry => $"{entry.Key}x{entry.Value}"));
             lines.Add(
                 $"Avatar: id={Avatar.AvatarId}, account={Avatar.AccountId}, name={Avatar.DisplayName}, " +
-                $"pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapons={weapons}");
+                $"confirmed={Avatar.IsServerConfirmed}, pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapons={weapons}");
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -194,15 +277,27 @@ public sealed class ClientRuntimeState
         if (Avatar is null)
         {
             throw new InvalidOperationException(
-                "The simulated client does not have a local Avatar bound to an Account yet. Run login <url> <account> <password> first.");
+                "The simulated client does not have a local Avatar bound to an Account yet. Run login <url> <account> <password> and then selectAvatar first.");
+        }
+
+        if (!Avatar.IsServerConfirmed)
+        {
+            throw new InvalidOperationException(
+                "The local Avatar selection is still waiting for server confirmation. Wait for the selectAvatar success response first.");
         }
     }
 
     private void RefreshLifecycleState()
     {
-        if (Avatar is not null)
+        if (Avatar is not null && Avatar.IsServerConfirmed)
         {
             LifecycleState = ClientLifecycleState.AvatarReady;
+            return;
+        }
+
+        if (Avatar is not null)
+        {
+            LifecycleState = ClientLifecycleState.AvatarSelecting;
             return;
         }
 
@@ -219,5 +314,11 @@ public sealed class ClientRuntimeState
         }
 
         LifecycleState = ClientLifecycleState.Disconnected;
+    }
+
+    private static string BuildTemporaryAvatarName(string avatarId)
+    {
+        int suffixLength = Math.Min(8, avatarId.Length);
+        return $"TempAvatar-{avatarId[..suffixLength]}";
     }
 }
