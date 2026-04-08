@@ -73,7 +73,7 @@
 2. M4-02 实现 Gate KCP 监听骨架、受控开放与会话创建；仅在收到 `GM` 下发的 `clusterReady = true` 后开放客户端入口。Deps: M4-01, M3-08, M3-15 | 状态: 已完成
 3. M4-03 实现一个简单的控制台应用程序模拟客户端行为，使用 C# 实现并单独放在 `client/` 目录。Deps: M4-02 | 状态: 已完成
 4. M4-04 实现模拟客户端的登录鉴权行为。Deps: M4-03 | 状态: 已完成
-5. M4-05 实现 Gate 会话管理表（SessionID,AccountID,AvatarID的关联）。Deps: M4-02 | 状态: 开发中
+5. M4-05 实现 Gate 会话管理表（SessionID,AccountID,AvatarID的关联）。Deps: M4-02 | 状态: 已完成
 6. M4-06 实现 Client→Gate→Game 请求链路。Deps: M2-07, M2-09, M2-10, M3-13, M4-04, M4-05 | 状态: 未开发
 7. M4-07 实现 Game→Gate→Client 响应链路。Deps: M2-09, M2-10, M4-06 | 状态: 未开发
 8. M4-08 实现 Game→Gate 推送消息通道。Deps: M4-06 | 状态: 未开发
