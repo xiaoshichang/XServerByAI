@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -2845,6 +2846,9 @@ bool GateNode::SendCreateAvatarEntityRequest(
 
 std::string GateNode::ResolveAvatarGameNodeId() const
 {
+    std::vector<std::string> ready_game_node_ids;
+    ready_game_node_ids.reserve(cluster_config().games.size());
+
     for (const auto& [game_node_id, game_config] : cluster_config().games)
     {
         (void)game_config;
@@ -2860,10 +2864,17 @@ std::string GateNode::ResolveAvatarGameNodeId() const
             continue;
         }
 
-        return game_node_id;
+        ready_game_node_ids.push_back(game_node_id);
     }
 
-    return {};
+    if (ready_game_node_ids.empty())
+    {
+        return {};
+    }
+
+    static thread_local std::mt19937 generator(std::random_device{}());
+    std::uniform_int_distribution<std::size_t> distribution(0U, ready_game_node_ids.size() - 1U);
+    return ready_game_node_ids[distribution(generator)];
 }
 
 void GateNode::ClearClientSessionRecord(std::uint64_t session_id) noexcept
