@@ -10,6 +10,7 @@ namespace XServer.Client.App;
 
 public sealed class ClientConsoleApp
 {
+    private const uint DefaultClientHelloMsgId = 45010U;
     private const string DefaultGate1AuthUrl = "http://127.0.0.1:4101";
     private const string DefaultGate1NodeId = "Gate1";
     private const uint DefaultMoveMsgId = 45011U;
@@ -185,8 +186,18 @@ public sealed class ClientConsoleApp
 
         _transport = transport;
         _state.MarkConnected(profile, transport.LocalEndpointText);
+        try
+        {
+            await SendClientHelloAsync(transport, cancellationToken);
+        }
+        catch
+        {
+            await DisposeTransportAsync();
+            _state.MarkDisconnected();
+            throw;
+        }
         await _output.WriteLineAsync(
-            $"connected remote={profile.DisplayEndpoint} gate={profile.GateNodeId} conv={profile.Conversation} source={profile.EndpointSource}");
+            $"connected remote={profile.DisplayEndpoint} gate={profile.GateNodeId} conv={profile.Conversation} source={profile.EndpointSource}; session primed with clientHello");
     }
 
     private async Task HandleSendAsync(ParsedCommand command, CancellationToken cancellationToken)
@@ -234,7 +245,7 @@ public sealed class ClientConsoleApp
             "http login");
         _state.StoreLoginGrant(grant.AccountId, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
         await _output.WriteLineAsync(
-            $"http login succeeded account={grant.AccountId} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Account cached; run connect to open the KCP session, then selectAvatar to enter game.");
+            $"http login succeeded account={grant.AccountId} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Account cached; run connect to open and prime the KCP session, then selectAvatar to enter game.");
     }
 
     private async Task HandleSelectAvatarAsync(ParsedCommand command, CancellationToken cancellationToken)
@@ -273,6 +284,19 @@ public sealed class ClientConsoleApp
 
         await _output.WriteLineAsync(
             $"selectAvatar request sent msgId={msgId} account={accountId} avatarId={selectedAvatar.AvatarId} avatarName={selectedAvatar.DisplayName}; waiting for server confirmation.");
+    }
+
+    private async Task SendClientHelloAsync(ClientTransport transport, CancellationToken cancellationToken)
+    {
+        PacketHeader header = PacketCodec.CreateHeader(
+            DefaultClientHelloMsgId,
+            _state.AllocatePacketSequence(),
+            PacketFlags.None,
+            0U);
+        await transport.SendPacketAsync(header, ReadOnlyMemory<byte>.Empty, cancellationToken);
+        _state.RecordSentPacket(header);
+        await _output.WriteLineAsync(
+            $"clientHello sent msgId={header.MsgId} seq={header.Seq} payloadBytes=0");
     }
 
     private async Task HandleMoveAsync(ParsedCommand command, CancellationToken cancellationToken)
@@ -384,6 +408,7 @@ public sealed class ClientConsoleApp
             "  status",
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
             "  login <url> <account> <password> [config=path]",
+            "  connect auto-sends clientHello [msgId=45010] to prime the Gate session",
             "  selectAvatar [msgId=45013]",
             "  move [x=1] [y=2] [z=0] [msgId=45011] [localApply=true]",
             "  buyWeapon [weaponId=rifle] [count=1] [msgId=45012] [localApply=true]",
@@ -392,6 +417,7 @@ public sealed class ClientConsoleApp
             "",
             "Notes:",
             "  login caches the local Account after the HTTP grant succeeds, but does not auto-select an Avatar.",
+            "  connect now sends a lightweight clientHello packet immediately after the UDP/KCP transport opens.",
             "  selectAvatar sends a placeholder choose-avatar request to Gate and locally enters a waiting-for-confirmation state.",
             "  selectAvatar now always generates temporary random avatarId/avatarName placeholders locally.",
             "  Avatar-dependent commands become available only after Gate confirms AvatarEntity creation.",

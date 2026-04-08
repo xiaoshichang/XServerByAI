@@ -34,6 +34,7 @@ constexpr std::uint16_t kErrorResponseFlags =
 constexpr std::uint32_t kDefaultHeartbeatIntervalMs = 5000U;
 constexpr std::uint32_t kDefaultHeartbeatTimeoutMs = 15000U;
 constexpr std::uint64_t kConversationReservationLifetimeMs = 30000U;
+constexpr std::uint32_t kClientHelloMsgId = 45010U;
 constexpr std::uint32_t kClientSelectAvatarMsgId = 45013U;
 constexpr std::uint32_t kGateCreateAvatarEntityMsgId = 2003U;
 constexpr std::uint32_t kGameAvatarEntityCreateResultMsgId = 2004U;
@@ -2443,6 +2444,26 @@ void GateNode::HandleClientPayloadReceived(
             };
             logger().Log(xs::core::LogLevel::Warn, "client.kcp", "Gate rejected a client select-avatar request.", context);
         }
+        return;
+    }
+
+    if (packet.header.msg_id == kClientHelloMsgId)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+            xs::core::LogContextField{"conversation", std::to_string(session.conversation())},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(packet.payload.size()))},
+        };
+
+        if (packet.header.flags != 0U || packet.header.seq == xs::net::kPacketSeqNone || !packet.payload.empty())
+        {
+            logger().Log(xs::core::LogLevel::Warn, "client.kcp", "Gate ignored a clientHello packet with an invalid envelope.", context);
+            return;
+        }
+
+        logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate accepted clientHello and primed the authenticated client session.", context);
         return;
     }
 
