@@ -2,7 +2,7 @@
 setlocal
 
 pushd "%~dp0.."
-dotnet run --project client/XServer.Client/XServer.Client.csproj --script client/demo.txt
+dotnet run --project client/XServer.Client.App/XServer.Client.App.csproj --script client/demo.txt
 set "EXITCODE=%ERRORLEVEL%"
 popd
 

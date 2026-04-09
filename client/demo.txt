@@ -1,6 +1,6 @@
 # Example M4-04 client simulator script.
 # Start the local cluster first, then run:
-# dotnet run --project client/XServer.Client/XServer.Client.csproj --script client/demo.txt
+# dotnet run --project client/XServer.Client.App/XServer.Client.App.csproj --script client/demo.txt
 
 login http://127.0.0.1:4101 demo-player dev-token
 connect

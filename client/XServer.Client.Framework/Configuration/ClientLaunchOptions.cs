@@ -89,7 +89,7 @@ public sealed record ClientLaunchOptions(
         return string.Join(
             Environment.NewLine,
             "Usage:",
-            "  dotnet run --project client/XServer.Client/XServer.Client.csproj [options]",
+            "  dotnet run --project client/XServer.Client.App/XServer.Client.App.csproj [options]",
             "Options:",
             "  --config <path>         Cluster config path. Default: configs/local-dev.json",
             "  --gate <GateNodeId>     Gate instance id. Default: Gate0",

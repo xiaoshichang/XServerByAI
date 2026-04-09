@@ -1,7 +1,6 @@
-using XServer.Client.App;
 using XServer.Client.Configuration;
 
-namespace XServer.Client;
+namespace XServer.Client.App;
 
 internal static class Program
 {
