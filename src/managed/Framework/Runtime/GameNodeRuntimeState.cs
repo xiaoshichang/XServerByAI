@@ -10,7 +10,7 @@ namespace XServer.Managed.Framework.Runtime
     {
         private readonly string _nodeId;
         private readonly ServerStubReadyCallback? _onServerStubReady;
-        private readonly IStubCallTransport? _stubCallTransport;
+        private readonly IMailboxCallTransport? _mailboxCallTransport;
         private readonly IProxyCallTransport? _proxyCallTransport;
         private readonly IProxyCallTransport? _clientMessageTransport;
         private readonly INativeTimerScheduler? _nativeTimerScheduler;
@@ -24,7 +24,7 @@ namespace XServer.Managed.Framework.Runtime
         public GameNodeRuntimeState(
             string nodeId,
             ServerStubReadyCallback? onServerStubReady = null,
-            IStubCallTransport? stubCallTransport = null,
+            IMailboxCallTransport? mailboxCallTransport = null,
             IProxyCallTransport? proxyCallTransport = null,
             IProxyCallTransport? clientMessageTransport = null,
             INativeTimerScheduler? nativeTimerScheduler = null)
@@ -33,7 +33,7 @@ namespace XServer.Managed.Framework.Runtime
 
             _nodeId = nodeId;
             _onServerStubReady = onServerStubReady;
-            _stubCallTransport = stubCallTransport;
+            _mailboxCallTransport = mailboxCallTransport;
             _proxyCallTransport = proxyCallTransport;
             _clientMessageTransport = clientMessageTransport;
             _nativeTimerScheduler = nativeTimerScheduler;
@@ -62,22 +62,67 @@ namespace XServer.Managed.Framework.Runtime
 
         internal StubCallErrorCode ReceiveStubCall(string targetStubType, StubCallMessage message)
         {
-            if (string.IsNullOrWhiteSpace(targetStubType))
+            MailboxCallErrorCode mailboxResult = ReceiveMailboxCall(
+                targetStubType,
+                new MailboxCallMessage(message.MsgId, message.Payload));
+            return mailboxResult switch
             {
-                return StubCallErrorCode.InvalidArgument;
+                MailboxCallErrorCode.None => StubCallErrorCode.None,
+                MailboxCallErrorCode.InvalidArgument => StubCallErrorCode.InvalidArgument,
+                MailboxCallErrorCode.InvalidMessageId => StubCallErrorCode.InvalidMessageId,
+                MailboxCallErrorCode.UnknownTargetMailbox => StubCallErrorCode.UnknownTargetStub,
+                MailboxCallErrorCode.TargetNodeUnavailable => StubCallErrorCode.TargetNodeUnavailable,
+                MailboxCallErrorCode.MailboxRejected => StubCallErrorCode.StubRejected,
+                _ => StubCallErrorCode.StubRejected,
+            };
+        }
+
+        internal MailboxCallErrorCode ReceiveMailboxCall(string targetMailboxName, MailboxCallMessage message)
+        {
+            return ReceiveMailboxCall(Guid.Empty, targetMailboxName, message);
+        }
+
+        internal MailboxCallErrorCode ReceiveMailboxCall(Guid targetEntityId, string targetMailboxName, MailboxCallMessage message)
+        {
+            if (targetEntityId == Guid.Empty && string.IsNullOrWhiteSpace(targetMailboxName))
+            {
+                return MailboxCallErrorCode.InvalidArgument;
             }
 
             if (message.MsgId == 0)
             {
-                return StubCallErrorCode.InvalidMessageId;
+                return MailboxCallErrorCode.InvalidMessageId;
             }
 
-            if (!_ownedServerStubsByType.TryGetValue(targetStubType, out ServerStubEntity? targetStub))
+            if (targetEntityId != Guid.Empty)
             {
-                return StubCallErrorCode.UnknownTargetStub;
+                if (_entityManager.TryGet(targetEntityId, out ServerEntity? targetEntity) && targetEntity != null)
+                {
+                    return targetEntity.ReceiveMailboxCall(message);
+                }
+
+                if (string.IsNullOrWhiteSpace(targetMailboxName))
+                {
+                    return MailboxCallErrorCode.UnknownTargetMailbox;
+                }
             }
 
-            return targetStub.ReceiveStubCall(message);
+            if (Guid.TryParse(targetMailboxName, out Guid entityId) && entityId != Guid.Empty)
+            {
+                if (!_entityManager.TryGet(entityId, out ServerEntity? targetEntity) || targetEntity == null)
+                {
+                    return MailboxCallErrorCode.UnknownTargetMailbox;
+                }
+
+                return targetEntity.ReceiveMailboxCall(message);
+            }
+
+            if (_ownedServerStubsByType.TryGetValue(targetMailboxName, out ServerStubEntity? targetStub))
+            {
+                return targetStub.ReceiveMailboxCall(message);
+            }
+
+            return MailboxCallErrorCode.UnknownTargetMailbox;
         }
 
         internal ProxyCallErrorCode ReceiveProxyCall(Guid targetEntityId, ProxyCallMessage message)
@@ -486,16 +531,16 @@ namespace XServer.Managed.Framework.Runtime
                 return StubCallErrorCode.UnknownTargetStub;
             }
 
-            if (_stubCallTransport == null)
+            if (_mailboxCallTransport == null)
             {
                 failureMessage = StubCallError.Message(StubCallErrorCode.TargetNodeUnavailable);
                 return StubCallErrorCode.TargetNodeUnavailable;
             }
 
-            StubCallErrorCode remoteResult = _stubCallTransport.Forward(
+            MailboxCallErrorCode mailboxResult = _mailboxCallTransport.Forward(
                 targetStubType,
-                targetGameNodeId,
-                message);
+                new MailboxCallMessage(message.MsgId, message.Payload));
+            StubCallErrorCode remoteResult = ToStubCallErrorCode(mailboxResult);
             if (remoteResult != StubCallErrorCode.None)
             {
                 failureMessage = $"Remote delivery to {targetGameNodeId} failed: {StubCallError.Message(remoteResult)}";
@@ -568,6 +613,20 @@ namespace XServer.Managed.Framework.Runtime
 
             ownerGameNodeId = string.Empty;
             return false;
+        }
+
+        private static StubCallErrorCode ToStubCallErrorCode(MailboxCallErrorCode mailboxResult)
+        {
+            return mailboxResult switch
+            {
+                MailboxCallErrorCode.None => StubCallErrorCode.None,
+                MailboxCallErrorCode.InvalidArgument => StubCallErrorCode.InvalidArgument,
+                MailboxCallErrorCode.InvalidMessageId => StubCallErrorCode.InvalidMessageId,
+                MailboxCallErrorCode.UnknownTargetMailbox => StubCallErrorCode.UnknownTargetStub,
+                MailboxCallErrorCode.TargetNodeUnavailable => StubCallErrorCode.TargetNodeUnavailable,
+                MailboxCallErrorCode.MailboxRejected => StubCallErrorCode.StubRejected,
+                _ => StubCallErrorCode.StubRejected,
+            };
         }
 
         private void HandleServerStubReady(ServerStubEntity stub)

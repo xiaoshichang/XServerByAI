@@ -9,8 +9,8 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void ServerEntity_CallStub_PrefersLocalOwnedTarget()
         {
-            LoopbackStubCallTransport transport = new();
-            GameNodeRuntimeState runtimeState = new("Game0", stubCallTransport: transport);
+            LoopbackMailboxCallTransport transport = new();
+            GameNodeRuntimeState runtimeState = new("Game0", mailboxCallTransport: transport);
             transport.Register(runtimeState);
 
             ServerStubOwnershipSnapshot snapshot = new(
@@ -40,8 +40,8 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void PlainServerEntity_CallStub_CanTargetOwnedMatchStub()
         {
-            LoopbackStubCallTransport transport = new();
-            GameNodeRuntimeState runtimeState = new("Game0", stubCallTransport: transport);
+            LoopbackMailboxCallTransport transport = new();
+            GameNodeRuntimeState runtimeState = new("Game0", mailboxCallTransport: transport);
             transport.Register(runtimeState);
 
             ServerStubOwnershipSnapshot snapshot = new(
@@ -72,9 +72,9 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void OnlineStub_CallStub_ForwardsToRemoteMatchStub_AndDeliversMessage()
         {
-            LoopbackStubCallTransport transport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game0", stubCallTransport: transport);
-            GameNodeRuntimeState matchRuntime = new("Game1", stubCallTransport: transport);
+            LoopbackMailboxCallTransport transport = new();
+            GameNodeRuntimeState onlineRuntime = new("Game0", mailboxCallTransport: transport);
+            GameNodeRuntimeState matchRuntime = new("Game1", mailboxCallTransport: transport);
             transport.Register(onlineRuntime);
             transport.Register(matchRuntime);
 
@@ -94,8 +94,8 @@ namespace XServer.Managed.Framework.Tests
 
             onlineStub.CallStub(nameof(MatchStub), 4102u, payload);
             Assert.Equal(1, transport.ForwardCallCount);
-            Assert.Equal(nameof(MatchStub), transport.LastTargetStubType);
-            Assert.Equal("Game1", transport.LastTargetGameNodeId);
+            Assert.Equal(nameof(MatchStub), transport.LastTargetMailboxName);
+            Assert.Equal(string.Empty, transport.LastTargetGameNodeId);
             Assert.NotNull(transport.LastMessage);
             Assert.Equal(4102u, transport.LastMessage!.Value.MsgId);
             Assert.Equal(payload, transport.LastMessage.Value.Payload.ToArray());
@@ -111,8 +111,8 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void ServerEntity_CallStub_RejectsUnknownTargetStubType()
         {
-            LoopbackStubCallTransport transport = new();
-            GameNodeRuntimeState runtimeState = new("Game0", stubCallTransport: transport);
+            LoopbackMailboxCallTransport transport = new();
+            GameNodeRuntimeState runtimeState = new("Game0", mailboxCallTransport: transport);
             transport.Register(runtimeState);
 
             ServerStubOwnershipSnapshot snapshot = new(
@@ -133,8 +133,8 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void ServerEntity_CallStub_ReportsTargetNodeUnavailable_WhenTransportCannotReachOwner()
         {
-            UnreachableStubCallTransport transport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game0", stubCallTransport: transport);
+            UnreachableMailboxCallTransport transport = new();
+            GameNodeRuntimeState onlineRuntime = new("Game0", mailboxCallTransport: transport);
 
             ServerStubOwnershipSnapshot snapshot = new(
                 3,
@@ -153,56 +153,84 @@ namespace XServer.Managed.Framework.Tests
         }
     }
 
-    internal sealed class LoopbackStubCallTransport : IStubCallTransport
+    internal sealed class LoopbackMailboxCallTransport : IMailboxCallTransport
     {
         private readonly Dictionary<string, GameNodeRuntimeState> _runtimes = new(StringComparer.Ordinal);
 
         public int ForwardCallCount { get; private set; }
 
-        public string? LastTargetStubType { get; private set; }
+        public string? LastTargetMailboxName { get; private set; }
 
         public string? LastTargetGameNodeId { get; private set; }
 
-        public StubCallMessage? LastMessage { get; private set; }
+        public MailboxCallMessage? LastMessage { get; private set; }
 
         public void Register(GameNodeRuntimeState runtimeState)
         {
             _runtimes[runtimeState.NodeId] = runtimeState;
         }
 
-        public StubCallErrorCode Forward(
-            string targetStubType,
-            string targetGameNodeId,
-            StubCallMessage message)
+        public MailboxCallErrorCode Forward(
+            MailboxAddress targetAddress,
+            MailboxCallMessage message)
         {
             ForwardCallCount++;
-            LastTargetStubType = targetStubType;
-            LastTargetGameNodeId = targetGameNodeId;
+            LastTargetMailboxName = targetAddress.EntityId.ToString("D");
+            LastTargetGameNodeId = targetAddress.TargetGameNodeId;
             LastMessage = message;
 
-            if (!_runtimes.TryGetValue(targetGameNodeId, out GameNodeRuntimeState? runtimeState))
+            if (!_runtimes.TryGetValue(targetAddress.TargetGameNodeId, out GameNodeRuntimeState? runtimeState))
             {
-                return StubCallErrorCode.TargetNodeUnavailable;
+                return MailboxCallErrorCode.TargetNodeUnavailable;
             }
 
-            return runtimeState.ReceiveStubCall(targetStubType, message);
+            return runtimeState.ReceiveMailboxCall(targetAddress.EntityId.ToString("D"), message);
+        }
+
+        public MailboxCallErrorCode Forward(
+            string stubtype,
+            MailboxCallMessage message)
+        {
+            ForwardCallCount++;
+            LastTargetMailboxName = stubtype;
+            LastTargetGameNodeId = string.Empty;
+            LastMessage = message;
+
+            foreach (GameNodeRuntimeState runtimeState in _runtimes.Values)
+            {
+                MailboxCallErrorCode result = runtimeState.ReceiveMailboxCall(stubtype, message);
+                if (result != MailboxCallErrorCode.UnknownTargetMailbox)
+                {
+                    return result;
+                }
+            }
+
+            return MailboxCallErrorCode.UnknownTargetMailbox;
         }
     }
 
-    internal sealed class UnreachableStubCallTransport : IStubCallTransport
+    internal sealed class UnreachableMailboxCallTransport : IMailboxCallTransport
     {
         public int ForwardCallCount { get; private set; }
 
-        public StubCallErrorCode Forward(
-            string targetStubType,
-            string targetGameNodeId,
-            StubCallMessage message)
+        public MailboxCallErrorCode Forward(
+            MailboxAddress targetAddress,
+            MailboxCallMessage message)
         {
-            _ = targetStubType;
-            _ = targetGameNodeId;
+            _ = targetAddress;
             _ = message;
             ForwardCallCount++;
-            return StubCallErrorCode.TargetNodeUnavailable;
+            return MailboxCallErrorCode.TargetNodeUnavailable;
+        }
+
+        public MailboxCallErrorCode Forward(
+            string stubtype,
+            MailboxCallMessage message)
+        {
+            _ = stubtype;
+            _ = message;
+            ForwardCallCount++;
+            return MailboxCallErrorCode.TargetNodeUnavailable;
         }
     }
 

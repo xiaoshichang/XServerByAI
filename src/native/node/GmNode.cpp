@@ -916,6 +916,7 @@ GmControlHttpResponse GmNode::HandleBoardcaseRequest(std::string_view message)
     if (!TrySendStubCallToGame(
             online_stub_entry->owner_game_node_id,
             kOnlineStubType,
+            online_stub_entry->entity_id == kUnknownServerEntityId ? std::string_view{} : std::string_view(online_stub_entry->entity_id),
             kOnlineStubBroadcastMsgId,
             payload,
             &error_message))
@@ -988,6 +989,7 @@ const GmNode::ServerStubEntry* GmNode::server_stub_entry(std::string_view entity
 bool GmNode::TrySendStubCallToGame(
     std::string_view target_game_node_id,
     std::string_view target_stub_type,
+    std::string_view target_entity_id,
     std::uint32_t msg_id,
     std::span<const std::byte> payload,
     std::string* error_message)
@@ -1030,18 +1032,19 @@ bool GmNode::TrySendStubCallToGame(
         return false;
     }
 
-    const xs::net::RelayForwardStubCall relay_message{
+    const xs::net::RelayForwardMailboxCall relay_message{
         .source_game_node_id = std::string(node_id()),
         .target_game_node_id = std::string(target_game_node_id),
-        .target_stub_type = std::string(target_stub_type),
-        .stub_call_msg_id = msg_id,
+        .target_entity_id = std::string(target_entity_id),
+        .target_mailbox_name = std::string(target_stub_type),
+        .mailbox_call_msg_id = msg_id,
         .relay_flags = 0u,
         .payload = std::vector<std::byte>(payload.begin(), payload.end()),
     };
 
     std::size_t wire_size = 0u;
     const xs::net::RelayCodecErrorCode wire_size_result =
-        xs::net::GetRelayForwardStubCallWireSize(relay_message, &wire_size);
+        xs::net::GetRelayForwardMailboxCallWireSize(relay_message, &wire_size);
     if (wire_size_result != xs::net::RelayCodecErrorCode::None)
     {
         if (error_message != nullptr)
@@ -1053,7 +1056,7 @@ bool GmNode::TrySendStubCallToGame(
 
     std::vector<std::byte> relay_payload(wire_size);
     const xs::net::RelayCodecErrorCode encode_result =
-        xs::net::EncodeRelayForwardStubCall(relay_message, relay_payload);
+        xs::net::EncodeRelayForwardMailboxCall(relay_message, relay_payload);
     if (encode_result != xs::net::RelayCodecErrorCode::None)
     {
         if (error_message != nullptr)
@@ -1064,7 +1067,7 @@ bool GmNode::TrySendStubCallToGame(
     }
 
     const xs::net::PacketHeader header =
-        xs::net::MakePacketHeader(xs::net::kRelayForwardStubCallMsgId, xs::net::kPacketSeqNone, 0U,
+        xs::net::MakePacketHeader(xs::net::kRelayForwardMailboxCallMsgId, xs::net::kPacketSeqNone, 0U,
                                   static_cast<std::uint32_t>(relay_payload.size()));
     std::vector<std::byte> packet(xs::net::kPacketHeaderSize + relay_payload.size());
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, relay_payload, packet);

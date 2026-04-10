@@ -36,12 +36,7 @@ namespace XServer.Managed.Framework.Entities
 
         internal StubCallErrorCode ReceiveStubCall(StubCallMessage message)
         {
-            if (message.MsgId == 0)
-            {
-                return StubCallErrorCode.InvalidMessageId;
-            }
-
-            return OnStubCall(message);
+            return ToStubCallErrorCode(ReceiveMailboxCall(new MailboxCallMessage(message.MsgId, message.Payload)));
         }
 
         protected virtual void OnReady()
@@ -53,6 +48,39 @@ namespace XServer.Managed.Framework.Entities
         {
             _ = message;
             return StubCallErrorCode.StubRejected;
+        }
+
+        protected override MailboxCallErrorCode OnMailboxCall(MailboxCallMessage message)
+        {
+            return ToMailboxCallErrorCode(OnStubCall(new StubCallMessage(message.MsgId, message.Payload)));
+        }
+
+        private static StubCallErrorCode ToStubCallErrorCode(MailboxCallErrorCode result)
+        {
+            return result switch
+            {
+                MailboxCallErrorCode.None => StubCallErrorCode.None,
+                MailboxCallErrorCode.InvalidArgument => StubCallErrorCode.InvalidArgument,
+                MailboxCallErrorCode.InvalidMessageId => StubCallErrorCode.InvalidMessageId,
+                MailboxCallErrorCode.UnknownTargetMailbox => StubCallErrorCode.UnknownTargetStub,
+                MailboxCallErrorCode.TargetNodeUnavailable => StubCallErrorCode.TargetNodeUnavailable,
+                MailboxCallErrorCode.MailboxRejected => StubCallErrorCode.StubRejected,
+                _ => StubCallErrorCode.StubRejected,
+            };
+        }
+
+        private static MailboxCallErrorCode ToMailboxCallErrorCode(StubCallErrorCode result)
+        {
+            return result switch
+            {
+                StubCallErrorCode.None => MailboxCallErrorCode.None,
+                StubCallErrorCode.InvalidArgument => MailboxCallErrorCode.InvalidArgument,
+                StubCallErrorCode.InvalidMessageId => MailboxCallErrorCode.InvalidMessageId,
+                StubCallErrorCode.UnknownTargetStub => MailboxCallErrorCode.UnknownTargetMailbox,
+                StubCallErrorCode.TargetNodeUnavailable => MailboxCallErrorCode.TargetNodeUnavailable,
+                StubCallErrorCode.StubRejected => MailboxCallErrorCode.MailboxRejected,
+                _ => MailboxCallErrorCode.MailboxRejected,
+            };
         }
     }
 }

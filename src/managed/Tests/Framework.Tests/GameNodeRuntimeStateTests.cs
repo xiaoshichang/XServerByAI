@@ -175,9 +175,9 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void GameNodeRuntimeState_CreatesAvatarEntity_RegistersProxyThroughOwnedOnlineStub()
         {
-            LoopbackStubCallTransport transport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game0", stubCallTransport: transport);
-            GameNodeRuntimeState avatarRuntime = new("Game3", stubCallTransport: transport);
+            LoopbackMailboxCallTransport transport = new();
+            GameNodeRuntimeState onlineRuntime = new("Game0", mailboxCallTransport: transport);
+            GameNodeRuntimeState avatarRuntime = new("Game3", mailboxCallTransport: transport);
             transport.Register(onlineRuntime);
             transport.Register(avatarRuntime);
 
@@ -219,12 +219,70 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(avatar.EntityId, registration.Proxy.EntityId);
             Assert.Equal("Gate7", registration.Proxy.RouteGateNodeId);
             Assert.Equal(1, transport.ForwardCallCount);
-            Assert.Equal(nameof(OnlineStub), transport.LastTargetStubType);
-            Assert.Equal("Game0", transport.LastTargetGameNodeId);
+            Assert.Equal(nameof(OnlineStub), transport.LastTargetMailboxName);
+            Assert.Equal(string.Empty, transport.LastTargetGameNodeId);
+        }
+
+        [Fact]
+        public void GameNodeRuntimeState_ReceiveMailboxCall_DeliversToNonMigratableEntity()
+        {
+            GameNodeRuntimeState runtimeState = new("Game0");
+            NonMigratableMailboxEntity entity = new();
+
+            Assert.Equal(EntityManagerErrorCode.None, runtimeState.EntityManager.Register(entity));
+
+            byte[] payload = [0x41, 0x42, 0x43];
+            MailboxCallErrorCode result = runtimeState.ReceiveMailboxCall(
+                entity.EntityId.ToString("D"),
+                new MailboxCallMessage(7101u, payload));
+
+            Assert.Equal(MailboxCallErrorCode.None, result);
+            Assert.Collection(
+                entity.ReceivedMailboxCalls,
+                received =>
+                {
+                    Assert.Equal(7101u, received.MsgId);
+                    Assert.Equal(payload, received.Payload);
+                });
+        }
+
+        [Fact]
+        public void GameNodeRuntimeState_ReceiveMailboxCall_RejectsMigratableEntity()
+        {
+            GameNodeRuntimeState runtimeState = new("Game0");
+            IndependentEntity entity = new();
+
+            Assert.Equal(EntityManagerErrorCode.None, runtimeState.EntityManager.Register(entity));
+
+            MailboxCallErrorCode result = runtimeState.ReceiveMailboxCall(
+                entity.EntityId.ToString("D"),
+                new MailboxCallMessage(7102u, Array.Empty<byte>()));
+
+            Assert.Equal(MailboxCallErrorCode.MailboxRejected, result);
         }
     }
 
     internal sealed class IndependentEntity : ServerEntity
     {
+    }
+
+    internal sealed class NonMigratableMailboxEntity : ServerEntity
+    {
+        private readonly List<ReceivedMailboxCall> _receivedMailboxCalls = [];
+
+        public IReadOnlyList<ReceivedMailboxCall> ReceivedMailboxCalls => _receivedMailboxCalls;
+
+        public override bool IsMigratable()
+        {
+            return false;
+        }
+
+        protected override MailboxCallErrorCode OnMailboxCall(MailboxCallMessage message)
+        {
+            _receivedMailboxCalls.Add(new ReceivedMailboxCall(message.MsgId, message.Payload.ToArray()));
+            return MailboxCallErrorCode.None;
+        }
+
+        internal readonly record struct ReceivedMailboxCall(uint MsgId, byte[] Payload);
     }
 }

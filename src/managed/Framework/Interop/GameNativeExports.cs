@@ -23,7 +23,7 @@ namespace XServer.Managed.Framework.Interop
             PropertyNameCaseInsensitive = true,
         };
         private static ManagedNativeCallbacks s_nativeCallbacks;
-        private static ManagedNativeStubCallTransport? s_nativeStubCallTransport;
+        private static ManagedNativeMailboxCallTransport? s_nativeMailboxCallTransport;
         private static ManagedNativeProxyCallTransport? s_nativeProxyCallTransport;
         private static ManagedNativeClientMessageTransport? s_nativeClientMessageTransport;
         private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
@@ -47,7 +47,7 @@ namespace XServer.Managed.Framework.Interop
             {
                 s_nativeCallbacks = args->NativeCallbacks;
                 NativeLoggerBridge.Configure(s_nativeCallbacks);
-                s_nativeStubCallTransport = ManagedNativeStubCallTransport.CreateOrNull(s_nativeCallbacks);
+                s_nativeMailboxCallTransport = ManagedNativeMailboxCallTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeProxyCallTransport = ManagedNativeProxyCallTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeClientMessageTransport = ManagedNativeClientMessageTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeTimerScheduler = new ManagedNativeTimerScheduler(s_nativeCallbacks);
@@ -56,7 +56,7 @@ namespace XServer.Managed.Framework.Interop
                 s_runtimeState = new GameNodeRuntimeState(
                     nodeId,
                     NotifyNativeServerStubReady,
-                    s_nativeStubCallTransport,
+                    s_nativeMailboxCallTransport,
                     s_nativeProxyCallTransport,
                     s_nativeClientMessageTransport,
                     nativeTimerScheduler: s_nativeTimerScheduler);
@@ -65,7 +65,7 @@ namespace XServer.Managed.Framework.Interop
             }
             catch
             {
-                s_nativeStubCallTransport = null;
+                s_nativeMailboxCallTransport = null;
                 s_nativeProxyCallTransport = null;
                 s_nativeClientMessageTransport = null;
                 s_nativeTimerScheduler?.Reset();
@@ -133,31 +133,32 @@ namespace XServer.Managed.Framework.Interop
                     return 0;
                 }
 
-                if (message->MsgId != RelayStubCallCodec.ForwardStubCallMsgId)
+                if (message->MsgId != RelayMailboxCallCodec.ForwardMailboxCallMsgId)
                 {
                     return 0;
                 }
 
-                if (!RelayStubCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayStubCallCodec.RelayStubCallEnvelope relay))
+                if (!RelayMailboxCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayMailboxCallCodec.RelayMailboxCallEnvelope relay))
                 {
-                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded stub call payload.");
+                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded mailbox call payload.");
                     return InvalidArgument;
                 }
 
                 if (!string.Equals(relay.TargetGameNodeId, s_runtimeState.NodeId, StringComparison.Ordinal))
                 {
-                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime rejected forwarded stub call for another game node.");
+                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime rejected forwarded mailbox call for another game node.");
                     return InvalidArgument;
                 }
 
-                StubCallErrorCode result = s_runtimeState.ReceiveStubCall(
-                    relay.TargetStubType,
-                    new StubCallMessage(relay.StubCallMsgId, relay.Payload));
-                if (result != StubCallErrorCode.None)
+                MailboxCallErrorCode result = s_runtimeState.ReceiveMailboxCall(
+                    relay.TargetEntityId,
+                    relay.TargetMailboxName,
+                    new MailboxCallMessage(relay.MailboxCallMsgId, relay.Payload));
+                if (result != MailboxCallErrorCode.None)
                 {
                     NativeLoggerBridge.Warn(
                         RuntimeLogCategory,
-                        $"Game managed runtime rejected forwarded stub call: {StubCallError.Message(result)}");
+                        $"Game managed runtime rejected forwarded mailbox call: {MailboxCallError.Message(result)}");
                     return (int)result;
                 }
 

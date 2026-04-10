@@ -4,21 +4,22 @@ using System.Text;
 
 namespace XServer.Managed.Framework.Interop
 {
-    internal static class RelayStubCallCodec
+    internal static class RelayMailboxCallCodec
     {
-        public const uint ForwardStubCallMsgId = 2002u;
+        public const uint ForwardMailboxCallMsgId = 2002u;
 
-        internal readonly record struct RelayStubCallEnvelope(
+        internal readonly record struct RelayMailboxCallEnvelope(
             string SourceGameNodeId,
             string TargetGameNodeId,
-            string TargetStubType,
-            uint StubCallMsgId,
+            Guid TargetEntityId,
+            string TargetMailboxName,
+            uint MailboxCallMsgId,
             ReadOnlyMemory<byte> Payload);
 
         public static unsafe bool TryDecode(
             byte* payload,
             uint payloadLength,
-            out RelayStubCallEnvelope message)
+            out RelayMailboxCallEnvelope message)
         {
             if (payload == null)
             {
@@ -31,7 +32,7 @@ namespace XServer.Managed.Framework.Interop
 
         public static bool TryDecode(
             ReadOnlySpan<byte> payload,
-            out RelayStubCallEnvelope message)
+            out RelayMailboxCallEnvelope message)
         {
             int offset = 0;
             return TryDecode(payload, ref offset, out message);
@@ -40,16 +41,24 @@ namespace XServer.Managed.Framework.Interop
         private static bool TryDecode(
             ReadOnlySpan<byte> payload,
             ref int offset,
-            out RelayStubCallEnvelope message)
+            out RelayMailboxCallEnvelope message)
         {
             message = default;
 
             if (!TryReadString16(payload, ref offset, out string sourceGameNodeId) ||
                 !TryReadString16(payload, ref offset, out string targetGameNodeId) ||
-                !TryReadString16(payload, ref offset, out string targetStubType) ||
-                !TryReadUInt32(payload, ref offset, out uint stubCallMsgId) ||
+                !TryReadString16(payload, ref offset, out string targetEntityIdText) ||
+                !TryReadString16(payload, ref offset, out string targetMailboxName) ||
+                !TryReadUInt32(payload, ref offset, out uint mailboxCallMsgId) ||
                 !TryReadUInt32(payload, ref offset, out uint relayFlags) ||
                 !TryReadBytes32(payload, ref offset, out byte[] callPayload))
+            {
+                return false;
+            }
+
+            Guid targetEntityId = Guid.Empty;
+            if (!string.IsNullOrWhiteSpace(targetEntityIdText) &&
+                (!Guid.TryParse(targetEntityIdText, out targetEntityId) || targetEntityId == Guid.Empty))
             {
                 return false;
             }
@@ -57,18 +66,19 @@ namespace XServer.Managed.Framework.Interop
             if (offset != payload.Length ||
                 string.IsNullOrWhiteSpace(sourceGameNodeId) ||
                 string.IsNullOrWhiteSpace(targetGameNodeId) ||
-                string.IsNullOrWhiteSpace(targetStubType) ||
-                stubCallMsgId == 0 ||
+                (targetEntityId == Guid.Empty && string.IsNullOrWhiteSpace(targetMailboxName)) ||
+                mailboxCallMsgId == 0 ||
                 relayFlags != 0)
             {
                 return false;
             }
 
-            message = new RelayStubCallEnvelope(
+            message = new RelayMailboxCallEnvelope(
                 sourceGameNodeId,
                 targetGameNodeId,
-                targetStubType,
-                stubCallMsgId,
+                targetEntityId,
+                targetMailboxName,
+                mailboxCallMsgId,
                 callPayload);
             return true;
         }

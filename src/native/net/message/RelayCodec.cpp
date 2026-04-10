@@ -94,8 +94,8 @@ namespace
     return true;
 }
 
-[[nodiscard]] RelayCodecErrorCode ValidateRelayForwardStubCall(
-    const RelayForwardStubCall& message) noexcept
+[[nodiscard]] RelayCodecErrorCode ValidateRelayForwardMailboxCall(
+    const RelayForwardMailboxCall& message) noexcept
 {
     if (message.source_game_node_id.empty())
     {
@@ -107,12 +107,17 @@ namespace
         return RelayCodecErrorCode::InvalidTargetGameNodeId;
     }
 
-    if (message.target_stub_type.empty())
+    if (!message.target_entity_id.empty() && !IsCanonicalGuidText(message.target_entity_id))
     {
-        return RelayCodecErrorCode::InvalidTargetStubType;
+        return RelayCodecErrorCode::InvalidTargetEntityId;
     }
 
-    if (message.stub_call_msg_id == 0u)
+    if (message.target_mailbox_name.empty() && message.target_entity_id.empty())
+    {
+        return RelayCodecErrorCode::InvalidTargetMailboxName;
+    }
+
+    if (message.mailbox_call_msg_id == 0u)
     {
         return RelayCodecErrorCode::InvalidMessageId;
     }
@@ -215,8 +220,8 @@ std::string_view RelayCodecErrorMessage(RelayCodecErrorCode error_code) noexcept
         return "Relay sourceGameNodeId must not be empty.";
     case RelayCodecErrorCode::InvalidTargetGameNodeId:
         return "Relay targetGameNodeId must not be empty.";
-    case RelayCodecErrorCode::InvalidTargetStubType:
-        return "Relay targetStubType must not be empty.";
+    case RelayCodecErrorCode::InvalidTargetMailboxName:
+        return "Relay targetMailboxName must not be empty when targetEntityId is absent.";
     case RelayCodecErrorCode::InvalidRouteGateNodeId:
         return "Relay routeGateNodeId must not be empty.";
     case RelayCodecErrorCode::InvalidTargetEntityId:
@@ -232,8 +237,8 @@ std::string_view RelayCodecErrorMessage(RelayCodecErrorCode error_code) noexcept
     return "Unknown relay codec error.";
 }
 
-RelayCodecErrorCode GetRelayForwardStubCallWireSize(
-    const RelayForwardStubCall& message,
+RelayCodecErrorCode GetRelayForwardMailboxCallWireSize(
+    const RelayForwardMailboxCall& message,
     std::size_t* wire_size) noexcept
 {
     if (wire_size == nullptr)
@@ -242,7 +247,7 @@ RelayCodecErrorCode GetRelayForwardStubCallWireSize(
     }
 
     *wire_size = 0u;
-    const RelayCodecErrorCode validation_result = ValidateRelayForwardStubCall(message);
+    const RelayCodecErrorCode validation_result = ValidateRelayForwardMailboxCall(message);
     if (validation_result != RelayCodecErrorCode::None)
     {
         return validation_result;
@@ -263,7 +268,14 @@ RelayCodecErrorCode GetRelayForwardStubCallWireSize(
         return result;
     }
 
-    result = GetString16WireSize(message.target_stub_type, &field_size);
+    result = GetString16WireSize(message.target_entity_id, &field_size);
+    if (result != RelayCodecErrorCode::None ||
+        (result = AddWireSize(field_size, wire_size)) != RelayCodecErrorCode::None)
+    {
+        return result;
+    }
+
+    result = GetString16WireSize(message.target_mailbox_name, &field_size);
     if (result != RelayCodecErrorCode::None ||
         (result = AddWireSize(field_size, wire_size)) != RelayCodecErrorCode::None)
     {
@@ -284,11 +296,11 @@ RelayCodecErrorCode GetRelayForwardStubCallWireSize(
     return RelayCodecErrorCode::None;
 }
 
-RelayCodecErrorCode EncodeRelayForwardStubCall(
-    const RelayForwardStubCall& message,
+RelayCodecErrorCode EncodeRelayForwardMailboxCall(
+    const RelayForwardMailboxCall& message,
     std::span<std::byte> buffer) noexcept
 {
-    const RelayCodecErrorCode validation_result = ValidateRelayForwardStubCall(message);
+    const RelayCodecErrorCode validation_result = ValidateRelayForwardMailboxCall(message);
     if (validation_result != RelayCodecErrorCode::None)
     {
         return validation_result;
@@ -297,8 +309,9 @@ RelayCodecErrorCode EncodeRelayForwardStubCall(
     BinaryWriter writer(buffer);
     if (!writer.WriteString16(message.source_game_node_id) ||
         !writer.WriteString16(message.target_game_node_id) ||
-        !writer.WriteString16(message.target_stub_type) ||
-        !writer.WriteUInt32(message.stub_call_msg_id) ||
+        !writer.WriteString16(message.target_entity_id) ||
+        !writer.WriteString16(message.target_mailbox_name) ||
+        !writer.WriteUInt32(message.mailbox_call_msg_id) ||
         !writer.WriteUInt32(message.relay_flags) ||
         !writer.WriteLengthPrefixedBytes32(message.payload))
     {
@@ -308,9 +321,9 @@ RelayCodecErrorCode EncodeRelayForwardStubCall(
     return RelayCodecErrorCode::None;
 }
 
-RelayCodecErrorCode DecodeRelayForwardStubCall(
+RelayCodecErrorCode DecodeRelayForwardMailboxCall(
     std::span<const std::byte> buffer,
-    RelayForwardStubCall* message) noexcept
+    RelayForwardMailboxCall* message) noexcept
 {
     if (message == nullptr)
     {
@@ -320,19 +333,20 @@ RelayCodecErrorCode DecodeRelayForwardStubCall(
     *message = {};
 
     BinaryReader reader(buffer);
-    RelayForwardStubCall parsed_message{};
+    RelayForwardMailboxCall parsed_message{};
     std::span<const std::byte> payload{};
     if (!reader.ReadString16(&parsed_message.source_game_node_id) ||
         !reader.ReadString16(&parsed_message.target_game_node_id) ||
-        !reader.ReadString16(&parsed_message.target_stub_type) ||
-        !reader.ReadUInt32(&parsed_message.stub_call_msg_id) ||
+        !reader.ReadString16(&parsed_message.target_entity_id) ||
+        !reader.ReadString16(&parsed_message.target_mailbox_name) ||
+        !reader.ReadUInt32(&parsed_message.mailbox_call_msg_id) ||
         !reader.ReadUInt32(&parsed_message.relay_flags) ||
         !reader.ReadLengthPrefixedBytes32(&payload))
     {
         return MapSerializationError(reader.error());
     }
 
-    const RelayCodecErrorCode validation_result = ValidateRelayForwardStubCall(parsed_message);
+    const RelayCodecErrorCode validation_result = ValidateRelayForwardMailboxCall(parsed_message);
     if (validation_result != RelayCodecErrorCode::None)
     {
         return validation_result;

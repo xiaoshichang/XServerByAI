@@ -105,6 +105,21 @@ namespace XServer.Managed.Framework.Entities
             return OnProxyCall(message);
         }
 
+        internal MailboxCallErrorCode ReceiveMailboxCall(MailboxCallMessage message)
+        {
+            if (message.MsgId == 0)
+            {
+                return MailboxCallErrorCode.InvalidMessageId;
+            }
+
+            if (IsMigratable())
+            {
+                return MailboxCallErrorCode.MailboxRejected;
+            }
+
+            return OnMailboxCall(message);
+        }
+
         protected long CreateNativeOnceTimer(TimeSpan delay, Action callback)
         {
             if (_nativeTimerScheduler == null)
@@ -129,6 +144,12 @@ namespace XServer.Managed.Framework.Entities
         {
             _ = message;
             return ProxyCallErrorCode.EntityRejected;
+        }
+
+        protected virtual MailboxCallErrorCode OnMailboxCall(MailboxCallMessage message)
+        {
+            _ = message;
+            return MailboxCallErrorCode.MailboxRejected;
         }
 
         protected void PushToClient(ProxyAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)

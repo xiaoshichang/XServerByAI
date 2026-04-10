@@ -885,7 +885,7 @@ void GateNode::HandleGameMessage(
         return;
     }
 
-    if (raw_header.msg_id == xs::net::kRelayForwardStubCallMsgId)
+    if (raw_header.msg_id == xs::net::kRelayForwardMailboxCallMsgId)
     {
         HandleGameForwardStubCallMessage(routing_id, payload);
         return;
@@ -1487,7 +1487,7 @@ void GateNode::HandleGameForwardStubCallMessage(
             xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
             xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
         };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node dropped malformed forwarded stub call packet.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node dropped malformed forwarded mailbox call packet.", context);
         return;
     }
 
@@ -1500,13 +1500,13 @@ void GateNode::HandleGameForwardStubCallMessage(
             xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
             xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
         };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored forwarded stub call with an invalid envelope.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored forwarded mailbox call with an invalid envelope.", context);
         return;
     }
 
-    xs::net::RelayForwardStubCall relay_message{};
+    xs::net::RelayForwardMailboxCall relay_message{};
     const xs::net::RelayCodecErrorCode decode_result =
-        xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message);
+        xs::net::DecodeRelayForwardMailboxCall(packet.payload, &relay_message);
     if (decode_result != xs::net::RelayCodecErrorCode::None)
     {
         const std::array<xs::core::LogContextField, 4> context{
@@ -1515,7 +1515,7 @@ void GateNode::HandleGameForwardStubCallMessage(
             xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
             xs::core::LogContextField{"relayError", std::string(xs::net::RelayCodecErrorMessage(decode_result))},
         };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode forwarded stub call payload.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode forwarded mailbox call payload.", context);
         return;
     }
 
@@ -1528,7 +1528,7 @@ void GateNode::HandleGameForwardStubCallMessage(
             xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
             xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
         };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded stub call from an unregistered Game.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded mailbox call from an unregistered Game.", context);
         return;
     }
 
@@ -1540,7 +1540,7 @@ void GateNode::HandleGameForwardStubCallMessage(
             xs::core::LogContextField{"declaredSourceGameNodeId", relay_message.source_game_node_id},
             xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
         };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded stub call with a mismatched source Game node.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded mailbox call with a mismatched source Game node.", context);
         return;
     }
 
@@ -1556,9 +1556,9 @@ void GateNode::HandleGameForwardStubCallMessage(
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
             xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
-            xs::core::LogContextField{"targetStubType", relay_message.target_stub_type},
+            xs::core::LogContextField{"targetMailboxName", relay_message.target_mailbox_name},
         };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node cannot forward stub call because target Game is unavailable.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node cannot forward mailbox call because target Game is unavailable.", context);
         return;
     }
 
@@ -1574,10 +1574,10 @@ void GateNode::HandleGameForwardStubCallMessage(
             xs::core::LogContextField{"nodeId", std::string(node_id())},
             xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
             xs::core::LogContextField{"targetGameNodeId", relay_message.target_game_node_id},
-            xs::core::LogContextField{"targetStubType", relay_message.target_stub_type},
+            xs::core::LogContextField{"targetMailboxName", relay_message.target_mailbox_name},
             xs::core::LogContextField{"innerNetworkError", std::string(inner_network()->last_error_message())},
         };
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to forward stub call to target Game.", context);
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to forward mailbox call to target Game.", context);
     }
 }
 

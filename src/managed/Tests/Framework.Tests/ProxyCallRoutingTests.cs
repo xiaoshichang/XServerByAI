@@ -9,12 +9,12 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void AvatarEntity_CallProxy_PrefersLocalEntityDispatch()
         {
-            LoopbackStubCallTransport stubTransport = new();
+            LoopbackMailboxCallTransport stubTransport = new();
             LoopbackProxyCallTransport proxyTransport = new();
             RecordingClientMessageTransport clientTransport = new();
             GameNodeRuntimeState runtimeState = new(
                 "Game0",
-                stubCallTransport: stubTransport,
+                mailboxCallTransport: stubTransport,
                 proxyCallTransport: proxyTransport,
                 clientMessageTransport: clientTransport);
             stubTransport.Register(runtimeState);
@@ -60,12 +60,12 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void AvatarEntity_CallProxy_ForwardsToRemoteEntity_WhenLocalLookupMisses()
         {
-            LoopbackStubCallTransport stubTransport = new();
+            LoopbackMailboxCallTransport stubTransport = new();
             LoopbackProxyCallTransport proxyTransport = new();
             RecordingClientMessageTransport clientTransport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game9", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
-            GameNodeRuntimeState sourceRuntime = new("Game0", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
-            GameNodeRuntimeState targetRuntime = new("Game1", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState onlineRuntime = new("Game9", mailboxCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState sourceRuntime = new("Game0", mailboxCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState targetRuntime = new("Game1", mailboxCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
             stubTransport.Register(onlineRuntime);
             stubTransport.Register(sourceRuntime);
             stubTransport.Register(targetRuntime);
@@ -117,11 +117,11 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void OnlineStub_BroadcastStubCall_FansOutToAllRegisteredAvatarsViaProxy()
         {
-            LoopbackStubCallTransport stubTransport = new();
+            LoopbackMailboxCallTransport stubTransport = new();
             LoopbackProxyCallTransport proxyTransport = new();
             RecordingClientMessageTransport clientTransport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game0", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
-            GameNodeRuntimeState remoteRuntime = new("Game1", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState onlineRuntime = new("Game0", mailboxCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState remoteRuntime = new("Game1", mailboxCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
             stubTransport.Register(onlineRuntime);
             stubTransport.Register(remoteRuntime);
             proxyTransport.Register(onlineRuntime);

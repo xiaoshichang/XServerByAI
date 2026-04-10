@@ -119,6 +119,7 @@ class GmNode final : public ServerNode
     [[nodiscard]] bool TrySendStubCallToGame(
         std::string_view target_game_node_id,
         std::string_view target_stub_type,
+        std::string_view target_entity_id,
         std::uint32_t msg_id,
         std::span<const std::byte> payload,
         std::string* error_message);

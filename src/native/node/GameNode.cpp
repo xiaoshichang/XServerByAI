@@ -12,6 +12,7 @@
 #include <asio/post.hpp>
 
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstring>
 #include <cstdint>
@@ -35,6 +36,9 @@ constexpr std::uint16_t kErrorResponseFlags = kResponseFlags | static_cast<std::
 constexpr std::int64_t kManagedNativeCreateTimerFailed = static_cast<std::int64_t>(xs::core::TimerErrorCode::Unknown);
 constexpr std::int32_t kManagedNativeCallbackInvalidArgument = -1;
 constexpr std::int32_t kManagedNativeCallbackOperationFailed = -2;
+constexpr std::int32_t kManagedNativeMailboxCallInvalidArgument = 1;
+constexpr std::int32_t kManagedNativeMailboxCallInvalidMessageId = 2;
+constexpr std::int32_t kManagedNativeMailboxCallUnknownTargetMailbox = 3;
 constexpr std::int32_t kManagedNativeProxyCallInvalidArgument = 1;
 constexpr std::int32_t kManagedNativeProxyCallInvalidMessageId = 2;
 constexpr std::int32_t kManagedNativeCallbackTargetNodeUnavailable = 4;
@@ -79,6 +83,37 @@ std::string BuildConnectorTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 std::string ToString(std::uint64_t value)
 {
     return std::to_string(value);
+}
+
+bool IsCanonicalGuidText(std::string_view text) noexcept
+{
+    if (text.size() != 36U)
+    {
+        return false;
+    }
+
+    for (std::size_t index = 0U; index < text.size(); ++index)
+    {
+        const char ch = text[index];
+        const bool should_be_dash =
+            index == 8U || index == 13U || index == 18U || index == 23U;
+        if (should_be_dash)
+        {
+            if (ch != '-')
+            {
+                return false;
+            }
+
+            continue;
+        }
+
+        if (std::isxdigit(static_cast<unsigned char>(ch)) == 0)
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool TryReadRequiredJsonString(
@@ -424,7 +459,7 @@ std::int32_t GameNode::HandleManagedForwardStubCallCallback(
 {
     if (context == nullptr)
     {
-        return kManagedNativeCallbackInvalidArgument;
+        return kManagedNativeMailboxCallInvalidArgument;
     }
 
     std::string_view target_game_node_id;
@@ -432,12 +467,12 @@ std::int32_t GameNode::HandleManagedForwardStubCallCallback(
     if (!TryReadManagedUtf8View(target_game_node_id_utf8, target_game_node_id_length, &target_game_node_id) ||
         !TryReadManagedUtf8View(target_stub_type_utf8, target_stub_type_length, &target_stub_type))
     {
-        return kManagedNativeCallbackInvalidArgument;
+        return kManagedNativeMailboxCallInvalidArgument;
     }
 
     if (payload == nullptr && payload_length != 0U)
     {
-        return kManagedNativeCallbackInvalidArgument;
+        return kManagedNativeMailboxCallInvalidArgument;
     }
 
     const std::span<const std::byte> payload_view(
@@ -583,9 +618,50 @@ std::int32_t GameNode::ForwardManagedStubCall(
     std::uint32_t msg_id,
     std::span<const std::byte> payload)
 {
-    if (target_game_node_id.empty() || target_stub_type.empty() || msg_id == 0U || inner_network() == nullptr)
+    if (target_stub_type.empty() || inner_network() == nullptr)
     {
-        return kManagedNativeCallbackInvalidArgument;
+        return kManagedNativeMailboxCallInvalidArgument;
+    }
+
+    if (msg_id == 0U)
+    {
+        return kManagedNativeMailboxCallInvalidMessageId;
+    }
+
+    std::string resolved_target_game_node_id;
+    std::string resolved_target_entity_id;
+    if (target_game_node_id.empty())
+    {
+        for (const xs::net::ServerStubOwnershipEntry& assignment : ownership_state_.assignments)
+        {
+            if (assignment.entity_type == target_stub_type)
+            {
+                resolved_target_game_node_id = assignment.owner_game_node_id;
+                if (assignment.entity_id != kUnknownServerEntityId && IsCanonicalGuidText(assignment.entity_id))
+                {
+                    resolved_target_entity_id = assignment.entity_id;
+                }
+                break;
+            }
+        }
+
+        if (resolved_target_game_node_id.empty())
+        {
+            logger().Log(
+                xs::core::LogLevel::Warn,
+                "inner",
+                "Game node cannot forward mailbox call because the target mailbox has no known owner.");
+            return kManagedNativeMailboxCallUnknownTargetMailbox;
+        }
+    }
+    else
+    {
+        resolved_target_game_node_id = std::string(target_game_node_id);
+    }
+
+    if (resolved_target_entity_id.empty() && IsCanonicalGuidText(target_stub_type))
+    {
+        resolved_target_entity_id = std::string(target_stub_type);
     }
 
     InnerNetworkSession* gate_session = nullptr;
@@ -610,48 +686,49 @@ std::int32_t GameNode::ForwardManagedStubCall(
 
     if (gate_session == nullptr)
     {
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node cannot forward stub call because no Gate is ready.");
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node cannot forward mailbox call because no Gate is ready.");
         return kManagedNativeCallbackTargetNodeUnavailable;
     }
 
-    const xs::net::RelayForwardStubCall relay_message{
+    const xs::net::RelayForwardMailboxCall relay_message{
         .source_game_node_id = std::string(node_id()),
-        .target_game_node_id = std::string(target_game_node_id),
-        .target_stub_type = std::string(target_stub_type),
-        .stub_call_msg_id = msg_id,
+        .target_game_node_id = std::move(resolved_target_game_node_id),
+        .target_entity_id = std::move(resolved_target_entity_id),
+        .target_mailbox_name = std::string(target_stub_type),
+        .mailbox_call_msg_id = msg_id,
         .relay_flags = 0u,
         .payload = std::vector<std::byte>(payload.begin(), payload.end()),
     };
 
     std::size_t wire_size = 0u;
     const xs::net::RelayCodecErrorCode wire_size_result =
-        xs::net::GetRelayForwardStubCallWireSize(relay_message, &wire_size);
+        xs::net::GetRelayForwardMailboxCallWireSize(relay_message, &wire_size);
     if (wire_size_result != xs::net::RelayCodecErrorCode::None)
     {
         gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(wire_size_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size forwarded stub call payload.");
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size forwarded mailbox call payload.");
         return kManagedNativeCallbackTargetNodeUnavailable;
     }
 
     std::vector<std::byte> relay_payload(wire_size);
     const xs::net::RelayCodecErrorCode encode_result =
-        xs::net::EncodeRelayForwardStubCall(relay_message, relay_payload);
+        xs::net::EncodeRelayForwardMailboxCall(relay_message, relay_payload);
     if (encode_result != xs::net::RelayCodecErrorCode::None)
     {
         gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(encode_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode forwarded stub call payload.");
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode forwarded mailbox call payload.");
         return kManagedNativeCallbackTargetNodeUnavailable;
     }
 
     const xs::net::PacketHeader header =
-        xs::net::MakePacketHeader(xs::net::kRelayForwardStubCallMsgId, xs::net::kPacketSeqNone, 0U,
+        xs::net::MakePacketHeader(xs::net::kRelayForwardMailboxCallMsgId, xs::net::kPacketSeqNone, 0U,
                                   static_cast<std::uint32_t>(relay_payload.size()));
     std::vector<std::byte> packet(xs::net::kPacketHeaderSize + relay_payload.size());
     const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, relay_payload, packet);
     if (packet_result != xs::net::PacketCodecErrorCode::None)
     {
         gate_session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap forwarded stub call into a packet.");
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap forwarded mailbox call into a packet.");
         return kManagedNativeCallbackTargetNodeUnavailable;
     }
 
@@ -659,7 +736,7 @@ std::int32_t GameNode::ForwardManagedStubCall(
     if (send_result != NodeErrorCode::None)
     {
         gate_session->last_protocol_error = std::string(inner_network()->last_error_message());
-        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send forwarded stub call to Gate.");
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send forwarded mailbox call to Gate.");
         return kManagedNativeCallbackTargetNodeUnavailable;
     }
 
@@ -1266,39 +1343,39 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
         return;
     }
 
-    if (packet.header.msg_id == xs::net::kRelayForwardStubCallMsgId)
+    if (packet.header.msg_id == xs::net::kRelayForwardMailboxCallMsgId)
     {
         if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
         {
-            session->last_protocol_error = "GM forwarded stub call envelope is invalid.";
+            session->last_protocol_error = "GM forwarded mailbox call envelope is invalid.";
             logger().Log(xs::core::LogLevel::Warn, "inner",
-                         "Game node ignored GM forwarded stub call with an invalid envelope.");
+                         "Game node ignored GM forwarded mailbox call with an invalid envelope.");
             return;
         }
 
-        xs::net::RelayForwardStubCall relay_message{};
+        xs::net::RelayForwardMailboxCall relay_message{};
         const xs::net::RelayCodecErrorCode decode_result =
-            xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message);
+            xs::net::DecodeRelayForwardMailboxCall(packet.payload, &relay_message);
         if (decode_result != xs::net::RelayCodecErrorCode::None)
         {
             session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(decode_result));
-            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM forwarded stub call.");
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM forwarded mailbox call.");
             return;
         }
 
         if (relay_message.target_game_node_id != node_id())
         {
-            session->last_protocol_error = "GM forwarded stub call target game node mismatch.";
+            session->last_protocol_error = "GM forwarded mailbox call target game node mismatch.";
             logger().Log(xs::core::LogLevel::Warn, "inner",
-                         "Game node rejected GM forwarded stub call for another game node.");
+                         "Game node rejected GM forwarded mailbox call for another game node.");
             return;
         }
 
         if (!managed_exports_loaded_ || managed_exports_.on_message == nullptr)
         {
-            session->last_protocol_error = "Game managed runtime is unavailable for forwarded stub call.";
+            session->last_protocol_error = "Game managed runtime is unavailable for forwarded mailbox call.";
             logger().Log(xs::core::LogLevel::Warn, "runtime",
-                         "Game node cannot dispatch GM forwarded stub call before managed exports are ready.");
+                         "Game node cannot dispatch GM forwarded mailbox call before managed exports are ready.");
             return;
         }
 
@@ -1317,9 +1394,9 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
         if (managed_result != 0)
         {
             session->last_protocol_error =
-                "Game managed runtime rejected GM forwarded stub call with error code " + std::to_string(managed_result) + ".";
+                "Game managed runtime rejected GM forwarded mailbox call with error code " + std::to_string(managed_result) + ".";
             logger().Log(xs::core::LogLevel::Warn, "runtime",
-                         "Game node observed a managed GM forwarded stub call failure.");
+                         "Game node observed a managed GM forwarded mailbox call failure.");
             return;
         }
 
@@ -1455,39 +1532,39 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         return;
     }
 
-    if (packet.header.msg_id == xs::net::kRelayForwardStubCallMsgId)
+    if (packet.header.msg_id == xs::net::kRelayForwardMailboxCallMsgId)
     {
         if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
         {
-            session->last_protocol_error = "Gate forwarded stub call envelope is invalid.";
+            session->last_protocol_error = "Gate forwarded mailbox call envelope is invalid.";
             logger().Log(xs::core::LogLevel::Warn, "inner",
-                         "Game node ignored Gate forwarded stub call with an invalid envelope.");
+                         "Game node ignored Gate forwarded mailbox call with an invalid envelope.");
             return;
         }
 
-        xs::net::RelayForwardStubCall relay_message{};
+        xs::net::RelayForwardMailboxCall relay_message{};
         const xs::net::RelayCodecErrorCode decode_result =
-            xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message);
+            xs::net::DecodeRelayForwardMailboxCall(packet.payload, &relay_message);
         if (decode_result != xs::net::RelayCodecErrorCode::None)
         {
             session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(decode_result));
-            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate forwarded stub call.");
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate forwarded mailbox call.");
             return;
         }
 
         if (relay_message.target_game_node_id != node_id())
         {
-            session->last_protocol_error = "Gate forwarded stub call target game node mismatch.";
+            session->last_protocol_error = "Gate forwarded mailbox call target game node mismatch.";
             logger().Log(xs::core::LogLevel::Warn, "inner",
-                         "Game node rejected Gate forwarded stub call for another game node.");
+                         "Game node rejected Gate forwarded mailbox call for another game node.");
             return;
         }
 
         if (!managed_exports_loaded_ || managed_exports_.on_message == nullptr)
         {
-            session->last_protocol_error = "Game managed runtime is unavailable for forwarded stub call.";
+            session->last_protocol_error = "Game managed runtime is unavailable for forwarded mailbox call.";
             logger().Log(xs::core::LogLevel::Warn, "runtime",
-                         "Game node cannot dispatch forwarded stub call before managed exports are ready.");
+                         "Game node cannot dispatch forwarded mailbox call before managed exports are ready.");
             return;
         }
 
@@ -1506,9 +1583,9 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         if (managed_result != 0)
         {
             session->last_protocol_error =
-                "Game managed runtime rejected forwarded stub call with error code " + std::to_string(managed_result) + ".";
+                "Game managed runtime rejected forwarded mailbox call with error code " + std::to_string(managed_result) + ".";
             logger().Log(xs::core::LogLevel::Warn, "runtime",
-                         "Game node observed a managed forwarded stub call failure.");
+                         "Game node observed a managed forwarded mailbox call failure.");
             return;
         }
 

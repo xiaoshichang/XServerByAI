@@ -213,11 +213,11 @@ struct ManagedNativeTimerCapture final
     }
 };
 
-struct ManagedForwardStubCallCapture final
+struct ManagedForwardMailboxCallCapture final
 {
     std::uint32_t call_count{0U};
     std::vector<std::string> target_game_node_ids{};
-    std::vector<std::string> target_stub_types{};
+    std::vector<std::string> target_mailbox_names{};
     std::vector<std::uint32_t> msg_ids{};
     std::vector<std::vector<std::byte>> payloads{};
 };
@@ -245,7 +245,7 @@ struct ManagedCallbackCapture final
     ReadyCallbackCapture ready{};
     ManagedLogCapture logs{};
     ManagedNativeTimerCapture timers{};
-    ManagedForwardStubCallCapture forwarded_stub_calls{};
+    ManagedForwardMailboxCallCapture forwarded_mailbox_calls{};
     ManagedForwardProxyCallCapture forwarded_proxy_calls{};
     ManagedPushClientMessageCapture pushed_client_messages{};
 };
@@ -342,34 +342,38 @@ std::int32_t CancelTimer(void* context, std::int64_t timer_id)
     return 0;
 }
 
-std::int32_t ForwardStubCall(void* context, const std::uint8_t* target_game_node_id_utf8,
-                             std::uint32_t target_game_node_id_length, const std::uint8_t* target_stub_type_utf8,
-                             std::uint32_t target_stub_type_length, std::uint32_t msg_id, const std::uint8_t* payload,
-                             std::uint32_t payload_length)
+std::int32_t ForwardMailboxCall(void* context, const std::uint8_t* target_game_node_id_utf8,
+                                std::uint32_t target_game_node_id_length, const std::uint8_t* target_stub_type_utf8,
+                                std::uint32_t target_stub_type_length, std::uint32_t msg_id, const std::uint8_t* payload,
+                                std::uint32_t payload_length)
 {
     auto* capture = static_cast<ManagedCallbackCapture*>(context);
-    if (capture == nullptr || target_game_node_id_utf8 == nullptr || target_stub_type_utf8 == nullptr || msg_id == 0U ||
+    if (capture == nullptr ||
+        (target_game_node_id_utf8 == nullptr && target_game_node_id_length != 0U) ||
+        target_stub_type_utf8 == nullptr ||
+        msg_id == 0U ||
         (payload == nullptr && payload_length != 0U))
     {
         XS_CHECK(false);
         return -1;
     }
 
-    ++capture->forwarded_stub_calls.call_count;
-    capture->forwarded_stub_calls.target_game_node_ids.push_back(
+    ++capture->forwarded_mailbox_calls.call_count;
+    capture->forwarded_mailbox_calls.target_game_node_ids.push_back(
         ReadManagedUtf8(target_game_node_id_utf8, target_game_node_id_length));
-    capture->forwarded_stub_calls.target_stub_types.push_back(ReadManagedUtf8(target_stub_type_utf8, target_stub_type_length));
-    capture->forwarded_stub_calls.msg_ids.push_back(msg_id);
+    capture->forwarded_mailbox_calls.target_mailbox_names.push_back(
+        ReadManagedUtf8(target_stub_type_utf8, target_stub_type_length));
+    capture->forwarded_mailbox_calls.msg_ids.push_back(msg_id);
     if (payload == nullptr)
     {
-        capture->forwarded_stub_calls.payloads.emplace_back();
+        capture->forwarded_mailbox_calls.payloads.emplace_back();
     }
     else
     {
         const std::span<const std::byte> payload_view(
             reinterpret_cast<const std::byte*>(payload),
             static_cast<std::size_t>(payload_length));
-        capture->forwarded_stub_calls.payloads.emplace_back(payload_view.begin(), payload_view.end());
+        capture->forwarded_mailbox_calls.payloads.emplace_back(payload_view.begin(), payload_view.end());
     }
 
     return 0;
@@ -479,24 +483,27 @@ bool ContainsLogMessageSubstring(const ManagedLogCapture& capture, std::string_v
     return false;
 }
 
-std::vector<std::byte> EncodeRelayForwardStubCallPayload(std::string_view source_game_node_id,
-                                                         std::string_view target_game_node_id,
-                                                         std::string_view target_stub_type, std::uint32_t msg_id,
-                                                         std::span<const std::byte> payload)
+std::vector<std::byte> EncodeRelayForwardMailboxCallPayload(std::string_view source_game_node_id,
+                                                            std::string_view target_game_node_id,
+                                                            std::string_view target_mailbox_name,
+                                                            std::uint32_t msg_id,
+                                                            std::span<const std::byte> payload,
+                                                            std::string_view target_entity_id = {})
 {
-    const xs::net::RelayForwardStubCall relay_message{
+    const xs::net::RelayForwardMailboxCall relay_message{
         .source_game_node_id = std::string(source_game_node_id),
         .target_game_node_id = std::string(target_game_node_id),
-        .target_stub_type = std::string(target_stub_type),
-        .stub_call_msg_id = msg_id,
+        .target_entity_id = std::string(target_entity_id),
+        .target_mailbox_name = std::string(target_mailbox_name),
+        .mailbox_call_msg_id = msg_id,
         .relay_flags = 0u,
         .payload = std::vector<std::byte>(payload.begin(), payload.end()),
     };
 
     std::size_t wire_size = 0u;
-    XS_CHECK(xs::net::GetRelayForwardStubCallWireSize(relay_message, &wire_size) == xs::net::RelayCodecErrorCode::None);
+    XS_CHECK(xs::net::GetRelayForwardMailboxCallWireSize(relay_message, &wire_size) == xs::net::RelayCodecErrorCode::None);
     std::vector<std::byte> buffer(wire_size);
-    XS_CHECK(xs::net::EncodeRelayForwardStubCall(relay_message, buffer) == xs::net::RelayCodecErrorCode::None);
+    XS_CHECK(xs::net::EncodeRelayForwardMailboxCall(relay_message, buffer) == xs::net::RelayCodecErrorCode::None);
     return buffer;
 }
 
@@ -738,7 +745,7 @@ void TestLoadAndBindExportsSucceed()
     init_input.args.native_callbacks.on_log = &OnManagedLog;
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
-    init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_stub_call = &ForwardMailboxCall;
     init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
     init_input.args.native_callbacks.push_client_message = &PushClientMessage;
     XS_CHECK(exports.init(&init_input.args) == 0);
@@ -818,7 +825,7 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(callback_capture.timers.created_timer_ids.size() == 1U);
     XS_CHECK(callback_capture.timers.fired_timer_ids.size() == 1U);
     XS_CHECK(callback_capture.timers.cancelled_timer_ids.empty());
-    XS_CHECK(callback_capture.forwarded_stub_calls.call_count == 0U);
+    XS_CHECK(callback_capture.forwarded_mailbox_calls.call_count == 0U);
     XS_CHECK(callback_capture.forwarded_proxy_calls.call_count == 0U);
     if (callback_capture.timers.requested_create_once_delays_ms.size() == 1U)
     {
@@ -900,7 +907,7 @@ void TestManagedExportsProvideServerStubCatalogFunctions()
     XS_CHECK(ContainsText(entity_types, "MatchStub"));
 }
 
-void TestManagedRuntimeForwardsRemoteStubCallThroughNativeCallback()
+void TestManagedRuntimeForwardsRemoteMailboxCallThroughNativeCallback()
 {
     xs::host::ManagedRuntimeHost host;
 
@@ -920,7 +927,7 @@ void TestManagedRuntimeForwardsRemoteStubCallThroughNativeCallback()
     init_input.args.native_callbacks.on_log = &OnManagedLog;
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
-    init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_stub_call = &ForwardMailboxCall;
     init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
     init_input.args.native_callbacks.push_client_message = &PushClientMessage;
 
@@ -939,28 +946,28 @@ void TestManagedRuntimeForwardsRemoteStubCallThroughNativeCallback()
     XS_CHECK(exports.apply_server_stub_ownership(&ownership_sync) == 0);
     callback_capture.timers.RunUntilIdle();
 
-    XS_CHECK(callback_capture.forwarded_stub_calls.call_count == 1U);
-    XS_CHECK(callback_capture.forwarded_stub_calls.target_game_node_ids.size() == 1U);
-    XS_CHECK(callback_capture.forwarded_stub_calls.target_stub_types.size() == 1U);
-    XS_CHECK(callback_capture.forwarded_stub_calls.msg_ids.size() == 1U);
-    XS_CHECK(callback_capture.forwarded_stub_calls.payloads.size() == 1U);
-    if (callback_capture.forwarded_stub_calls.target_game_node_ids.size() == 1U)
+    XS_CHECK(callback_capture.forwarded_mailbox_calls.call_count == 1U);
+    XS_CHECK(callback_capture.forwarded_mailbox_calls.target_game_node_ids.size() == 1U);
+    XS_CHECK(callback_capture.forwarded_mailbox_calls.target_mailbox_names.size() == 1U);
+    XS_CHECK(callback_capture.forwarded_mailbox_calls.msg_ids.size() == 1U);
+    XS_CHECK(callback_capture.forwarded_mailbox_calls.payloads.size() == 1U);
+    if (callback_capture.forwarded_mailbox_calls.target_game_node_ids.size() == 1U)
     {
-        XS_CHECK(callback_capture.forwarded_stub_calls.target_game_node_ids[0] == "Game1");
+        XS_CHECK(callback_capture.forwarded_mailbox_calls.target_game_node_ids[0].empty());
     }
-    if (callback_capture.forwarded_stub_calls.target_stub_types.size() == 1U)
+    if (callback_capture.forwarded_mailbox_calls.target_mailbox_names.size() == 1U)
     {
-        XS_CHECK(callback_capture.forwarded_stub_calls.target_stub_types[0] == "MatchStub");
+        XS_CHECK(callback_capture.forwarded_mailbox_calls.target_mailbox_names[0] == "MatchStub");
     }
-    if (callback_capture.forwarded_stub_calls.msg_ids.size() == 1U)
+    if (callback_capture.forwarded_mailbox_calls.msg_ids.size() == 1U)
     {
-        XS_CHECK(callback_capture.forwarded_stub_calls.msg_ids[0] == 5101U);
+        XS_CHECK(callback_capture.forwarded_mailbox_calls.msg_ids[0] == 5101U);
     }
-    if (callback_capture.forwarded_stub_calls.payloads.size() == 1U)
+    if (callback_capture.forwarded_mailbox_calls.payloads.size() == 1U)
     {
         const std::string payload_text(
-            reinterpret_cast<const char*>(callback_capture.forwarded_stub_calls.payloads[0].data()),
-            callback_capture.forwarded_stub_calls.payloads[0].size());
+            reinterpret_cast<const char*>(callback_capture.forwarded_mailbox_calls.payloads[0].data()),
+            callback_capture.forwarded_mailbox_calls.payloads[0].size());
         XS_CHECK(payload_text == "online-startup-call");
     }
 }
@@ -985,7 +992,7 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
     init_input.args.native_callbacks.on_log = &OnManagedLog;
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
-    init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_stub_call = &ForwardMailboxCall;
     init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
     init_input.args.native_callbacks.push_client_message = &PushClientMessage;
 
@@ -1015,11 +1022,11 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
         reinterpret_cast<const std::byte*>(registration_payload_text.data()),
         registration_payload_text.size());
     const std::vector<std::byte> register_relay_payload =
-        EncodeRelayForwardStubCallPayload("GM", "Game0", "OnlineStub", 5200U, registration_payload);
+        EncodeRelayForwardMailboxCallPayload("GM", "Game0", "OnlineStub", 5200U, registration_payload);
 
     const xs::host::ManagedMessageView register_message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
-        .msg_id = xs::net::kRelayForwardStubCallMsgId,
+        .msg_id = xs::net::kRelayForwardMailboxCallMsgId,
         .seq = 0U,
         .flags = 0U,
         .session_id = 0U,
@@ -1035,11 +1042,11 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
         reinterpret_cast<const std::byte*>(broadcast_payload_text.data()),
         broadcast_payload_text.size());
     const std::vector<std::byte> broadcast_relay_payload =
-        EncodeRelayForwardStubCallPayload("GM", "Game0", "OnlineStub", 5201U, broadcast_payload);
+        EncodeRelayForwardMailboxCallPayload("GM", "Game0", "OnlineStub", 5201U, broadcast_payload);
 
     const xs::host::ManagedMessageView broadcast_message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
-        .msg_id = xs::net::kRelayForwardStubCallMsgId,
+        .msg_id = xs::net::kRelayForwardMailboxCallMsgId,
         .seq = 0U,
         .flags = 0U,
         .session_id = 0U,
@@ -1076,7 +1083,7 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
     }
 }
 
-void TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub()
+void TestManagedRuntimeDispatchesForwardedMailboxCallMessageToTargetStub()
 {
     xs::host::ManagedRuntimeHost host;
 
@@ -1096,7 +1103,7 @@ void TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub()
     init_input.args.native_callbacks.on_log = &OnManagedLog;
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
-    init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_stub_call = &ForwardMailboxCall;
     init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
     init_input.args.native_callbacks.push_client_message = &PushClientMessage;
 
@@ -1118,11 +1125,11 @@ void TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub()
         reinterpret_cast<const std::byte*>(stub_payload_text.data()),
         stub_payload_text.size());
     const std::vector<std::byte> relay_payload =
-        EncodeRelayForwardStubCallPayload("Game0", "Game1", "MatchStub", 5101U, stub_payload);
+        EncodeRelayForwardMailboxCallPayload("Game0", "Game1", "MatchStub", 5101U, stub_payload);
 
     const xs::host::ManagedMessageView message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
-        .msg_id = xs::net::kRelayForwardStubCallMsgId,
+        .msg_id = xs::net::kRelayForwardMailboxCallMsgId,
         .seq = 0U,
         .flags = 0U,
         .session_id = 0U,
@@ -1157,7 +1164,7 @@ void TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar()
     init_input.args.native_callbacks.on_log = &OnManagedLog;
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
-    init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_stub_call = &ForwardMailboxCall;
     init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
     init_input.args.native_callbacks.push_client_message = &PushClientMessage;
 
@@ -1327,9 +1334,9 @@ int main()
     TestLoadRejectsMissingRuntimeConfig();
     TestLoadRejectsMissingAssembly();
     TestLoadAndBindExportsSucceed();
-    TestManagedRuntimeForwardsRemoteStubCallThroughNativeCallback();
+    TestManagedRuntimeForwardsRemoteMailboxCallThroughNativeCallback();
     TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback();
-    TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub();
+    TestManagedRuntimeDispatchesForwardedMailboxCallMessageToTargetStub();
     TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar();
     TestManagedExportsProvideServerStubCatalogFunctions();
     TestLoadAllowsSecondInitializationAfterUnload();
