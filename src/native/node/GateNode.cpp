@@ -2814,13 +2814,6 @@ bool GateNode::TryRegisterAuthenticatedClientSession(
         return false;
     }
 
-    if (const auto account_iterator = session_ids_by_account_.find(reservation.account);
-        account_iterator != session_ids_by_account_.end() &&
-        account_iterator->second != session.session_id())
-    {
-        ClearClientSessionRecord(account_iterator->second);
-    }
-
     ClearClientSessionRecord(session.session_id());
 
     const std::uint64_t now_unix_ms = CurrentUnixTimeMilliseconds();
