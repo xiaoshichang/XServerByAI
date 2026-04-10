@@ -6,9 +6,7 @@ namespace XServer.Managed.Framework.Entities
 {
     public abstract partial class ServerEntity
     {
-        private IServerStubCaller? _stubCaller;
-        private IProxyEntityCaller? _proxyEntityCaller;
-        private IClientMessageSender? _clientMessageSender;
+        private IServerEntityMessageSender? _messageSender;
         private INativeTimerScheduler? _nativeTimerScheduler;
 
         protected ServerEntity()
@@ -41,16 +39,46 @@ namespace XServer.Managed.Framework.Entities
                 return;
             }
 
-            if (_stubCaller == null)
+            if (_messageSender == null)
             {
                 LogCallStubError("Stub caller is not configured for this entity.");
                 return;
             }
 
-            _stubCaller.CallStub(this, targetStubType, new StubCallMessage(msgId, payload));
+            _messageSender.CallStub(this, targetStubType, new StubCallMessage(msgId, payload));
+        }
+
+        public void CallMailbox(MailboxAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)
+        {
+            if (targetAddress == null ||
+                targetAddress.EntityId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(targetAddress.TargetGameNodeId))
+            {
+                LogCallMailboxError("Mailbox address is invalid.");
+                return;
+            }
+
+            if (msgId == 0)
+            {
+                LogCallMailboxError("Mailbox call msgId must not be zero.");
+                return;
+            }
+
+            if (_messageSender == null)
+            {
+                LogCallMailboxError("Mailbox caller is not configured for this entity.");
+                return;
+            }
+
+            _messageSender.CallMailbox(this, targetAddress, new MailboxCallMessage(msgId, payload));
         }
 
         public void CallProxy(ProxyAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)
+        {
+            CallServerProxy(targetAddress, msgId, payload);
+        }
+
+        public void CallServerProxy(ProxyAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)
         {
             if (targetAddress == null ||
                 targetAddress.EntityId == Guid.Empty ||
@@ -66,28 +94,18 @@ namespace XServer.Managed.Framework.Entities
                 return;
             }
 
-            if (_proxyEntityCaller == null)
+            if (_messageSender == null)
             {
                 LogCallProxyError("Proxy caller is not configured for this entity.");
                 return;
             }
 
-            _proxyEntityCaller.CallProxy(this, targetAddress, new ProxyCallMessage(msgId, payload));
+            _messageSender.CallServerProxy(this, targetAddress, new ProxyCallMessage(msgId, payload));
         }
 
-        internal void SetStubCaller(IServerStubCaller? stubCaller)
+        internal void SetMessageSender(IServerEntityMessageSender? messageSender)
         {
-            _stubCaller = stubCaller;
-        }
-
-        internal void SetProxyEntityCaller(IProxyEntityCaller? proxyEntityCaller)
-        {
-            _proxyEntityCaller = proxyEntityCaller;
-        }
-
-        internal void SetClientMessageSender(IClientMessageSender? clientMessageSender)
-        {
-            _clientMessageSender = clientMessageSender;
+            _messageSender = messageSender;
         }
 
         internal void SetNativeTimerScheduler(INativeTimerScheduler? nativeTimerScheduler)
@@ -168,13 +186,13 @@ namespace XServer.Managed.Framework.Entities
                 return;
             }
 
-            if (_clientMessageSender == null)
+            if (_messageSender == null)
             {
                 LogPushToClientError("Client message sender is not configured for this entity.");
                 return;
             }
 
-            _clientMessageSender.PushToClient(this, targetAddress, new ProxyCallMessage(msgId, payload));
+            _messageSender.CallClient(this, targetAddress, new ProxyCallMessage(msgId, payload));
         }
 
         private void LogCallStubError(string message)
@@ -183,6 +201,11 @@ namespace XServer.Managed.Framework.Entities
         }
 
         private void LogCallProxyError(string message)
+        {
+            NativeLoggerBridge.Warn(EntityType, message);
+        }
+
+        private void LogCallMailboxError(string message)
         {
             NativeLoggerBridge.Warn(EntityType, message);
         }

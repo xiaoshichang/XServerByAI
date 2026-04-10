@@ -175,9 +175,9 @@ namespace XServer.Managed.Framework.Tests
         [Fact]
         public void GameNodeRuntimeState_CreatesAvatarEntity_RegistersProxyThroughOwnedOnlineStub()
         {
-            LoopbackMailboxCallTransport transport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game0", mailboxCallTransport: transport);
-            GameNodeRuntimeState avatarRuntime = new("Game3", mailboxCallTransport: transport);
+            LoopbackServerEntityMessageTransport transport = new();
+            GameNodeRuntimeState onlineRuntime = new("Game0", messageTransport: transport);
+            GameNodeRuntimeState avatarRuntime = new("Game3", messageTransport: transport);
             transport.Register(onlineRuntime);
             transport.Register(avatarRuntime);
 

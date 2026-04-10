@@ -23,9 +23,7 @@ namespace XServer.Managed.Framework.Interop
             PropertyNameCaseInsensitive = true,
         };
         private static ManagedNativeCallbacks s_nativeCallbacks;
-        private static ManagedNativeMailboxCallTransport? s_nativeMailboxCallTransport;
-        private static ManagedNativeProxyCallTransport? s_nativeProxyCallTransport;
-        private static ManagedNativeClientMessageTransport? s_nativeClientMessageTransport;
+        private static ManagedNativeServerEntityMessageTransport? s_nativeMessageTransport;
         private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
         private static GameNodeRuntimeState? s_runtimeState;
 
@@ -47,27 +45,21 @@ namespace XServer.Managed.Framework.Interop
             {
                 s_nativeCallbacks = args->NativeCallbacks;
                 NativeLoggerBridge.Configure(s_nativeCallbacks);
-                s_nativeMailboxCallTransport = ManagedNativeMailboxCallTransport.CreateOrNull(s_nativeCallbacks);
-                s_nativeProxyCallTransport = ManagedNativeProxyCallTransport.CreateOrNull(s_nativeCallbacks);
-                s_nativeClientMessageTransport = ManagedNativeClientMessageTransport.CreateOrNull(s_nativeCallbacks);
+                s_nativeMessageTransport = ManagedNativeServerEntityMessageTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeTimerScheduler = new ManagedNativeTimerScheduler(s_nativeCallbacks);
                 string nodeId = ReadUtf8(args->NodeIdUtf8, args->NodeIdLength);
                 _ = ReadUtf8(args->ConfigPathUtf8, args->ConfigPathLength);
                 s_runtimeState = new GameNodeRuntimeState(
                     nodeId,
                     NotifyNativeServerStubReady,
-                    s_nativeMailboxCallTransport,
-                    s_nativeProxyCallTransport,
-                    s_nativeClientMessageTransport,
+                    s_nativeMessageTransport,
                     nativeTimerScheduler: s_nativeTimerScheduler);
                 NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime initialized.");
                 return 0;
             }
             catch
             {
-                s_nativeMailboxCallTransport = null;
-                s_nativeProxyCallTransport = null;
-                s_nativeClientMessageTransport = null;
+                s_nativeMessageTransport = null;
                 s_nativeTimerScheduler?.Reset();
                 s_nativeTimerScheduler = null;
                 NativeLoggerBridge.Reset();

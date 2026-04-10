@@ -6,13 +6,11 @@ namespace XServer.Managed.Framework.Runtime
 {
     public delegate void ServerStubReadyCallback(ulong assignmentEpoch, ServerStubEntity stub);
 
-    public sealed class GameNodeRuntimeState : IServerStubCaller, IProxyEntityCaller, IClientMessageSender
+    public sealed class GameNodeRuntimeState : IServerEntityMessageSender
     {
         private readonly string _nodeId;
         private readonly ServerStubReadyCallback? _onServerStubReady;
-        private readonly IMailboxCallTransport? _mailboxCallTransport;
-        private readonly IProxyCallTransport? _proxyCallTransport;
-        private readonly IProxyCallTransport? _clientMessageTransport;
+        private readonly IServerEntityMessageTransport? _messageTransport;
         private readonly INativeTimerScheduler? _nativeTimerScheduler;
         private readonly EntityManager _entityManager = new();
         private readonly List<ServerStubEntity> _ownedServerStubs = [];
@@ -24,18 +22,14 @@ namespace XServer.Managed.Framework.Runtime
         public GameNodeRuntimeState(
             string nodeId,
             ServerStubReadyCallback? onServerStubReady = null,
-            IMailboxCallTransport? mailboxCallTransport = null,
-            IProxyCallTransport? proxyCallTransport = null,
-            IProxyCallTransport? clientMessageTransport = null,
+            IServerEntityMessageTransport? messageTransport = null,
             INativeTimerScheduler? nativeTimerScheduler = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(nodeId);
 
             _nodeId = nodeId;
             _onServerStubReady = onServerStubReady;
-            _mailboxCallTransport = mailboxCallTransport;
-            _proxyCallTransport = proxyCallTransport;
-            _clientMessageTransport = clientMessageTransport;
+            _messageTransport = messageTransport;
             _nativeTimerScheduler = nativeTimerScheduler;
         }
 
@@ -145,7 +139,7 @@ namespace XServer.Managed.Framework.Runtime
             return targetEntity.ReceiveProxyCall(message);
         }
 
-        void IServerStubCaller.CallStub(ServerEntity sourceEntity, string targetStubType, StubCallMessage message)
+        void IServerEntityMessageSender.CallStub(ServerEntity sourceEntity, string targetStubType, StubCallMessage message)
         {
             StubCallErrorCode result = DispatchStubCall(sourceEntity, targetStubType, message, out string failureMessage);
             if (result != StubCallErrorCode.None)
@@ -154,7 +148,16 @@ namespace XServer.Managed.Framework.Runtime
             }
         }
 
-        void IProxyEntityCaller.CallProxy(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
+        void IServerEntityMessageSender.CallMailbox(ServerEntity sourceEntity, MailboxAddress targetAddress, MailboxCallMessage message)
+        {
+            MailboxCallErrorCode result = DispatchMailboxCall(sourceEntity, targetAddress, message, out string failureMessage);
+            if (result != MailboxCallErrorCode.None)
+            {
+                LogMailboxCallFailure(sourceEntity, targetAddress, message.MsgId, failureMessage);
+            }
+        }
+
+        void IServerEntityMessageSender.CallServerProxy(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
         {
             if (sourceEntity == null ||
                 targetAddress == null ||
@@ -192,7 +195,7 @@ namespace XServer.Managed.Framework.Runtime
                 return;
             }
 
-            if (_proxyCallTransport == null)
+            if (_messageTransport == null)
             {
                 LogProxyCallFailure(
                     sourceEntity,
@@ -202,7 +205,7 @@ namespace XServer.Managed.Framework.Runtime
                 return;
             }
 
-            ProxyCallErrorCode remoteResult = _proxyCallTransport.Forward(targetAddress, message);
+            ProxyCallErrorCode remoteResult = _messageTransport.ForwardByServerProxy(targetAddress, message);
             if (remoteResult != ProxyCallErrorCode.None)
             {
                 LogProxyCallFailure(
@@ -213,7 +216,7 @@ namespace XServer.Managed.Framework.Runtime
             }
         }
 
-        void IClientMessageSender.PushToClient(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
+        void IServerEntityMessageSender.CallClient(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
         {
             if (sourceEntity == null ||
                 targetAddress == null ||
@@ -236,13 +239,13 @@ namespace XServer.Managed.Framework.Runtime
                 return;
             }
 
-            if (_clientMessageTransport == null)
+            if (_messageTransport == null)
             {
                 LogClientPushFailure(sourceEntity, targetAddress, message.MsgId, ProxyCallError.Message(ProxyCallErrorCode.TargetNodeUnavailable));
                 return;
             }
 
-            ProxyCallErrorCode result = _clientMessageTransport.Forward(targetAddress, message);
+            ProxyCallErrorCode result = _messageTransport.ForwardByClientProxy(targetAddress, message);
             if (result != ProxyCallErrorCode.None)
             {
                 LogClientPushFailure(
@@ -289,17 +292,13 @@ namespace XServer.Managed.Framework.Runtime
                 }
 
                 stub.SetReadyCallback(HandleServerStubReady);
-                stub.SetStubCaller(this);
-                stub.SetProxyEntityCaller(this);
-                stub.SetClientMessageSender(this);
+                stub.SetMessageSender(this);
                 stub.SetNativeTimerScheduler(_nativeTimerScheduler);
 
                 if (!stagedEntityIds.Add(stub.EntityId) || _entityManager.Contains(stub.EntityId))
                 {
                     stub.SetReadyCallback(null);
-                    stub.SetStubCaller(null);
-                    stub.SetProxyEntityCaller(null);
-                    stub.SetClientMessageSender(null);
+                    stub.SetMessageSender(null);
                     stub.SetNativeTimerScheduler(null);
                     stub.Destroy();
                     DestroyEntities(createdStubs);
@@ -408,17 +407,13 @@ namespace XServer.Managed.Framework.Runtime
                 request.AccountId,
                 request.AvatarName,
                 request.RouteGateNodeId);
-            createdAvatar.SetStubCaller(this);
-            createdAvatar.SetProxyEntityCaller(this);
-            createdAvatar.SetClientMessageSender(this);
+            createdAvatar.SetMessageSender(this);
             createdAvatar.SetNativeTimerScheduler(_nativeTimerScheduler);
 
             EntityManagerErrorCode registerResult = _entityManager.Register(createdAvatar);
             if (registerResult != EntityManagerErrorCode.None)
             {
-                createdAvatar.SetStubCaller(null);
-                createdAvatar.SetProxyEntityCaller(null);
-                createdAvatar.SetClientMessageSender(null);
+                createdAvatar.SetMessageSender(null);
                 createdAvatar.SetNativeTimerScheduler(null);
                 error = EntityManagerError.Message(registerResult);
                 return false;
@@ -436,9 +431,7 @@ namespace XServer.Managed.Framework.Runtime
             {
                 _ = _entityManager.Unregister(createdAvatar.EntityId);
                 createdAvatar.Destroy();
-                createdAvatar.SetStubCaller(null);
-                createdAvatar.SetProxyEntityCaller(null);
-                createdAvatar.SetClientMessageSender(null);
+                createdAvatar.SetMessageSender(null);
                 createdAvatar.SetNativeTimerScheduler(null);
                 error = registerError;
                 return false;
@@ -480,6 +473,67 @@ namespace XServer.Managed.Framework.Runtime
 
             error = string.Empty;
             return true;
+        }
+
+        private MailboxCallErrorCode DispatchMailboxCall(
+            ServerEntity sourceEntity,
+            MailboxAddress targetAddress,
+            MailboxCallMessage message,
+            out string failureMessage)
+        {
+            failureMessage = string.Empty;
+
+            if (sourceEntity == null ||
+                targetAddress == null ||
+                targetAddress.EntityId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(targetAddress.TargetGameNodeId))
+            {
+                failureMessage = "Mailbox call argument is invalid.";
+                return MailboxCallErrorCode.InvalidArgument;
+            }
+
+            if (message.MsgId == 0)
+            {
+                failureMessage = "Mailbox call msgId must not be zero.";
+                return MailboxCallErrorCode.InvalidMessageId;
+            }
+
+            if (!_entityManager.Contains(sourceEntity.EntityId))
+            {
+                failureMessage = "Source entity is not registered in runtime state.";
+                return MailboxCallErrorCode.InvalidArgument;
+            }
+
+            if (_entityManager.TryGet(targetAddress.EntityId, out ServerEntity? localTarget) && localTarget != null)
+            {
+                MailboxCallErrorCode localResult = localTarget.ReceiveMailboxCall(message);
+                if (localResult != MailboxCallErrorCode.None)
+                {
+                    failureMessage = $"Local delivery failed: {MailboxCallError.Message(localResult)}";
+                }
+
+                return localResult;
+            }
+
+            if (string.Equals(targetAddress.TargetGameNodeId, _nodeId, StringComparison.Ordinal))
+            {
+                failureMessage = "Target mailbox is owned by the local game node but no local instance is available.";
+                return MailboxCallErrorCode.UnknownTargetMailbox;
+            }
+
+            if (_messageTransport == null)
+            {
+                failureMessage = MailboxCallError.Message(MailboxCallErrorCode.TargetNodeUnavailable);
+                return MailboxCallErrorCode.TargetNodeUnavailable;
+            }
+
+            MailboxCallErrorCode remoteResult = _messageTransport.ForwardByMailbox(targetAddress, message);
+            if (remoteResult != MailboxCallErrorCode.None)
+            {
+                failureMessage = $"Remote delivery to {targetAddress.TargetGameNodeId} failed: {MailboxCallError.Message(remoteResult)}";
+            }
+
+            return remoteResult;
         }
 
         private StubCallErrorCode DispatchStubCall(
@@ -531,13 +585,13 @@ namespace XServer.Managed.Framework.Runtime
                 return StubCallErrorCode.UnknownTargetStub;
             }
 
-            if (_mailboxCallTransport == null)
+            if (_messageTransport == null)
             {
                 failureMessage = StubCallError.Message(StubCallErrorCode.TargetNodeUnavailable);
                 return StubCallErrorCode.TargetNodeUnavailable;
             }
 
-            MailboxCallErrorCode mailboxResult = _mailboxCallTransport.Forward(
+            MailboxCallErrorCode mailboxResult = _messageTransport.ForwardByStubType(
                 targetStubType,
                 new MailboxCallMessage(message.MsgId, message.Payload));
             StubCallErrorCode remoteResult = ToStubCallErrorCode(mailboxResult);
@@ -556,9 +610,7 @@ namespace XServer.Managed.Framework.Runtime
                 stub.SetReadyCallback(null);
                 _ = _entityManager.Unregister(stub.EntityId);
                 stub.Destroy();
-                stub.SetStubCaller(null);
-                stub.SetProxyEntityCaller(null);
-                stub.SetClientMessageSender(null);
+                stub.SetMessageSender(null);
                 stub.SetNativeTimerScheduler(null);
             }
 
@@ -593,9 +645,7 @@ namespace XServer.Managed.Framework.Runtime
             {
                 stub.SetReadyCallback(null);
                 stub.Destroy();
-                stub.SetStubCaller(null);
-                stub.SetProxyEntityCaller(null);
-                stub.SetClientMessageSender(null);
+                stub.SetMessageSender(null);
                 stub.SetNativeTimerScheduler(null);
             }
         }
@@ -645,6 +695,20 @@ namespace XServer.Managed.Framework.Runtime
             NativeLoggerBridge.Warn(
                 sourceEntityType,
                 $"CallStub target={resolvedTargetStubType} msgId={msgId} failed: {message}");
+        }
+
+        private static void LogMailboxCallFailure(
+            ServerEntity? sourceEntity,
+            MailboxAddress? targetAddress,
+            uint msgId,
+            string message)
+        {
+            string sourceEntityType = sourceEntity?.EntityType ?? "UnknownEntity";
+            string targetEntityId = targetAddress?.EntityId.ToString("D") ?? "<empty>";
+            string targetGameNodeId = targetAddress?.TargetGameNodeId ?? "<empty>";
+            NativeLoggerBridge.Warn(
+                sourceEntityType,
+                $"CallMailbox entityId={targetEntityId} targetGameNodeId={targetGameNodeId} msgId={msgId} failed: {message}");
         }
 
         private static void LogProxyCallFailure(
