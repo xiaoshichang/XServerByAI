@@ -55,6 +55,10 @@ namespace XServer.Managed.Framework.Entities
         {
             NativeLoggerBridge.Info(nameof(AvatarEntity), $"AvatarEntity {EntityId:D} received proxy call msgId={message.MsgId}.");
             _receivedProxyMessages.Add(new ReceivedProxyMessage(message.MsgId, message.Payload.ToArray()));
+            if (Proxy != null)
+            {
+                PushToClient(Proxy, message.MsgId, message.Payload);
+            }
             return ProxyCallErrorCode.None;
         }
 

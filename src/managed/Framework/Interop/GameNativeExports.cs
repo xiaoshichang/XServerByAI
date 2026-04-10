@@ -25,6 +25,7 @@ namespace XServer.Managed.Framework.Interop
         private static ManagedNativeCallbacks s_nativeCallbacks;
         private static ManagedNativeStubCallTransport? s_nativeStubCallTransport;
         private static ManagedNativeProxyCallTransport? s_nativeProxyCallTransport;
+        private static ManagedNativeClientMessageTransport? s_nativeClientMessageTransport;
         private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
         private static GameNodeRuntimeState? s_runtimeState;
 
@@ -48,6 +49,7 @@ namespace XServer.Managed.Framework.Interop
                 NativeLoggerBridge.Configure(s_nativeCallbacks);
                 s_nativeStubCallTransport = ManagedNativeStubCallTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeProxyCallTransport = ManagedNativeProxyCallTransport.CreateOrNull(s_nativeCallbacks);
+                s_nativeClientMessageTransport = ManagedNativeClientMessageTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeTimerScheduler = new ManagedNativeTimerScheduler(s_nativeCallbacks);
                 string nodeId = ReadUtf8(args->NodeIdUtf8, args->NodeIdLength);
                 _ = ReadUtf8(args->ConfigPathUtf8, args->ConfigPathLength);
@@ -56,6 +58,7 @@ namespace XServer.Managed.Framework.Interop
                     NotifyNativeServerStubReady,
                     s_nativeStubCallTransport,
                     s_nativeProxyCallTransport,
+                    s_nativeClientMessageTransport,
                     nativeTimerScheduler: s_nativeTimerScheduler);
                 NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime initialized.");
                 return 0;
@@ -64,6 +67,7 @@ namespace XServer.Managed.Framework.Interop
             {
                 s_nativeStubCallTransport = null;
                 s_nativeProxyCallTransport = null;
+                s_nativeClientMessageTransport = null;
                 s_nativeTimerScheduler?.Reset();
                 s_nativeTimerScheduler = null;
                 NativeLoggerBridge.Reset();

@@ -487,6 +487,46 @@ std::int32_t GameNode::HandleManagedForwardProxyCallCallback(
     return game_node->ForwardManagedProxyCall(route_gate_node_id, target_entity_id, msg_id, payload_view);
 }
 
+std::int32_t GameNode::HandleManagedPushClientMessageCallback(
+    void* context,
+    const std::uint8_t* route_gate_node_id_utf8,
+    std::uint32_t route_gate_node_id_length,
+    const std::uint8_t* target_entity_id_utf8,
+    std::uint32_t target_entity_id_length,
+    std::uint32_t msg_id,
+    const std::uint8_t* payload,
+    std::uint32_t payload_length)
+{
+    if (context == nullptr)
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    std::string_view route_gate_node_id;
+    std::string_view target_entity_id;
+    if (!TryReadManagedUtf8View(route_gate_node_id_utf8, route_gate_node_id_length, &route_gate_node_id) ||
+        !TryReadManagedUtf8View(target_entity_id_utf8, target_entity_id_length, &target_entity_id))
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    if (msg_id == 0U)
+    {
+        return kManagedNativeProxyCallInvalidMessageId;
+    }
+
+    if (payload == nullptr && payload_length != 0U)
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    const std::span<const std::byte> payload_view(
+        reinterpret_cast<const std::byte*>(payload),
+        static_cast<std::size_t>(payload_length));
+    auto* game_node = static_cast<GameNode*>(context);
+    return game_node->PushManagedClientMessage(route_gate_node_id, target_entity_id, msg_id, payload_view);
+}
+
 void GameNode::HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message)
 {
     const std::string_view resolved_category = category.empty() ? kManagedRuntimeLogCategory : category;
@@ -696,6 +736,82 @@ std::int32_t GameNode::ForwardManagedProxyCall(
     {
         gate_session->last_protocol_error = std::string(inner_network()->last_error_message());
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send forwarded proxy call to Gate.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    gate_session->last_protocol_error.clear();
+    return 0;
+}
+
+std::int32_t GameNode::PushManagedClientMessage(
+    std::string_view route_gate_node_id,
+    std::string_view target_entity_id,
+    std::uint32_t msg_id,
+    std::span<const std::byte> payload)
+{
+    if (route_gate_node_id.empty() || target_entity_id.empty() || msg_id == 0U || inner_network() == nullptr)
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    InnerNetworkSession* gate_session = remote_session(route_gate_node_id);
+    if (gate_session == nullptr ||
+        gate_session->process_type != xs::core::ProcessType::Gate ||
+        gate_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !gate_session->registered ||
+        !gate_session->inner_network_ready)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node cannot push client message because the route Gate is unavailable.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    const xs::net::RelayPushToClient relay_message{
+        .source_game_node_id = std::string(node_id()),
+        .route_gate_node_id = std::string(route_gate_node_id),
+        .target_entity_id = std::string(target_entity_id),
+        .client_msg_id = msg_id,
+        .relay_flags = 0u,
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    };
+
+    std::size_t wire_size = 0u;
+    const xs::net::RelayCodecErrorCode wire_size_result =
+        xs::net::GetRelayPushToClientWireSize(relay_message, &wire_size);
+    if (wire_size_result != xs::net::RelayCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(wire_size_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size push-to-client payload.");
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    std::vector<std::byte> relay_payload(wire_size);
+    const xs::net::RelayCodecErrorCode encode_result =
+        xs::net::EncodeRelayPushToClient(relay_message, relay_payload);
+    if (encode_result != xs::net::RelayCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(encode_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode push-to-client payload.");
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kRelayPushToClientMsgId, xs::net::kPacketSeqNone, 0U,
+                                  static_cast<std::uint32_t>(relay_payload.size()));
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + relay_payload.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, relay_payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap push-to-client payload into a packet.");
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(route_gate_node_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(inner_network()->last_error_message());
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send push-to-client packet to Gate.");
         return kManagedNativeCallbackTargetNodeUnavailable;
     }
 
@@ -997,6 +1113,7 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
         .cancel_timer = &GameNode::HandleManagedCancelTimerCallback,
         .forward_stub_call = &GameNode::HandleManagedForwardStubCallCallback,
         .forward_proxy_call = &GameNode::HandleManagedForwardProxyCallCallback,
+        .push_client_message = &GameNode::HandleManagedPushClientMessageCallback,
     };
     const xs::host::ManagedInitArgs init_args{
         .struct_size = sizeof(xs::host::ManagedInitArgs),

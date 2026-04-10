@@ -6,12 +6,13 @@ namespace XServer.Managed.Framework.Runtime
 {
     public delegate void ServerStubReadyCallback(ulong assignmentEpoch, ServerStubEntity stub);
 
-    public sealed class GameNodeRuntimeState : IServerStubCaller, IProxyEntityCaller
+    public sealed class GameNodeRuntimeState : IServerStubCaller, IProxyEntityCaller, IClientMessageSender
     {
         private readonly string _nodeId;
         private readonly ServerStubReadyCallback? _onServerStubReady;
         private readonly IStubCallTransport? _stubCallTransport;
         private readonly IProxyCallTransport? _proxyCallTransport;
+        private readonly IProxyCallTransport? _clientMessageTransport;
         private readonly INativeTimerScheduler? _nativeTimerScheduler;
         private readonly EntityManager _entityManager = new();
         private readonly List<ServerStubEntity> _ownedServerStubs = [];
@@ -25,6 +26,7 @@ namespace XServer.Managed.Framework.Runtime
             ServerStubReadyCallback? onServerStubReady = null,
             IStubCallTransport? stubCallTransport = null,
             IProxyCallTransport? proxyCallTransport = null,
+            IProxyCallTransport? clientMessageTransport = null,
             INativeTimerScheduler? nativeTimerScheduler = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(nodeId);
@@ -33,6 +35,7 @@ namespace XServer.Managed.Framework.Runtime
             _onServerStubReady = onServerStubReady;
             _stubCallTransport = stubCallTransport;
             _proxyCallTransport = proxyCallTransport;
+            _clientMessageTransport = clientMessageTransport;
             _nativeTimerScheduler = nativeTimerScheduler;
         }
 
@@ -165,6 +168,46 @@ namespace XServer.Managed.Framework.Runtime
             }
         }
 
+        void IClientMessageSender.PushToClient(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
+        {
+            if (sourceEntity == null ||
+                targetAddress == null ||
+                targetAddress.EntityId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(targetAddress.RouteGateNodeId))
+            {
+                LogClientPushFailure(sourceEntity, targetAddress, message.MsgId, "Client push argument is invalid.");
+                return;
+            }
+
+            if (message.MsgId == 0)
+            {
+                LogClientPushFailure(sourceEntity, targetAddress, message.MsgId, "Client push msgId must not be zero.");
+                return;
+            }
+
+            if (!_entityManager.Contains(sourceEntity.EntityId))
+            {
+                LogClientPushFailure(sourceEntity, targetAddress, message.MsgId, "Source entity is not registered in runtime state.");
+                return;
+            }
+
+            if (_clientMessageTransport == null)
+            {
+                LogClientPushFailure(sourceEntity, targetAddress, message.MsgId, ProxyCallError.Message(ProxyCallErrorCode.TargetNodeUnavailable));
+                return;
+            }
+
+            ProxyCallErrorCode result = _clientMessageTransport.Forward(targetAddress, message);
+            if (result != ProxyCallErrorCode.None)
+            {
+                LogClientPushFailure(
+                    sourceEntity,
+                    targetAddress,
+                    message.MsgId,
+                    $"Client delivery through {targetAddress.RouteGateNodeId} failed: {ProxyCallError.Message(result)}");
+            }
+        }
+
         public GameNodeRuntimeStateErrorCode ApplyOwnership(ServerStubOwnershipSnapshot snapshot)
         {
             if (snapshot == null)
@@ -203,6 +246,7 @@ namespace XServer.Managed.Framework.Runtime
                 stub.SetReadyCallback(HandleServerStubReady);
                 stub.SetStubCaller(this);
                 stub.SetProxyEntityCaller(this);
+                stub.SetClientMessageSender(this);
                 stub.SetNativeTimerScheduler(_nativeTimerScheduler);
 
                 if (!stagedEntityIds.Add(stub.EntityId) || _entityManager.Contains(stub.EntityId))
@@ -210,6 +254,7 @@ namespace XServer.Managed.Framework.Runtime
                     stub.SetReadyCallback(null);
                     stub.SetStubCaller(null);
                     stub.SetProxyEntityCaller(null);
+                    stub.SetClientMessageSender(null);
                     stub.SetNativeTimerScheduler(null);
                     stub.Destroy();
                     DestroyEntities(createdStubs);
@@ -320,6 +365,7 @@ namespace XServer.Managed.Framework.Runtime
                 request.RouteGateNodeId);
             createdAvatar.SetStubCaller(this);
             createdAvatar.SetProxyEntityCaller(this);
+            createdAvatar.SetClientMessageSender(this);
             createdAvatar.SetNativeTimerScheduler(_nativeTimerScheduler);
 
             EntityManagerErrorCode registerResult = _entityManager.Register(createdAvatar);
@@ -327,6 +373,7 @@ namespace XServer.Managed.Framework.Runtime
             {
                 createdAvatar.SetStubCaller(null);
                 createdAvatar.SetProxyEntityCaller(null);
+                createdAvatar.SetClientMessageSender(null);
                 createdAvatar.SetNativeTimerScheduler(null);
                 error = EntityManagerError.Message(registerResult);
                 return false;
@@ -346,6 +393,7 @@ namespace XServer.Managed.Framework.Runtime
                 createdAvatar.Destroy();
                 createdAvatar.SetStubCaller(null);
                 createdAvatar.SetProxyEntityCaller(null);
+                createdAvatar.SetClientMessageSender(null);
                 createdAvatar.SetNativeTimerScheduler(null);
                 error = registerError;
                 return false;
@@ -465,6 +513,7 @@ namespace XServer.Managed.Framework.Runtime
                 stub.Destroy();
                 stub.SetStubCaller(null);
                 stub.SetProxyEntityCaller(null);
+                stub.SetClientMessageSender(null);
                 stub.SetNativeTimerScheduler(null);
             }
 
@@ -501,6 +550,7 @@ namespace XServer.Managed.Framework.Runtime
                 stub.Destroy();
                 stub.SetStubCaller(null);
                 stub.SetProxyEntityCaller(null);
+                stub.SetClientMessageSender(null);
                 stub.SetNativeTimerScheduler(null);
             }
         }
@@ -550,6 +600,20 @@ namespace XServer.Managed.Framework.Runtime
             NativeLoggerBridge.Warn(
                 sourceEntityType,
                 $"CallProxy entityId={targetEntityId} routeGateNodeId={routeGateNodeId} msgId={msgId} failed: {message}");
+        }
+
+        private static void LogClientPushFailure(
+            ServerEntity? sourceEntity,
+            ProxyAddress? targetAddress,
+            uint msgId,
+            string message)
+        {
+            string sourceEntityType = sourceEntity?.EntityType ?? "UnknownEntity";
+            string targetEntityId = targetAddress?.EntityId.ToString("D") ?? "<empty>";
+            string routeGateNodeId = targetAddress?.RouteGateNodeId ?? "<empty>";
+            NativeLoggerBridge.Warn(
+                sourceEntityType,
+                $"PushToClient entityId={targetEntityId} routeGateNodeId={routeGateNodeId} msgId={msgId} failed: {message}");
         }
     }
 }

@@ -106,6 +106,15 @@ class GameNode final : public ServerNode
         std::uint32_t msg_id,
         const std::uint8_t* payload,
         std::uint32_t payload_length);
+    static std::int32_t HandleManagedPushClientMessageCallback(
+        void* context,
+        const std::uint8_t* route_gate_node_id_utf8,
+        std::uint32_t route_gate_node_id_length,
+        const std::uint8_t* target_entity_id_utf8,
+        std::uint32_t target_entity_id_length,
+        std::uint32_t msg_id,
+        const std::uint8_t* payload,
+        std::uint32_t payload_length);
     void HandleManagedServerStubReady(std::uint64_t assignment_epoch, xs::host::ManagedServerStubReadyEntry entry);
     void HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message);
     [[nodiscard]] std::int64_t CreateManagedOnceTimer(std::uint64_t delay_ms);
@@ -116,6 +125,11 @@ class GameNode final : public ServerNode
         std::uint32_t msg_id,
         std::span<const std::byte> payload);
     [[nodiscard]] std::int32_t ForwardManagedProxyCall(
+        std::string_view route_gate_node_id,
+        std::string_view target_entity_id,
+        std::uint32_t msg_id,
+        std::span<const std::byte> payload);
+    [[nodiscard]] std::int32_t PushManagedClientMessage(
         std::string_view route_gate_node_id,
         std::string_view target_entity_id,
         std::uint32_t msg_id,

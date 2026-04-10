@@ -11,7 +11,12 @@ namespace XServer.Managed.Framework.Tests
         {
             LoopbackStubCallTransport stubTransport = new();
             LoopbackProxyCallTransport proxyTransport = new();
-            GameNodeRuntimeState runtimeState = new("Game0", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport);
+            RecordingClientMessageTransport clientTransport = new();
+            GameNodeRuntimeState runtimeState = new(
+                "Game0",
+                stubCallTransport: stubTransport,
+                proxyCallTransport: proxyTransport,
+                clientMessageTransport: clientTransport);
             stubTransport.Register(runtimeState);
             proxyTransport.Register(runtimeState);
 
@@ -40,6 +45,9 @@ namespace XServer.Managed.Framework.Tests
             sourceAvatar!.CallProxy(targetAvatar!.Proxy!, OnlineStub.BroadcastOnlineAvatarProxyMsgId, payload);
 
             Assert.Equal(0, proxyTransport.ForwardCallCount);
+            Assert.Equal(1, clientTransport.ForwardCallCount);
+            Assert.Equal(targetAvatar.EntityId, clientTransport.LastTargetEntityId);
+            Assert.Equal("Gate0", clientTransport.LastRouteGateNodeId);
             Assert.Collection(
                 targetAvatar.ReceivedProxyMessages,
                 received =>
@@ -54,9 +62,10 @@ namespace XServer.Managed.Framework.Tests
         {
             LoopbackStubCallTransport stubTransport = new();
             LoopbackProxyCallTransport proxyTransport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game9", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport);
-            GameNodeRuntimeState sourceRuntime = new("Game0", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport);
-            GameNodeRuntimeState targetRuntime = new("Game1", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport);
+            RecordingClientMessageTransport clientTransport = new();
+            GameNodeRuntimeState onlineRuntime = new("Game9", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState sourceRuntime = new("Game0", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState targetRuntime = new("Game1", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
             stubTransport.Register(onlineRuntime);
             stubTransport.Register(sourceRuntime);
             stubTransport.Register(targetRuntime);
@@ -93,6 +102,9 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(1, proxyTransport.ForwardCallCount);
             Assert.Equal(targetAvatar.EntityId, proxyTransport.LastTargetEntityId);
             Assert.Equal("Gate9", proxyTransport.LastRouteGateNodeId);
+            Assert.Equal(1, clientTransport.ForwardCallCount);
+            Assert.Equal(targetAvatar.EntityId, clientTransport.LastTargetEntityId);
+            Assert.Equal("Gate9", clientTransport.LastRouteGateNodeId);
             Assert.Collection(
                 targetAvatar.ReceivedProxyMessages,
                 received =>
@@ -107,8 +119,9 @@ namespace XServer.Managed.Framework.Tests
         {
             LoopbackStubCallTransport stubTransport = new();
             LoopbackProxyCallTransport proxyTransport = new();
-            GameNodeRuntimeState onlineRuntime = new("Game0", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport);
-            GameNodeRuntimeState remoteRuntime = new("Game1", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport);
+            RecordingClientMessageTransport clientTransport = new();
+            GameNodeRuntimeState onlineRuntime = new("Game0", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
+            GameNodeRuntimeState remoteRuntime = new("Game1", stubCallTransport: stubTransport, proxyCallTransport: proxyTransport, clientMessageTransport: clientTransport);
             stubTransport.Register(onlineRuntime);
             stubTransport.Register(remoteRuntime);
             proxyTransport.Register(onlineRuntime);
@@ -141,6 +154,7 @@ namespace XServer.Managed.Framework.Tests
 
             Assert.Equal(StubCallErrorCode.None, result);
             Assert.Equal(1, proxyTransport.ForwardCallCount);
+            Assert.Equal(2, clientTransport.ForwardCallCount);
             Assert.Collection(
                 localAvatar!.ReceivedProxyMessages,
                 received =>
@@ -193,6 +207,28 @@ namespace XServer.Managed.Framework.Tests
             }
 
             return ProxyCallErrorCode.UnknownTargetEntity;
+        }
+    }
+
+    internal sealed class RecordingClientMessageTransport : IProxyCallTransport
+    {
+        public int ForwardCallCount { get; private set; }
+
+        public Guid LastTargetEntityId { get; private set; }
+
+        public string? LastRouteGateNodeId { get; private set; }
+
+        public ProxyCallMessage? LastMessage { get; private set; }
+
+        public ProxyCallErrorCode Forward(
+            ProxyAddress targetAddress,
+            ProxyCallMessage message)
+        {
+            ForwardCallCount++;
+            LastTargetEntityId = targetAddress.EntityId;
+            LastRouteGateNodeId = targetAddress.RouteGateNodeId;
+            LastMessage = message;
+            return ProxyCallErrorCode.None;
         }
     }
 }

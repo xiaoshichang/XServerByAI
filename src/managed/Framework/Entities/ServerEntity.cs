@@ -8,6 +8,7 @@ namespace XServer.Managed.Framework.Entities
     {
         private IServerStubCaller? _stubCaller;
         private IProxyEntityCaller? _proxyEntityCaller;
+        private IClientMessageSender? _clientMessageSender;
         private INativeTimerScheduler? _nativeTimerScheduler;
 
         protected ServerEntity()
@@ -84,6 +85,11 @@ namespace XServer.Managed.Framework.Entities
             _proxyEntityCaller = proxyEntityCaller;
         }
 
+        internal void SetClientMessageSender(IClientMessageSender? clientMessageSender)
+        {
+            _clientMessageSender = clientMessageSender;
+        }
+
         internal void SetNativeTimerScheduler(INativeTimerScheduler? nativeTimerScheduler)
         {
             _nativeTimerScheduler = nativeTimerScheduler;
@@ -125,12 +131,42 @@ namespace XServer.Managed.Framework.Entities
             return ProxyCallErrorCode.EntityRejected;
         }
 
+        protected void PushToClient(ProxyAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)
+        {
+            if (targetAddress == null ||
+                targetAddress.EntityId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(targetAddress.RouteGateNodeId))
+            {
+                LogPushToClientError("Client target address is invalid.");
+                return;
+            }
+
+            if (msgId == 0)
+            {
+                LogPushToClientError("Client push msgId must not be zero.");
+                return;
+            }
+
+            if (_clientMessageSender == null)
+            {
+                LogPushToClientError("Client message sender is not configured for this entity.");
+                return;
+            }
+
+            _clientMessageSender.PushToClient(this, targetAddress, new ProxyCallMessage(msgId, payload));
+        }
+
         private void LogCallStubError(string message)
         {
             NativeLoggerBridge.Warn(EntityType, message);
         }
 
         private void LogCallProxyError(string message)
+        {
+            NativeLoggerBridge.Warn(EntityType, message);
+        }
+
+        private void LogPushToClientError(string message)
         {
             NativeLoggerBridge.Warn(EntityType, message);
         }

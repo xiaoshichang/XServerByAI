@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -13,7 +13,7 @@
 namespace xs::host
 {
 
-inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 8;
+inline constexpr std::uint32_t XS_MANAGED_ABI_VERSION = 9;
 inline constexpr std::string_view kManagedExportsTypeName =
     "XServer.Managed.Framework.Interop.GameNativeExports, XServer.Managed.Framework";
 inline constexpr std::string_view kManagedGameGetAbiVersionMethodName = "GameNativeGetAbiVersion";
@@ -72,6 +72,15 @@ using ManagedForwardProxyCallCallbackFn =
                                        std::uint32_t msg_id,
                                        const std::uint8_t* payload,
                                        std::uint32_t payload_length);
+using ManagedPushClientMessageCallbackFn =
+    std::int32_t(XS_MANAGED_CALLTYPE*)(void* context,
+                                       const std::uint8_t* route_gate_node_id_utf8,
+                                       std::uint32_t route_gate_node_id_length,
+                                       const std::uint8_t* target_entity_id_utf8,
+                                       std::uint32_t target_entity_id_length,
+                                       std::uint32_t msg_id,
+                                       const std::uint8_t* payload,
+                                       std::uint32_t payload_length);
 
 struct ManagedNativeCallbacks
 {
@@ -84,6 +93,7 @@ struct ManagedNativeCallbacks
     ManagedCancelTimerCallbackFn cancel_timer{nullptr};
     ManagedForwardStubCallCallbackFn forward_stub_call{nullptr};
     ManagedForwardProxyCallCallbackFn forward_proxy_call{nullptr};
+    ManagedPushClientMessageCallbackFn push_client_message{nullptr};
 };
 
 struct ManagedInitArgs

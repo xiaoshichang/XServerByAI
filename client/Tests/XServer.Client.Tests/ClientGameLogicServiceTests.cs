@@ -81,6 +81,26 @@ public sealed class ClientGameLogicServiceTests
         Assert.Equal(-3.0f, state.Avatar.PositionZ);
     }
 
+    [Fact]
+    public void TryHandleControlPacketFormatsBoardcaseBroadcast()
+    {
+        ClientRuntimeState state = new();
+        ClientGameLogicService service = new();
+        byte[] payload = "hello"u8.ToArray();
+
+        PacketView packet = new(
+            PacketCodec.CreateHeader(
+                ClientGameLogicService.BroadcastMessageMsgId,
+                0U,
+                PacketFlags.None,
+                checked((uint)payload.Length)),
+            payload);
+
+        string? message = service.TryHandleControlPacket(state, packet);
+
+        Assert.Equal("boardcase received: hello", message);
+    }
+
     private static ClientRuntimeState CreateReadyAvatarState()
     {
         ClientRuntimeState state = new();

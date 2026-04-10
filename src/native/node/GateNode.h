@@ -86,6 +86,9 @@ class GateNode final : public ServerNode
     void HandleGameAvatarEntityCreateResultMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);
+    void HandleGamePushToClientMessage(
+        std::span<const std::byte> routing_id,
+        std::span<const std::byte> payload);
     void HandleGameForwardProxyCallMessage(
         std::span<const std::byte> routing_id,
         std::span<const std::byte> payload);

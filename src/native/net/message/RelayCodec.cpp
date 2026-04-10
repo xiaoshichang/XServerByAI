@@ -156,6 +156,37 @@ namespace
     return RelayCodecErrorCode::None;
 }
 
+[[nodiscard]] RelayCodecErrorCode ValidateRelayPushToClient(
+    const RelayPushToClient& message) noexcept
+{
+    if (message.source_game_node_id.empty())
+    {
+        return RelayCodecErrorCode::InvalidSourceGameNodeId;
+    }
+
+    if (message.route_gate_node_id.empty())
+    {
+        return RelayCodecErrorCode::InvalidRouteGateNodeId;
+    }
+
+    if (!IsCanonicalGuidText(message.target_entity_id))
+    {
+        return RelayCodecErrorCode::InvalidTargetEntityId;
+    }
+
+    if (message.client_msg_id == 0u)
+    {
+        return RelayCodecErrorCode::InvalidMessageId;
+    }
+
+    if (message.relay_flags != 0u)
+    {
+        return RelayCodecErrorCode::InvalidRelayFlags;
+    }
+
+    return RelayCodecErrorCode::None;
+}
+
 [[nodiscard]] RelayCodecErrorCode CheckTrailingBytes(const BinaryReader& reader) noexcept
 {
     if (reader.remaining() != 0u)
@@ -419,6 +450,123 @@ RelayCodecErrorCode DecodeRelayForwardProxyCall(
     }
 
     const RelayCodecErrorCode validation_result = ValidateRelayForwardProxyCall(parsed_message);
+    if (validation_result != RelayCodecErrorCode::None)
+    {
+        return validation_result;
+    }
+
+    const RelayCodecErrorCode trailing_result = CheckTrailingBytes(reader);
+    if (trailing_result != RelayCodecErrorCode::None)
+    {
+        return trailing_result;
+    }
+
+    parsed_message.payload.assign(payload.begin(), payload.end());
+    *message = std::move(parsed_message);
+    return RelayCodecErrorCode::None;
+}
+
+RelayCodecErrorCode GetRelayPushToClientWireSize(
+    const RelayPushToClient& message,
+    std::size_t* wire_size) noexcept
+{
+    if (wire_size == nullptr)
+    {
+        return RelayCodecErrorCode::InvalidArgument;
+    }
+
+    *wire_size = 0u;
+    const RelayCodecErrorCode validation_result = ValidateRelayPushToClient(message);
+    if (validation_result != RelayCodecErrorCode::None)
+    {
+        return validation_result;
+    }
+
+    std::size_t field_size = 0u;
+    RelayCodecErrorCode result = GetString16WireSize(message.source_game_node_id, &field_size);
+    if (result != RelayCodecErrorCode::None ||
+        (result = AddWireSize(field_size, wire_size)) != RelayCodecErrorCode::None)
+    {
+        return result;
+    }
+
+    result = GetString16WireSize(message.route_gate_node_id, &field_size);
+    if (result != RelayCodecErrorCode::None ||
+        (result = AddWireSize(field_size, wire_size)) != RelayCodecErrorCode::None)
+    {
+        return result;
+    }
+
+    result = GetString16WireSize(message.target_entity_id, &field_size);
+    if (result != RelayCodecErrorCode::None ||
+        (result = AddWireSize(field_size, wire_size)) != RelayCodecErrorCode::None)
+    {
+        return result;
+    }
+
+    if (message.payload.size() > static_cast<std::size_t>(std::numeric_limits<std::uint32_t>::max()))
+    {
+        return RelayCodecErrorCode::LengthOverflow;
+    }
+
+    result = AddWireSize(sizeof(std::uint32_t) * 3u + message.payload.size(), wire_size);
+    if (result != RelayCodecErrorCode::None)
+    {
+        return result;
+    }
+
+    return RelayCodecErrorCode::None;
+}
+
+RelayCodecErrorCode EncodeRelayPushToClient(
+    const RelayPushToClient& message,
+    std::span<std::byte> buffer) noexcept
+{
+    const RelayCodecErrorCode validation_result = ValidateRelayPushToClient(message);
+    if (validation_result != RelayCodecErrorCode::None)
+    {
+        return validation_result;
+    }
+
+    BinaryWriter writer(buffer);
+    if (!writer.WriteString16(message.source_game_node_id) ||
+        !writer.WriteString16(message.route_gate_node_id) ||
+        !writer.WriteString16(message.target_entity_id) ||
+        !writer.WriteUInt32(message.client_msg_id) ||
+        !writer.WriteUInt32(message.relay_flags) ||
+        !writer.WriteLengthPrefixedBytes32(message.payload))
+    {
+        return MapSerializationError(writer.error());
+    }
+
+    return RelayCodecErrorCode::None;
+}
+
+RelayCodecErrorCode DecodeRelayPushToClient(
+    std::span<const std::byte> buffer,
+    RelayPushToClient* message) noexcept
+{
+    if (message == nullptr)
+    {
+        return RelayCodecErrorCode::InvalidArgument;
+    }
+
+    *message = {};
+
+    BinaryReader reader(buffer);
+    RelayPushToClient parsed_message{};
+    std::span<const std::byte> payload{};
+    if (!reader.ReadString16(&parsed_message.source_game_node_id) ||
+        !reader.ReadString16(&parsed_message.route_gate_node_id) ||
+        !reader.ReadString16(&parsed_message.target_entity_id) ||
+        !reader.ReadUInt32(&parsed_message.client_msg_id) ||
+        !reader.ReadUInt32(&parsed_message.relay_flags) ||
+        !reader.ReadLengthPrefixedBytes32(&payload))
+    {
+        return MapSerializationError(reader.error());
+    }
+
+    const RelayCodecErrorCode validation_result = ValidateRelayPushToClient(parsed_message);
     if (validation_result != RelayCodecErrorCode::None)
     {
         return validation_result;

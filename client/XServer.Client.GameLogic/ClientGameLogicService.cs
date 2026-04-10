@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
@@ -9,6 +10,7 @@ public sealed class ClientGameLogicService
     public const uint DefaultMoveMsgId = 45011U;
     public const uint DefaultBuyWeaponMsgId = 45012U;
     public const uint DefaultSelectAvatarMsgId = 45013U;
+    public const uint BroadcastMessageMsgId = 6201U;
 
     private static readonly JsonSerializerOptions ControlJsonOptions = new()
     {
@@ -148,6 +150,11 @@ public sealed class ClientGameLogicService
     {
         ArgumentNullException.ThrowIfNull(state);
 
+        if (packet.Header.MsgId == BroadcastMessageMsgId)
+        {
+            return TryHandleBroadcastPacket(packet);
+        }
+
         if (packet.Header.MsgId != DefaultSelectAvatarMsgId ||
             (packet.Header.Flags & PacketFlags.Response) == PacketFlags.None)
         {
@@ -189,6 +196,24 @@ public sealed class ClientGameLogicService
 
         return
             $"selectAvatar confirmed account={response.AccountId} avatarId={response.AvatarId} avatarName={response.AvatarName ?? response.AvatarId} game={response.GameNodeId ?? "<unknown>"} sessionId={response.SessionId}";
+    }
+
+    private static string TryHandleBroadcastPacket(PacketView packet)
+    {
+        if (packet.Payload.IsEmpty)
+        {
+            return "boardcase received: <empty>";
+        }
+
+        try
+        {
+            string text = Encoding.UTF8.GetString(packet.Payload.Span);
+            return $"boardcase received: {text}";
+        }
+        catch (DecoderFallbackException)
+        {
+            return $"boardcase received: payloadBytes={packet.Payload.Length}";
+        }
     }
 
     private static void EnsureAccountReady(ClientRuntimeState state)

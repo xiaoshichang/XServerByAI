@@ -53,6 +53,16 @@ struct RelayForwardProxyCall
     std::vector<std::byte> payload{};
 };
 
+struct RelayPushToClient
+{
+    std::string source_game_node_id{};
+    std::string route_gate_node_id{};
+    std::string target_entity_id{};
+    std::uint32_t client_msg_id{0u};
+    std::uint32_t relay_flags{0u};
+    std::vector<std::byte> payload{};
+};
+
 [[nodiscard]] RelayCodecErrorCode GetRelayForwardStubCallWireSize(
     const RelayForwardStubCall& message,
     std::size_t* wire_size) noexcept;
@@ -72,5 +82,15 @@ struct RelayForwardProxyCall
 [[nodiscard]] RelayCodecErrorCode DecodeRelayForwardProxyCall(
     std::span<const std::byte> buffer,
     RelayForwardProxyCall* message) noexcept;
+
+[[nodiscard]] RelayCodecErrorCode GetRelayPushToClientWireSize(
+    const RelayPushToClient& message,
+    std::size_t* wire_size) noexcept;
+[[nodiscard]] RelayCodecErrorCode EncodeRelayPushToClient(
+    const RelayPushToClient& message,
+    std::span<std::byte> buffer) noexcept;
+[[nodiscard]] RelayCodecErrorCode DecodeRelayPushToClient(
+    std::span<const std::byte> buffer,
+    RelayPushToClient* message) noexcept;
 
 } // namespace xs::net
