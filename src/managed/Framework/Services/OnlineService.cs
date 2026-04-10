@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using XServer.Managed.Framework.Interop;
 using XServer.Managed.Framework.Runtime;
 
@@ -13,81 +14,127 @@ namespace XServer.Managed.Framework.Entities
         ulong SessionId,
         string GateNodeId,
         string GameNodeId,
-        string DisplayName);
+        string DisplayName,
+        ProxyAddress Proxy);
 
-    public sealed class OnlineStub : ServerStubEntity
+    internal static class OnlineAvatarRegistrationPayloadCodec
     {
-        private const string StartupTargetStubType = "MatchStub";
-        private const uint StartupCallMsgId = 5101u;
-        private static readonly object AvatarRegistrySync = new();
-        private static readonly Dictionary<Guid, OnlineAvatarRegistration> RegisteredAvatars = [];
-        private long _startupTimerId;
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
 
-        public static bool TryRegisterAvatar(OnlineAvatarRegistration registration, out string error)
+        public static byte[] Encode(OnlineAvatarRegistration registration)
         {
             if (string.IsNullOrWhiteSpace(registration.AccountId) ||
                 registration.EntityId == Guid.Empty ||
                 registration.SessionId == 0 ||
                 string.IsNullOrWhiteSpace(registration.GateNodeId) ||
-                string.IsNullOrWhiteSpace(registration.GameNodeId))
+                string.IsNullOrWhiteSpace(registration.GameNodeId) ||
+                string.IsNullOrWhiteSpace(registration.DisplayName) ||
+                registration.Proxy == null ||
+                registration.Proxy.EntityId != registration.EntityId ||
+                string.IsNullOrWhiteSpace(registration.Proxy.RouteGateNodeId))
             {
-                error = "Online avatar registration is incomplete.";
+                throw new ArgumentException("Online avatar registration is incomplete.", nameof(registration));
+            }
+
+            OnlineAvatarRegistrationPayload payload = new()
+            {
+                AccountId = registration.AccountId,
+                EntityId = registration.EntityId.ToString("D"),
+                SessionId = registration.SessionId,
+                GateNodeId = registration.GateNodeId,
+                GameNodeId = registration.GameNodeId,
+                DisplayName = registration.DisplayName,
+                ProxyEntityId = registration.Proxy.EntityId.ToString("D"),
+                ProxyRouteGateNodeId = registration.Proxy.RouteGateNodeId,
+            };
+            return JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
+        }
+
+        public static bool TryDecode(ReadOnlyMemory<byte> payload, out OnlineAvatarRegistration registration)
+        {
+            registration = default;
+            if (payload.IsEmpty)
+            {
                 return false;
             }
 
-            lock (AvatarRegistrySync)
+            OnlineAvatarRegistrationPayload? decoded = JsonSerializer.Deserialize<OnlineAvatarRegistrationPayload>(payload.Span, JsonOptions);
+            if (decoded == null ||
+                string.IsNullOrWhiteSpace(decoded.AccountId) ||
+                string.IsNullOrWhiteSpace(decoded.EntityId) ||
+                decoded.SessionId == 0 ||
+                string.IsNullOrWhiteSpace(decoded.GateNodeId) ||
+                string.IsNullOrWhiteSpace(decoded.GameNodeId) ||
+                string.IsNullOrWhiteSpace(decoded.DisplayName) ||
+                string.IsNullOrWhiteSpace(decoded.ProxyEntityId) ||
+                string.IsNullOrWhiteSpace(decoded.ProxyRouteGateNodeId) ||
+                !Guid.TryParse(decoded.EntityId, out Guid entityId) ||
+                entityId == Guid.Empty ||
+                !Guid.TryParse(decoded.ProxyEntityId, out Guid proxyEntityId) ||
+                proxyEntityId != entityId)
             {
-                if (RegisteredAvatars.TryGetValue(registration.EntityId, out OnlineAvatarRegistration existing))
-                {
-                    bool sameRegistration =
-                        existing.EntityId == registration.EntityId &&
-                        existing.SessionId == registration.SessionId &&
-                        string.Equals(existing.AccountId, registration.AccountId, StringComparison.Ordinal) &&
-                        string.Equals(existing.GateNodeId, registration.GateNodeId, StringComparison.Ordinal) &&
-                        string.Equals(existing.GameNodeId, registration.GameNodeId, StringComparison.Ordinal);
-                    if (!sameRegistration)
-                    {
-                        error = $"Avatar entity '{registration.EntityId:D}' is already registered online.";
-                        return false;
-                    }
-                }
-
-                RegisteredAvatars[registration.EntityId] = registration;
+                return false;
             }
 
-            error = string.Empty;
+            registration = new OnlineAvatarRegistration(
+                decoded.AccountId,
+                entityId,
+                decoded.SessionId,
+                decoded.GateNodeId,
+                decoded.GameNodeId,
+                decoded.DisplayName,
+                new ProxyAddress(proxyEntityId, decoded.ProxyRouteGateNodeId));
             return true;
         }
 
-        public static bool TryGetRegisteredAvatar(Guid entityId, out OnlineAvatarRegistration registration)
+        private sealed class OnlineAvatarRegistrationPayload
+        {
+            public string? AccountId { get; init; }
+
+            public string? EntityId { get; init; }
+
+            public ulong SessionId { get; init; }
+
+            public string? GateNodeId { get; init; }
+
+            public string? GameNodeId { get; init; }
+
+            public string? DisplayName { get; init; }
+
+            public string? ProxyEntityId { get; init; }
+
+            public string? ProxyRouteGateNodeId { get; init; }
+        }
+    }
+
+    public sealed class OnlineStub : ServerStubEntity
+    {
+        private const string StartupTargetStubType = "MatchStub";
+        private const uint StartupCallMsgId = 5101u;
+        public const uint RegisterOnlineAvatarMessageStubMsgId = 5200u;
+        public const uint BroadcastOnlineAvatarMessageStubMsgId = 5201u;
+        public const uint BroadcastOnlineAvatarProxyMsgId = 6201u;
+        private readonly Dictionary<Guid, OnlineAvatarRegistration> _registeredAvatars = [];
+        private long _startupTimerId;
+
+        public bool TryGetRegisteredAvatar(Guid entityId, out OnlineAvatarRegistration registration)
         {
             if (entityId == Guid.Empty)
             {
                 throw new ArgumentException("Avatar entityId must not be empty.", nameof(entityId));
             }
 
-            lock (AvatarRegistrySync)
-            {
-                return RegisteredAvatars.TryGetValue(entityId, out registration);
-            }
+            return _registeredAvatars.TryGetValue(entityId, out registration);
         }
 
-        public static IReadOnlyList<OnlineAvatarRegistration> SnapshotRegisteredAvatars()
+        public IReadOnlyList<OnlineAvatarRegistration> SnapshotRegisteredAvatars()
         {
-            lock (AvatarRegistrySync)
-            {
-                return RegisteredAvatars.Values
-                    .OrderBy(static entry => entry.EntityId)
-                    .ToArray();
-            }
-        }
-
-        public static void ClearRegisteredAvatars()
-        {
-            lock (AvatarRegistrySync)
-            {
-                RegisteredAvatars.Clear();
-            }
+            return _registeredAvatars.Values
+                .OrderBy(static entry => entry.EntityId)
+                .ToArray();
         }
 
         protected override void OnReady()
@@ -113,6 +160,59 @@ namespace XServer.Managed.Framework.Entities
                 _ = CancelNativeTimer(_startupTimerId);
                 _startupTimerId = 0;
             }
+        }
+
+        protected override StubCallErrorCode OnStubCall(StubCallMessage message)
+        {
+            if (message.MsgId == RegisterOnlineAvatarMessageStubMsgId)
+            {
+                return HandleRegisterOnlineAvatar(message);
+            }
+
+            if (message.MsgId == BroadcastOnlineAvatarMessageStubMsgId)
+            {
+                return HandleBroadcastOnlineAvatar(message);
+            }
+
+            return base.OnStubCall(message);
+        }
+
+        private StubCallErrorCode HandleRegisterOnlineAvatar(StubCallMessage message)
+        {
+            if (!OnlineAvatarRegistrationPayloadCodec.TryDecode(message.Payload, out OnlineAvatarRegistration registration))
+            {
+                NativeLoggerBridge.Warn(nameof(OnlineStub), "OnlineStub rejected an invalid avatar registration payload.");
+                return StubCallErrorCode.InvalidArgument;
+            }
+
+            if (_registeredAvatars.TryGetValue(registration.EntityId, out OnlineAvatarRegistration existing) &&
+                !string.Equals(existing.AccountId, registration.AccountId, StringComparison.Ordinal))
+            {
+                NativeLoggerBridge.Warn(
+                    nameof(OnlineStub),
+                    $"OnlineStub rejected avatar registration because entityId={registration.EntityId:D} is already bound to another account.");
+                return StubCallErrorCode.StubRejected;
+            }
+
+            _registeredAvatars[registration.EntityId] = registration;
+            NativeLoggerBridge.Info(
+                nameof(OnlineStub),
+                $"OnlineStub registered avatar entityId={registration.EntityId:D} routeGateNodeId={registration.Proxy.RouteGateNodeId} gameNodeId={registration.GameNodeId}.");
+            return StubCallErrorCode.None;
+        }
+
+        private StubCallErrorCode HandleBroadcastOnlineAvatar(StubCallMessage message)
+        {
+            IReadOnlyList<OnlineAvatarRegistration> registrations = SnapshotRegisteredAvatars();
+            foreach (OnlineAvatarRegistration registration in registrations)
+            {
+                CallProxy(registration.Proxy, BroadcastOnlineAvatarProxyMsgId, message.Payload);
+            }
+
+            NativeLoggerBridge.Info(
+                nameof(OnlineStub),
+                $"OnlineStub broadcasted msgId={BroadcastOnlineAvatarProxyMsgId} to {registrations.Count} online avatars.");
+            return StubCallErrorCode.None;
         }
 
         private void HandleStartupTimerFired()

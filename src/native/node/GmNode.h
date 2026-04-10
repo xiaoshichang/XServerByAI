@@ -98,6 +98,7 @@ class GmNode final : public ServerNode
     [[nodiscard]] std::vector<xs::net::ServerStubOwnershipEntry> BuildServerStubDistributeTable() const;
     void OnAllStubReady();
     [[nodiscard]] GmControlHttpStatusSnapshot BuildControlHttpStatusSnapshot() const;
+    [[nodiscard]] GmControlHttpResponse HandleBoardcaseRequest(std::string_view message);
     [[nodiscard]] bool AreAllExpectedNodesOnline() const noexcept;
     [[nodiscard]] bool AreAllExpectedGamesMeshReady() const noexcept;
     [[nodiscard]] bool AreAllServerStubsReady() const noexcept;
@@ -114,6 +115,13 @@ class GmNode final : public ServerNode
         const xs::net::ClusterReadyNotify& notify);
     [[nodiscard]] GameMeshReadyEntry* mesh_ready_entry(std::string_view node_id) noexcept;
     [[nodiscard]] const GameMeshReadyEntry* mesh_ready_entry(std::string_view node_id) const noexcept;
+    [[nodiscard]] const ServerStubEntry* server_stub_entry(std::string_view entity_type) const noexcept;
+    [[nodiscard]] bool TrySendStubCallToGame(
+        std::string_view target_game_node_id,
+        std::string_view target_stub_type,
+        std::uint32_t msg_id,
+        std::span<const std::byte> payload,
+        std::string* error_message);
 
     xs::core::TimerID timeout_scan_timer_id_{0};
     std::unique_ptr<GmControlHttpService> control_http_service_{};

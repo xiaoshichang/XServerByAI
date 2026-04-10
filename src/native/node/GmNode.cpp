@@ -2,10 +2,12 @@
 
 #include "BinarySerialization.h"
 #include "InnerNetwork.h"
+#include "Json.h"
 #include "ManagedRuntimeHost.h"
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
 #include "message/PacketCodec.h"
+#include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
 
 #include <algorithm>
@@ -34,6 +36,8 @@ inline constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
 inline constexpr std::int32_t kInnerChannelInvalid = 3004;
 inline constexpr std::int32_t kInnerRequestInvalid = 3005;
 inline constexpr std::string_view kUnknownServerEntityId = "unknown";
+inline constexpr std::string_view kOnlineStubType = "OnlineStub";
+inline constexpr std::uint32_t kOnlineStubBroadcastMsgId = 5201U;
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -346,6 +350,9 @@ NodeErrorCode GmNode::OnInit()
     };
     control_options.stop_handler = [this]() {
         RequestStop();
+    };
+    control_options.boardcase_handler = [this](std::string_view message) {
+        return HandleBoardcaseRequest(message);
     };
 
     control_http_service_ = std::make_unique<GmControlHttpService>(event_loop(), logger(), std::move(control_options));
@@ -872,6 +879,79 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
     return snapshot;
 }
 
+GmControlHttpResponse GmNode::HandleBoardcaseRequest(std::string_view message)
+{
+    if (message.empty())
+    {
+        xs::core::Json body{
+            {"error", "Broadcast message must not be empty."},
+        };
+
+        GmControlHttpResponse response;
+        response.status_code = 400;
+        response.body = body.dump();
+        return response;
+    }
+
+    const ServerStubEntry* online_stub_entry = server_stub_entry(kOnlineStubType);
+    if (online_stub_entry == nullptr ||
+        online_stub_entry->owner_game_node_id.empty() ||
+        online_stub_entry->state != ServerStubState::Ready)
+    {
+        xs::core::Json body{
+            {"error", "OnlineStub owner is not available."},
+            {"stubType", std::string(kOnlineStubType)},
+        };
+
+        GmControlHttpResponse response;
+        response.status_code = 503;
+        response.body = body.dump();
+        return response;
+    }
+
+    const std::span<const std::byte> payload(
+        reinterpret_cast<const std::byte*>(message.data()),
+        message.size());
+    std::string error_message;
+    if (!TrySendStubCallToGame(
+            online_stub_entry->owner_game_node_id,
+            kOnlineStubType,
+            kOnlineStubBroadcastMsgId,
+            payload,
+            &error_message))
+    {
+        xs::core::Json body{
+            {"error", error_message.empty() ? "Failed to forward boardcase message to OnlineStub owner." : error_message},
+            {"stubType", std::string(kOnlineStubType)},
+            {"ownerGameNodeId", online_stub_entry->owner_game_node_id},
+        };
+
+        GmControlHttpResponse response;
+        response.status_code = 503;
+        response.body = body.dump();
+        return response;
+    }
+
+    const std::array<xs::core::LogContextField, 3> context{
+        xs::core::LogContextField{"stubType", std::string(kOnlineStubType)},
+        xs::core::LogContextField{"ownerGameNodeId", online_stub_entry->owner_game_node_id},
+        xs::core::LogContextField{"messageBytes", ToString(message.size())},
+    };
+    logger().Log(xs::core::LogLevel::Info, "control.http", "GM forwarded /boardcase request to OnlineStub owner.", context);
+
+    xs::core::Json body{
+        {"status", "forwarded"},
+        {"stubType", std::string(kOnlineStubType)},
+        {"ownerGameNodeId", online_stub_entry->owner_game_node_id},
+        {"message", std::string(message)},
+    };
+
+    GmControlHttpResponse response;
+    response.status_code = 200;
+    response.body = body.dump();
+    return response;
+}
+
 GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node_id) noexcept
 {
     auto iterator = std::find_if(
@@ -892,6 +972,122 @@ const GmNode::GameMeshReadyEntry* GmNode::mesh_ready_entry(std::string_view node
             return entry.node_id == node_id;
         });
     return iterator != startup_state_.expected_game_entries.end() ? &(*iterator) : nullptr;
+}
+
+const GmNode::ServerStubEntry* GmNode::server_stub_entry(std::string_view entity_type) const noexcept
+{
+    const auto iterator = std::find_if(
+        server_stub_state_table_.entries.begin(),
+        server_stub_state_table_.entries.end(),
+        [entity_type](const ServerStubEntry& entry) {
+            return entry.entity_type == entity_type;
+        });
+    return iterator != server_stub_state_table_.entries.end() ? &(*iterator) : nullptr;
+}
+
+bool GmNode::TrySendStubCallToGame(
+    std::string_view target_game_node_id,
+    std::string_view target_stub_type,
+    std::uint32_t msg_id,
+    std::span<const std::byte> payload,
+    std::string* error_message)
+{
+    if (error_message != nullptr)
+    {
+        error_message->clear();
+    }
+
+    if (target_game_node_id.empty() || target_stub_type.empty() || msg_id == 0U)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "GM stub relay arguments are invalid.";
+        }
+        return false;
+    }
+
+    if (inner_network() == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "GM inner network is unavailable.";
+        }
+        return false;
+    }
+
+    InnerNetworkSession* target_session = inner_network_remote_sessions().FindMutableByNodeId(target_game_node_id);
+    if (target_session == nullptr ||
+        target_session->process_type != xs::core::ProcessType::Game ||
+        target_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !target_session->registered ||
+        !target_session->inner_network_ready ||
+        target_session->routing_id.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "OnlineStub owner Game is unavailable on the inner network.";
+        }
+        return false;
+    }
+
+    const xs::net::RelayForwardStubCall relay_message{
+        .source_game_node_id = std::string(node_id()),
+        .target_game_node_id = std::string(target_game_node_id),
+        .target_stub_type = std::string(target_stub_type),
+        .stub_call_msg_id = msg_id,
+        .relay_flags = 0u,
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    };
+
+    std::size_t wire_size = 0u;
+    const xs::net::RelayCodecErrorCode wire_size_result =
+        xs::net::GetRelayForwardStubCallWireSize(relay_message, &wire_size);
+    if (wire_size_result != xs::net::RelayCodecErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(xs::net::RelayCodecErrorMessage(wire_size_result));
+        }
+        return false;
+    }
+
+    std::vector<std::byte> relay_payload(wire_size);
+    const xs::net::RelayCodecErrorCode encode_result =
+        xs::net::EncodeRelayForwardStubCall(relay_message, relay_payload);
+    if (encode_result != xs::net::RelayCodecErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(xs::net::RelayCodecErrorMessage(encode_result));
+        }
+        return false;
+    }
+
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kRelayForwardStubCallMsgId, xs::net::kPacketSeqNone, 0U,
+                                  static_cast<std::uint32_t>(relay_payload.size()));
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + relay_payload.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, relay_payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        }
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(target_session->routing_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(inner_network()->last_error_message());
+        }
+        return false;
+    }
+
+    return true;
 }
 
 bool GmNode::AreAllExpectedNodesOnline() const noexcept

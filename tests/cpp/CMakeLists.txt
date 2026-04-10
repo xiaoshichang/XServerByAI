@@ -170,6 +170,8 @@ function(xs_add_managed_runtime_asset asset_name project_path output_dir assembl
         "${${asset_name}_OUTPUT_DIR_CMAKE}/${assembly_name}.dll")
     set(${asset_name}_RUNTIMECONFIG_PATH
         "${${asset_name}_OUTPUT_DIR_CMAKE}/${assembly_name}.runtimeconfig.json")
+    set(${asset_name}_SOURCE_RUNTIMECONFIG_PATH
+        "${project_directory}/bin/Debug/net10.0/${assembly_name}.runtimeconfig.json")
 
     add_custom_command(
         OUTPUT
@@ -194,6 +196,10 @@ function(xs_add_managed_runtime_asset asset_name project_path output_dir assembl
                 -m:1
                 -p:GenerateRuntimeConfigurationFiles=true
                 "-p:OutDir=${${asset_name}_OUTPUT_DIR_CMAKE}/"
+        COMMAND
+            ${CMAKE_COMMAND} -E copy_if_different
+                "${${asset_name}_SOURCE_RUNTIMECONFIG_PATH}"
+                "${${asset_name}_RUNTIMECONFIG_PATH}"
         DEPENDS
             "${CMAKE_SOURCE_DIR}/XServerByAI.Managed.sln"
             "${project_path}"

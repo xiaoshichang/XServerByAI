@@ -173,41 +173,54 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
-        public void GameNodeRuntimeState_CreatesAvatarEntity_BindsProxy_AndRegistersOnlineAvatar()
+        public void GameNodeRuntimeState_CreatesAvatarEntity_RegistersProxyThroughOwnedOnlineStub()
         {
-            OnlineStub.ClearRegisteredAvatars();
-            try
-            {
-                GameNodeRuntimeState runtimeState = new("Game3");
-                Guid avatarEntityId = Guid.NewGuid();
-                AvatarEntitySpawnRequest request = new(
-                    avatarEntityId,
-                    "account-alpha",
-                    "Hero Alpha",
-                    "Gate7",
-                    42);
+            LoopbackStubCallTransport transport = new();
+            GameNodeRuntimeState onlineRuntime = new("Game0", stubCallTransport: transport);
+            GameNodeRuntimeState avatarRuntime = new("Game3", stubCallTransport: transport);
+            transport.Register(onlineRuntime);
+            transport.Register(avatarRuntime);
 
-                Assert.True(runtimeState.TryCreateAvatarEntity(request, out AvatarEntity? avatar, out string? error));
-                Assert.Null(error);
-                Assert.NotNull(avatar);
-                Assert.Equal(EntityLifecycleState.Active, avatar!.LifecycleState);
-                Assert.Equal(avatarEntityId, avatar.EntityId);
-                Assert.Equal("account-alpha", avatar.AccountId);
-                Assert.Equal("Hero Alpha", avatar.DisplayName);
-                Assert.NotNull(avatar.Proxy);
-                Assert.Equal("Gate7", avatar.Proxy!.RouteGateNodeId);
-                Assert.True(runtimeState.EntityManager.Contains(avatar.EntityId));
-                Assert.Single(runtimeState.EntityManager.SnapshotByType<AvatarEntity>());
-                Assert.True(OnlineStub.TryGetRegisteredAvatar(avatarEntityId, out OnlineAvatarRegistration registration));
-                Assert.Equal(avatar.EntityId, registration.EntityId);
-                Assert.Equal((ulong)42, registration.SessionId);
-                Assert.Equal("Gate7", registration.GateNodeId);
-                Assert.Equal("Game3", registration.GameNodeId);
-            }
-            finally
-            {
-                OnlineStub.ClearRegisteredAvatars();
-            }
+            ServerStubOwnershipSnapshot snapshot = new(
+                1,
+                [
+                    new ServerStubOwnershipAssignment(nameof(OnlineStub), "unknown", "Game0"),
+                ]);
+
+            Assert.Equal(GameNodeRuntimeStateErrorCode.None, onlineRuntime.ApplyOwnership(snapshot));
+            Assert.Equal(GameNodeRuntimeStateErrorCode.None, avatarRuntime.ApplyOwnership(snapshot));
+
+            Guid avatarEntityId = Guid.NewGuid();
+            AvatarEntitySpawnRequest request = new(
+                avatarEntityId,
+                "account-alpha",
+                "Hero Alpha",
+                "Gate7",
+                42);
+
+            Assert.True(avatarRuntime.TryCreateAvatarEntity(request, out AvatarEntity? avatar, out string? error));
+            Assert.Null(error);
+            Assert.NotNull(avatar);
+            Assert.Equal(EntityLifecycleState.Active, avatar!.LifecycleState);
+            Assert.Equal(avatarEntityId, avatar.EntityId);
+            Assert.Equal("account-alpha", avatar.AccountId);
+            Assert.Equal("Hero Alpha", avatar.DisplayName);
+            Assert.NotNull(avatar.Proxy);
+            Assert.Equal("Gate7", avatar.Proxy!.RouteGateNodeId);
+            Assert.True(avatarRuntime.EntityManager.Contains(avatar.EntityId));
+            Assert.Single(avatarRuntime.EntityManager.SnapshotByType<AvatarEntity>());
+
+            OnlineStub onlineStub = Assert.IsType<OnlineStub>(onlineRuntime.OwnedServerStubs.Single());
+            Assert.True(onlineStub.TryGetRegisteredAvatar(avatarEntityId, out OnlineAvatarRegistration registration));
+            Assert.Equal(avatar.EntityId, registration.EntityId);
+            Assert.Equal((ulong)42, registration.SessionId);
+            Assert.Equal("Gate7", registration.GateNodeId);
+            Assert.Equal("Game3", registration.GameNodeId);
+            Assert.Equal(avatar.EntityId, registration.Proxy.EntityId);
+            Assert.Equal("Gate7", registration.Proxy.RouteGateNodeId);
+            Assert.Equal(1, transport.ForwardCallCount);
+            Assert.Equal(nameof(OnlineStub), transport.LastTargetStubType);
+            Assert.Equal("Game0", transport.LastTargetGameNodeId);
         }
     }
 

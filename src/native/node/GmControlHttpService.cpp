@@ -166,6 +166,8 @@ std::string_view HttpStatusText(std::uint16_t status_code) noexcept
         return "Payload Too Large";
     case 500:
         return "Internal Server Error";
+    case 503:
+        return "Service Unavailable";
     }
 
     return "Unknown";
@@ -316,6 +318,149 @@ GmControlHttpResponse BuildJsonErrorResponse(std::uint16_t status_code, std::str
     response.status_code = status_code;
     response.body = body.dump();
     return response;
+}
+
+bool TrySplitRequestTarget(
+    std::string_view target,
+    std::string_view* path,
+    std::string_view* query) noexcept
+{
+    if (path == nullptr || query == nullptr || target.empty() || target.front() != '/')
+    {
+        return false;
+    }
+
+    const std::size_t query_offset = target.find('?');
+    if (query_offset == std::string_view::npos)
+    {
+        *path = target;
+        *query = std::string_view{};
+        return true;
+    }
+
+    *path = target.substr(0U, query_offset);
+    *query = target.substr(query_offset + 1U);
+    return true;
+}
+
+bool TryHexNibble(char ch, std::uint8_t* value) noexcept
+{
+    if (value == nullptr)
+    {
+        return false;
+    }
+
+    if (ch >= '0' && ch <= '9')
+    {
+        *value = static_cast<std::uint8_t>(ch - '0');
+        return true;
+    }
+
+    if (ch >= 'a' && ch <= 'f')
+    {
+        *value = static_cast<std::uint8_t>(10 + (ch - 'a'));
+        return true;
+    }
+
+    if (ch >= 'A' && ch <= 'F')
+    {
+        *value = static_cast<std::uint8_t>(10 + (ch - 'A'));
+        return true;
+    }
+
+    return false;
+}
+
+bool TryUrlDecode(std::string_view encoded, std::string* decoded)
+{
+    if (decoded == nullptr)
+    {
+        return false;
+    }
+
+    decoded->clear();
+    decoded->reserve(encoded.size());
+
+    for (std::size_t index = 0U; index < encoded.size(); ++index)
+    {
+        const char ch = encoded[index];
+        if (ch == '+')
+        {
+            decoded->push_back(' ');
+            continue;
+        }
+
+        if (ch != '%')
+        {
+            decoded->push_back(ch);
+            continue;
+        }
+
+        if (index + 2U >= encoded.size())
+        {
+            return false;
+        }
+
+        std::uint8_t high = 0U;
+        std::uint8_t low = 0U;
+        if (!TryHexNibble(encoded[index + 1U], &high) ||
+            !TryHexNibble(encoded[index + 2U], &low))
+        {
+            return false;
+        }
+
+        decoded->push_back(static_cast<char>((high << 4U) | low));
+        index += 2U;
+    }
+
+    return true;
+}
+
+bool TryGetDecodedQueryValue(
+    std::string_view query,
+    std::string_view key,
+    std::string* value)
+{
+    if (value == nullptr)
+    {
+        return false;
+    }
+
+    std::size_t segment_begin = 0U;
+    while (segment_begin <= query.size())
+    {
+        const std::size_t segment_end = query.find('&', segment_begin);
+        const std::string_view segment =
+            segment_end == std::string_view::npos
+                ? query.substr(segment_begin)
+                : query.substr(segment_begin, segment_end - segment_begin);
+
+        if (!segment.empty())
+        {
+            const std::size_t equals_offset = segment.find('=');
+            const std::string_view segment_key =
+                equals_offset == std::string_view::npos
+                    ? segment
+                    : segment.substr(0U, equals_offset);
+            if (segment_key == key)
+            {
+                const std::string_view encoded_value =
+                    equals_offset == std::string_view::npos
+                        ? std::string_view{}
+                        : segment.substr(equals_offset + 1U);
+                return TryUrlDecode(encoded_value, value);
+            }
+        }
+
+        if (segment_end == std::string_view::npos)
+        {
+            break;
+        }
+
+        segment_begin = segment_end + 1U;
+    }
+
+    return false;
 }
 
 } // namespace
@@ -485,6 +630,14 @@ class GmControlHttpService::Impl final
                 last_error_message_,
                 NodeErrorCode::InvalidArgument,
                 "GM control HTTP stop handler must not be empty.");
+        }
+
+        if (!options_.boardcase_handler)
+        {
+            return SetError(
+                last_error_message_,
+                NodeErrorCode::InvalidArgument,
+                "GM control HTTP boardcase handler must not be empty.");
         }
 
         std::string endpoint_error;
@@ -684,7 +837,14 @@ class GmControlHttpService::Impl final
     {
         (void)body;
 
-        if (path == "/healthz")
+        std::string_view request_path;
+        std::string_view request_query;
+        if (!TrySplitRequestTarget(path, &request_path, &request_query))
+        {
+            return BuildJsonErrorResponse(400, "HTTP request target is invalid.");
+        }
+
+        if (request_path == "/healthz")
         {
             if (method != "GET")
             {
@@ -702,7 +862,7 @@ class GmControlHttpService::Impl final
             return response;
         }
 
-        if (path == "/status")
+        if (request_path == "/status")
         {
             if (method != "GET")
             {
@@ -802,7 +962,28 @@ class GmControlHttpService::Impl final
             return response;
         }
 
-        if (path == "/shutdown")
+        if (request_path == "/boardcase")
+        {
+            if (method != "GET")
+            {
+                return BuildJsonErrorResponse(405, "Only GET is allowed for /boardcase.");
+            }
+
+            std::string message;
+            if (!TryGetDecodedQueryValue(request_query, "msg", &message))
+            {
+                return BuildJsonErrorResponse(400, "Query parameter 'msg' is required for /boardcase.");
+            }
+
+            if (TrimAscii(message).empty())
+            {
+                return BuildJsonErrorResponse(400, "Query parameter 'msg' must not be empty.");
+            }
+
+            return options_.boardcase_handler(message);
+        }
+
+        if (request_path == "/shutdown")
         {
             if (method != "POST")
             {

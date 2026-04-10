@@ -95,6 +95,7 @@ struct GmControlHttpStatusSnapshot
 
 using GmControlHttpStatusProvider = std::function<GmControlHttpStatusSnapshot()>;
 using GmControlHttpStopHandler = std::function<void()>;
+using GmControlHttpBoardcaseHandler = std::function<GmControlHttpResponse(std::string_view message)>;
 
 struct GmControlHttpServiceOptions
 {
@@ -102,6 +103,7 @@ struct GmControlHttpServiceOptions
     std::string node_id{};
     GmControlHttpStatusProvider status_provider{};
     GmControlHttpStopHandler stop_handler{};
+    GmControlHttpBoardcaseHandler boardcase_handler{};
 };
 
 class GmControlHttpService final

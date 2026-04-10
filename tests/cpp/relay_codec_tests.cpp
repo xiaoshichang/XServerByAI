@@ -131,6 +131,106 @@ void TestRelayForwardStubCallRejectsMalformedBuffers()
              xs::net::RelayCodecErrorCode::InvalidRelayFlags);
 }
 
+void TestRelayForwardProxyCallRoundTrip()
+{
+    const xs::net::RelayForwardProxyCall message{
+        .source_game_node_id = "Game0",
+        .route_gate_node_id = "Gate3",
+        .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
+        .proxy_call_msg_id = 6201u,
+        .relay_flags = 0u,
+        .payload = {std::byte{0x11}, std::byte{0x22}, std::byte{0x33}},
+    };
+
+    std::size_t wire_size = 0u;
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) == xs::net::RelayCodecErrorCode::None);
+
+    std::vector<std::byte> buffer(wire_size);
+    XS_CHECK(xs::net::EncodeRelayForwardProxyCall(message, buffer) == xs::net::RelayCodecErrorCode::None);
+
+    xs::net::RelayForwardProxyCall decoded{};
+    XS_CHECK(xs::net::DecodeRelayForwardProxyCall(buffer, &decoded) == xs::net::RelayCodecErrorCode::None);
+    XS_CHECK(decoded.source_game_node_id == message.source_game_node_id);
+    XS_CHECK(decoded.route_gate_node_id == message.route_gate_node_id);
+    XS_CHECK(decoded.target_entity_id == message.target_entity_id);
+    XS_CHECK(decoded.proxy_call_msg_id == message.proxy_call_msg_id);
+    XS_CHECK(decoded.relay_flags == message.relay_flags);
+    XS_CHECK(decoded.payload == message.payload);
+}
+
+void TestRelayForwardProxyCallRejectsSemanticViolations()
+{
+    xs::net::RelayForwardProxyCall message{
+        .source_game_node_id = "Game0",
+        .route_gate_node_id = "Gate3",
+        .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
+        .proxy_call_msg_id = 6201u,
+        .relay_flags = 0u,
+        .payload = {},
+    };
+
+    std::size_t wire_size = 0u;
+    message.proxy_call_msg_id = 0u;
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) ==
+             xs::net::RelayCodecErrorCode::InvalidMessageId);
+
+    message.proxy_call_msg_id = 6201u;
+    message.source_game_node_id.clear();
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) ==
+             xs::net::RelayCodecErrorCode::InvalidSourceGameNodeId);
+
+    message.source_game_node_id = "Game0";
+    message.route_gate_node_id.clear();
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) ==
+             xs::net::RelayCodecErrorCode::InvalidRouteGateNodeId);
+
+    message.route_gate_node_id = "Gate3";
+    message.target_entity_id = "not-a-guid";
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) ==
+             xs::net::RelayCodecErrorCode::InvalidTargetEntityId);
+
+    message.target_entity_id = "01234567-89ab-cdef-0123-456789abcdef";
+    message.relay_flags = 1u;
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) ==
+             xs::net::RelayCodecErrorCode::InvalidRelayFlags);
+}
+
+void TestRelayForwardProxyCallRejectsMalformedBuffers()
+{
+    const xs::net::RelayForwardProxyCall message{
+        .source_game_node_id = "Game0",
+        .route_gate_node_id = "Gate3",
+        .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
+        .proxy_call_msg_id = 6201u,
+        .relay_flags = 0u,
+        .payload = {std::byte{0x5A}, std::byte{0x5B}},
+    };
+
+    std::size_t wire_size = 0u;
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) == xs::net::RelayCodecErrorCode::None);
+    std::vector<std::byte> buffer(wire_size);
+    XS_CHECK(xs::net::EncodeRelayForwardProxyCall(message, buffer) == xs::net::RelayCodecErrorCode::None);
+
+    xs::net::RelayForwardProxyCall decoded{};
+    XS_CHECK(xs::net::DecodeRelayForwardProxyCall(
+                 std::span<const std::byte>(buffer.data(), buffer.size() - 1u),
+                 &decoded) == xs::net::RelayCodecErrorCode::BufferTooSmall);
+
+    std::vector<std::byte> trailing = buffer;
+    trailing.push_back(std::byte{0x7F});
+    XS_CHECK(xs::net::DecodeRelayForwardProxyCall(trailing, &decoded) == xs::net::RelayCodecErrorCode::TrailingBytes);
+
+    std::vector<std::byte> invalid_flags = buffer;
+    const std::size_t relay_flags_offset =
+        sizeof(std::uint16_t) + 5u +
+        sizeof(std::uint16_t) + 5u +
+        sizeof(std::uint16_t) + 36u +
+        sizeof(std::uint32_t);
+    invalid_flags[relay_flags_offset + 3u] = std::byte{0x01};
+    XS_CHECK(xs::net::DecodeRelayForwardProxyCall(invalid_flags, &decoded) ==
+             xs::net::RelayCodecErrorCode::InvalidRelayFlags);
+}
+
 } // namespace
 
 int main()
@@ -138,6 +238,9 @@ int main()
     TestRelayForwardStubCallRoundTrip();
     TestRelayForwardStubCallRejectsSemanticViolations();
     TestRelayForwardStubCallRejectsMalformedBuffers();
+    TestRelayForwardProxyCallRoundTrip();
+    TestRelayForwardProxyCallRejectsSemanticViolations();
+    TestRelayForwardProxyCallRejectsMalformedBuffers();
 
     if (g_failures != 0)
     {

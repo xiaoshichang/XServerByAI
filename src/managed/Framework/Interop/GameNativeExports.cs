@@ -24,6 +24,7 @@ namespace XServer.Managed.Framework.Interop
         };
         private static ManagedNativeCallbacks s_nativeCallbacks;
         private static ManagedNativeStubCallTransport? s_nativeStubCallTransport;
+        private static ManagedNativeProxyCallTransport? s_nativeProxyCallTransport;
         private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
         private static GameNodeRuntimeState? s_runtimeState;
 
@@ -46,6 +47,7 @@ namespace XServer.Managed.Framework.Interop
                 s_nativeCallbacks = args->NativeCallbacks;
                 NativeLoggerBridge.Configure(s_nativeCallbacks);
                 s_nativeStubCallTransport = ManagedNativeStubCallTransport.CreateOrNull(s_nativeCallbacks);
+                s_nativeProxyCallTransport = ManagedNativeProxyCallTransport.CreateOrNull(s_nativeCallbacks);
                 s_nativeTimerScheduler = new ManagedNativeTimerScheduler(s_nativeCallbacks);
                 string nodeId = ReadUtf8(args->NodeIdUtf8, args->NodeIdLength);
                 _ = ReadUtf8(args->ConfigPathUtf8, args->ConfigPathLength);
@@ -53,6 +55,7 @@ namespace XServer.Managed.Framework.Interop
                     nodeId,
                     NotifyNativeServerStubReady,
                     s_nativeStubCallTransport,
+                    s_nativeProxyCallTransport,
                     nativeTimerScheduler: s_nativeTimerScheduler);
                 NativeLoggerBridge.Info(RuntimeLogCategory, "Game managed runtime initialized.");
                 return 0;
@@ -60,6 +63,7 @@ namespace XServer.Managed.Framework.Interop
             catch
             {
                 s_nativeStubCallTransport = null;
+                s_nativeProxyCallTransport = null;
                 s_nativeTimerScheduler?.Reset();
                 s_nativeTimerScheduler = null;
                 NativeLoggerBridge.Reset();
@@ -100,6 +104,28 @@ namespace XServer.Managed.Framework.Interop
                     NativeLoggerBridge.Info(
                         RuntimeLogCategory,
                         $"Game managed runtime created AvatarEntity entityId={avatar!.EntityId} gate={createRequest.RouteGateNodeId}.");
+                    return 0;
+                }
+
+                if (message->MsgId == RelayProxyCallCodec.ForwardProxyCallMsgId)
+                {
+                    if (!RelayProxyCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayProxyCallCodec.RelayProxyCallEnvelope proxyRelay))
+                    {
+                        NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded proxy call payload.");
+                        return InvalidArgument;
+                    }
+
+                    ProxyCallErrorCode proxyResult = s_runtimeState.ReceiveProxyCall(
+                        proxyRelay.TargetEntityId,
+                        new ProxyCallMessage(proxyRelay.ProxyCallMsgId, proxyRelay.Payload));
+                    if (proxyResult != ProxyCallErrorCode.None)
+                    {
+                        NativeLoggerBridge.Warn(
+                            RuntimeLogCategory,
+                            $"Game managed runtime rejected forwarded proxy call: {ProxyCallError.Message(proxyResult)}");
+                        return (int)proxyResult;
+                    }
+
                     return 0;
                 }
 

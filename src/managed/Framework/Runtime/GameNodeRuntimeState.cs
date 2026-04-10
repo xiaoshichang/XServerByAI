@@ -6,11 +6,12 @@ namespace XServer.Managed.Framework.Runtime
 {
     public delegate void ServerStubReadyCallback(ulong assignmentEpoch, ServerStubEntity stub);
 
-    public sealed class GameNodeRuntimeState : IServerStubCaller
+    public sealed class GameNodeRuntimeState : IServerStubCaller, IProxyEntityCaller
     {
         private readonly string _nodeId;
         private readonly ServerStubReadyCallback? _onServerStubReady;
         private readonly IStubCallTransport? _stubCallTransport;
+        private readonly IProxyCallTransport? _proxyCallTransport;
         private readonly INativeTimerScheduler? _nativeTimerScheduler;
         private readonly EntityManager _entityManager = new();
         private readonly List<ServerStubEntity> _ownedServerStubs = [];
@@ -23,6 +24,7 @@ namespace XServer.Managed.Framework.Runtime
             string nodeId,
             ServerStubReadyCallback? onServerStubReady = null,
             IStubCallTransport? stubCallTransport = null,
+            IProxyCallTransport? proxyCallTransport = null,
             INativeTimerScheduler? nativeTimerScheduler = null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(nodeId);
@@ -30,6 +32,7 @@ namespace XServer.Managed.Framework.Runtime
             _nodeId = nodeId;
             _onServerStubReady = onServerStubReady;
             _stubCallTransport = stubCallTransport;
+            _proxyCallTransport = proxyCallTransport;
             _nativeTimerScheduler = nativeTimerScheduler;
         }
 
@@ -74,82 +77,91 @@ namespace XServer.Managed.Framework.Runtime
             return targetStub.ReceiveStubCall(message);
         }
 
+        internal ProxyCallErrorCode ReceiveProxyCall(Guid targetEntityId, ProxyCallMessage message)
+        {
+            if (targetEntityId == Guid.Empty)
+            {
+                return ProxyCallErrorCode.InvalidArgument;
+            }
+
+            if (message.MsgId == 0)
+            {
+                return ProxyCallErrorCode.InvalidMessageId;
+            }
+
+            if (!_entityManager.TryGet(targetEntityId, out ServerEntity? targetEntity) || targetEntity == null)
+            {
+                return ProxyCallErrorCode.UnknownTargetEntity;
+            }
+
+            return targetEntity.ReceiveProxyCall(message);
+        }
+
         void IServerStubCaller.CallStub(ServerEntity sourceEntity, string targetStubType, StubCallMessage message)
         {
-            if (sourceEntity == null || string.IsNullOrWhiteSpace(targetStubType))
+            StubCallErrorCode result = DispatchStubCall(sourceEntity, targetStubType, message, out string failureMessage);
+            if (result != StubCallErrorCode.None)
             {
-                LogStubCallFailure(sourceEntity, targetStubType, message.MsgId, "Stub call argument is invalid.");
+                LogStubCallFailure(sourceEntity, targetStubType, message.MsgId, failureMessage);
+            }
+        }
+
+        void IProxyEntityCaller.CallProxy(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
+        {
+            if (sourceEntity == null ||
+                targetAddress == null ||
+                targetAddress.EntityId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(targetAddress.RouteGateNodeId))
+            {
+                LogProxyCallFailure(sourceEntity, targetAddress, message.MsgId, "Proxy call argument is invalid.");
                 return;
             }
 
             if (message.MsgId == 0)
             {
-                LogStubCallFailure(sourceEntity, targetStubType, message.MsgId, "Stub call msgId must not be zero.");
+                LogProxyCallFailure(sourceEntity, targetAddress, message.MsgId, "Proxy call msgId must not be zero.");
                 return;
             }
 
             if (!_entityManager.Contains(sourceEntity.EntityId))
             {
-                LogStubCallFailure(sourceEntity, targetStubType, message.MsgId, "Source entity is not registered in runtime state.");
+                LogProxyCallFailure(sourceEntity, targetAddress, message.MsgId, "Source entity is not registered in runtime state.");
                 return;
             }
 
-            if (_ownedServerStubsByType.TryGetValue(targetStubType, out ServerStubEntity? localTarget))
+            if (_entityManager.TryGet(targetAddress.EntityId, out ServerEntity? localTarget) && localTarget != null)
             {
-                StubCallErrorCode localResult = localTarget.ReceiveStubCall(message);
-                if (localResult != StubCallErrorCode.None)
+                ProxyCallErrorCode localResult = localTarget.ReceiveProxyCall(message);
+                if (localResult != ProxyCallErrorCode.None)
                 {
-                    LogStubCallFailure(
+                    LogProxyCallFailure(
                         sourceEntity,
-                        targetStubType,
+                        targetAddress,
                         message.MsgId,
-                        $"Local delivery failed: {StubCallError.Message(localResult)}");
+                        $"Local delivery failed: {ProxyCallError.Message(localResult)}");
                 }
 
                 return;
             }
 
-            if (!TryGetOwnedGameNodeId(targetStubType, out string targetGameNodeId))
+            if (_proxyCallTransport == null)
             {
-                LogStubCallFailure(
+                LogProxyCallFailure(
                     sourceEntity,
-                    targetStubType,
+                    targetAddress,
                     message.MsgId,
-                    StubCallError.Message(StubCallErrorCode.UnknownTargetStub));
+                    ProxyCallError.Message(ProxyCallErrorCode.TargetNodeUnavailable));
                 return;
             }
 
-            if (string.Equals(targetGameNodeId, _nodeId, StringComparison.Ordinal))
+            ProxyCallErrorCode remoteResult = _proxyCallTransport.Forward(targetAddress, message);
+            if (remoteResult != ProxyCallErrorCode.None)
             {
-                LogStubCallFailure(
+                LogProxyCallFailure(
                     sourceEntity,
-                    targetStubType,
+                    targetAddress,
                     message.MsgId,
-                    "Target stub is owned by the local game node but no local instance is available.");
-                return;
-            }
-
-            if (_stubCallTransport == null)
-            {
-                LogStubCallFailure(
-                    sourceEntity,
-                    targetStubType,
-                    message.MsgId,
-                    StubCallError.Message(StubCallErrorCode.TargetNodeUnavailable));
-                return;
-            }
-
-            StubCallErrorCode remoteResult = _stubCallTransport.Forward(
-                targetStubType,
-                targetGameNodeId,
-                message);
-            if (remoteResult != StubCallErrorCode.None)
-            {
-                LogStubCallFailure(
-                    sourceEntity,
-                    targetStubType,
-                    message.MsgId,
-                    $"Remote delivery to {targetGameNodeId} failed: {StubCallError.Message(remoteResult)}");
+                    $"Remote delivery through {targetAddress.RouteGateNodeId} failed: {ProxyCallError.Message(remoteResult)}");
             }
         }
 
@@ -190,12 +202,14 @@ namespace XServer.Managed.Framework.Runtime
 
                 stub.SetReadyCallback(HandleServerStubReady);
                 stub.SetStubCaller(this);
+                stub.SetProxyEntityCaller(this);
                 stub.SetNativeTimerScheduler(_nativeTimerScheduler);
 
                 if (!stagedEntityIds.Add(stub.EntityId) || _entityManager.Contains(stub.EntityId))
                 {
                     stub.SetReadyCallback(null);
                     stub.SetStubCaller(null);
+                    stub.SetProxyEntityCaller(null);
                     stub.SetNativeTimerScheduler(null);
                     stub.Destroy();
                     DestroyEntities(createdStubs);
@@ -278,19 +292,22 @@ namespace XServer.Managed.Framework.Runtime
                     return false;
                 }
 
+                ProxyAddress reboundProxy = new(existingAvatar.EntityId, request.RouteGateNodeId);
                 OnlineAvatarRegistration existingRegistration = new(
                     existingAvatar.AccountId,
                     existingAvatar.EntityId,
                     request.SessionId,
                     request.RouteGateNodeId,
                     _nodeId,
-                    existingAvatar.DisplayName);
-                if (!OnlineStub.TryRegisterAvatar(existingRegistration, out string existingRegisterError))
+                    existingAvatar.DisplayName,
+                    reboundProxy);
+                if (!TryRegisterAvatarWithOnlineStub(existingAvatar, existingRegistration, out string existingRegisterError))
                 {
                     error = existingRegisterError;
                     return false;
                 }
 
+                existingAvatar.RebindProxy(request.RouteGateNodeId);
                 avatar = existingAvatar;
                 return true;
             }
@@ -302,12 +319,14 @@ namespace XServer.Managed.Framework.Runtime
                 request.AvatarName,
                 request.RouteGateNodeId);
             createdAvatar.SetStubCaller(this);
+            createdAvatar.SetProxyEntityCaller(this);
             createdAvatar.SetNativeTimerScheduler(_nativeTimerScheduler);
 
             EntityManagerErrorCode registerResult = _entityManager.Register(createdAvatar);
             if (registerResult != EntityManagerErrorCode.None)
             {
                 createdAvatar.SetStubCaller(null);
+                createdAvatar.SetProxyEntityCaller(null);
                 createdAvatar.SetNativeTimerScheduler(null);
                 error = EntityManagerError.Message(registerResult);
                 return false;
@@ -319,12 +338,14 @@ namespace XServer.Managed.Framework.Runtime
                 request.SessionId,
                 request.RouteGateNodeId,
                 _nodeId,
-                createdAvatar.DisplayName);
-            if (!OnlineStub.TryRegisterAvatar(registration, out string registerError))
+                createdAvatar.DisplayName,
+                createdAvatar.Proxy!);
+            if (!TryRegisterAvatarWithOnlineStub(createdAvatar, registration, out string registerError))
             {
                 _ = _entityManager.Unregister(createdAvatar.EntityId);
                 createdAvatar.Destroy();
                 createdAvatar.SetStubCaller(null);
+                createdAvatar.SetProxyEntityCaller(null);
                 createdAvatar.SetNativeTimerScheduler(null);
                 error = registerError;
                 return false;
@@ -335,6 +356,105 @@ namespace XServer.Managed.Framework.Runtime
             avatar = createdAvatar;
             return true;
         }
+        private bool TryRegisterAvatarWithOnlineStub(
+            AvatarEntity sourceAvatar,
+            OnlineAvatarRegistration registration,
+            out string error)
+        {
+            byte[] payload;
+            try
+            {
+                payload = OnlineAvatarRegistrationPayloadCodec.Encode(registration);
+            }
+            catch (ArgumentException exception)
+            {
+                error = exception.Message;
+                return false;
+            }
+
+            StubCallErrorCode result = DispatchStubCall(
+                sourceAvatar,
+                nameof(OnlineStub),
+                new StubCallMessage(OnlineStub.RegisterOnlineAvatarMessageStubMsgId, payload),
+                out string failureMessage);
+            if (result != StubCallErrorCode.None)
+            {
+                error = string.IsNullOrWhiteSpace(failureMessage)
+                    ? StubCallError.Message(result)
+                    : failureMessage;
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        private StubCallErrorCode DispatchStubCall(
+            ServerEntity sourceEntity,
+            string targetStubType,
+            StubCallMessage message,
+            out string failureMessage)
+        {
+            failureMessage = string.Empty;
+
+            if (sourceEntity == null || string.IsNullOrWhiteSpace(targetStubType))
+            {
+                failureMessage = "Stub call argument is invalid.";
+                return StubCallErrorCode.InvalidArgument;
+            }
+
+            if (message.MsgId == 0)
+            {
+                failureMessage = "Stub call msgId must not be zero.";
+                return StubCallErrorCode.InvalidMessageId;
+            }
+
+            if (!_entityManager.Contains(sourceEntity.EntityId))
+            {
+                failureMessage = "Source entity is not registered in runtime state.";
+                return StubCallErrorCode.InvalidArgument;
+            }
+
+            if (_ownedServerStubsByType.TryGetValue(targetStubType, out ServerStubEntity? localTarget))
+            {
+                StubCallErrorCode localResult = localTarget.ReceiveStubCall(message);
+                if (localResult != StubCallErrorCode.None)
+                {
+                    failureMessage = $"Local delivery failed: {StubCallError.Message(localResult)}";
+                }
+
+                return localResult;
+            }
+
+            if (!TryGetOwnedGameNodeId(targetStubType, out string targetGameNodeId))
+            {
+                failureMessage = StubCallError.Message(StubCallErrorCode.UnknownTargetStub);
+                return StubCallErrorCode.UnknownTargetStub;
+            }
+
+            if (string.Equals(targetGameNodeId, _nodeId, StringComparison.Ordinal))
+            {
+                failureMessage = "Target stub is owned by the local game node but no local instance is available.";
+                return StubCallErrorCode.UnknownTargetStub;
+            }
+
+            if (_stubCallTransport == null)
+            {
+                failureMessage = StubCallError.Message(StubCallErrorCode.TargetNodeUnavailable);
+                return StubCallErrorCode.TargetNodeUnavailable;
+            }
+
+            StubCallErrorCode remoteResult = _stubCallTransport.Forward(
+                targetStubType,
+                targetGameNodeId,
+                message);
+            if (remoteResult != StubCallErrorCode.None)
+            {
+                failureMessage = $"Remote delivery to {targetGameNodeId} failed: {StubCallError.Message(remoteResult)}";
+            }
+
+            return remoteResult;
+        }
 
         private void ClearOwnedServerStubs()
         {
@@ -344,6 +464,7 @@ namespace XServer.Managed.Framework.Runtime
                 _ = _entityManager.Unregister(stub.EntityId);
                 stub.Destroy();
                 stub.SetStubCaller(null);
+                stub.SetProxyEntityCaller(null);
                 stub.SetNativeTimerScheduler(null);
             }
 
@@ -379,6 +500,7 @@ namespace XServer.Managed.Framework.Runtime
                 stub.SetReadyCallback(null);
                 stub.Destroy();
                 stub.SetStubCaller(null);
+                stub.SetProxyEntityCaller(null);
                 stub.SetNativeTimerScheduler(null);
             }
         }
@@ -414,6 +536,20 @@ namespace XServer.Managed.Framework.Runtime
             NativeLoggerBridge.Warn(
                 sourceEntityType,
                 $"CallStub target={resolvedTargetStubType} msgId={msgId} failed: {message}");
+        }
+
+        private static void LogProxyCallFailure(
+            ServerEntity? sourceEntity,
+            ProxyAddress? targetAddress,
+            uint msgId,
+            string message)
+        {
+            string sourceEntityType = sourceEntity?.EntityType ?? "UnknownEntity";
+            string targetEntityId = targetAddress?.EntityId.ToString("D") ?? "<empty>";
+            string routeGateNodeId = targetAddress?.RouteGateNodeId ?? "<empty>";
+            NativeLoggerBridge.Warn(
+                sourceEntityType,
+                $"CallProxy entityId={targetEntityId} routeGateNodeId={routeGateNodeId} msgId={msgId} failed: {message}");
         }
     }
 }

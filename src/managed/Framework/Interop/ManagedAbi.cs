@@ -1,10 +1,10 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace XServer.Managed.Framework.Interop
 {
     public static class ManagedAbi
     {
-        public const uint Version = 7;
+        public const uint Version = 8;
         public const int NodeIdMaxUtf8Bytes = 128;
         public const int ServerStubEntityTypeMaxUtf8Bytes = 128;
         public const int ServerStubEntityIdMaxUtf8Bytes = 128;
@@ -31,6 +31,7 @@ namespace XServer.Managed.Framework.Interop
         public delegate* unmanaged[Cdecl]<void*, ulong, long> CreateOnceTimer;
         public delegate* unmanaged[Cdecl]<void*, long, int> CancelTimer;
         public delegate* unmanaged[Cdecl]<void*, byte*, uint, byte*, uint, uint, byte*, uint, int> ForwardStubCall;
+        public delegate* unmanaged[Cdecl]<void*, byte*, uint, byte*, uint, uint, byte*, uint, int> ForwardProxyCall;
     }
 
     [StructLayout(LayoutKind.Sequential)]

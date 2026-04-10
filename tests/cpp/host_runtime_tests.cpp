@@ -222,12 +222,22 @@ struct ManagedForwardStubCallCapture final
     std::vector<std::vector<std::byte>> payloads{};
 };
 
+struct ManagedForwardProxyCallCapture final
+{
+    std::uint32_t call_count{0U};
+    std::vector<std::string> route_gate_node_ids{};
+    std::vector<std::string> target_entity_ids{};
+    std::vector<std::uint32_t> msg_ids{};
+    std::vector<std::vector<std::byte>> payloads{};
+};
+
 struct ManagedCallbackCapture final
 {
     ReadyCallbackCapture ready{};
     ManagedLogCapture logs{};
     ManagedNativeTimerCapture timers{};
     ManagedForwardStubCallCapture forwarded_stub_calls{};
+    ManagedForwardProxyCallCapture forwarded_proxy_calls{};
 };
 
 void OnServerStubReady(void* context, std::uint64_t assignment_epoch,
@@ -355,6 +365,40 @@ std::int32_t ForwardStubCall(void* context, const std::uint8_t* target_game_node
     return 0;
 }
 
+std::int32_t ForwardProxyCall(void* context, const std::uint8_t* route_gate_node_id_utf8,
+                              std::uint32_t route_gate_node_id_length, const std::uint8_t* target_entity_id_utf8,
+                              std::uint32_t target_entity_id_length, std::uint32_t msg_id, const std::uint8_t* payload,
+                              std::uint32_t payload_length)
+{
+    auto* capture = static_cast<ManagedCallbackCapture*>(context);
+    if (capture == nullptr || route_gate_node_id_utf8 == nullptr || target_entity_id_utf8 == nullptr || msg_id == 0U ||
+        (payload == nullptr && payload_length != 0U))
+    {
+        XS_CHECK(false);
+        return -1;
+    }
+
+    ++capture->forwarded_proxy_calls.call_count;
+    capture->forwarded_proxy_calls.route_gate_node_ids.push_back(
+        ReadManagedUtf8(route_gate_node_id_utf8, route_gate_node_id_length));
+    capture->forwarded_proxy_calls.target_entity_ids.push_back(
+        ReadManagedUtf8(target_entity_id_utf8, target_entity_id_length));
+    capture->forwarded_proxy_calls.msg_ids.push_back(msg_id);
+    if (payload == nullptr)
+    {
+        capture->forwarded_proxy_calls.payloads.emplace_back();
+    }
+    else
+    {
+        const std::span<const std::byte> payload_view(
+            reinterpret_cast<const std::byte*>(payload),
+            static_cast<std::size_t>(payload_length));
+        capture->forwarded_proxy_calls.payloads.emplace_back(payload_view.begin(), payload_view.end());
+    }
+
+    return 0;
+}
+
 std::size_t CountManagedLogs(const ManagedLogCapture& capture, std::uint32_t level, std::string_view category,
                              std::string_view message)
 {
@@ -377,6 +421,20 @@ bool ContainsText(const std::vector<std::string>& values, std::string_view expec
     return std::find(values.begin(), values.end(), expected) != values.end();
 }
 
+bool ContainsLogMessageSubstring(const ManagedLogCapture& capture, std::string_view category, std::string_view substring)
+{
+    for (std::size_t index = 0U; index < capture.categories.size() && index < capture.messages.size(); ++index)
+    {
+        if (capture.categories[index] == category &&
+            capture.messages[index].find(substring) != std::string::npos)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 std::vector<std::byte> EncodeRelayForwardStubCallPayload(std::string_view source_game_node_id,
                                                          std::string_view target_game_node_id,
                                                          std::string_view target_stub_type, std::uint32_t msg_id,
@@ -396,6 +454,53 @@ std::vector<std::byte> EncodeRelayForwardStubCallPayload(std::string_view source
     std::vector<std::byte> buffer(wire_size);
     XS_CHECK(xs::net::EncodeRelayForwardStubCall(relay_message, buffer) == xs::net::RelayCodecErrorCode::None);
     return buffer;
+}
+
+std::vector<std::byte> EncodeRelayForwardProxyCallPayload(std::string_view source_game_node_id,
+                                                          std::string_view route_gate_node_id,
+                                                          std::string_view target_entity_id, std::uint32_t msg_id,
+                                                          std::span<const std::byte> payload)
+{
+    const xs::net::RelayForwardProxyCall relay_message{
+        .source_game_node_id = std::string(source_game_node_id),
+        .route_gate_node_id = std::string(route_gate_node_id),
+        .target_entity_id = std::string(target_entity_id),
+        .proxy_call_msg_id = msg_id,
+        .relay_flags = 0u,
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    };
+
+    std::size_t wire_size = 0u;
+    XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(relay_message, &wire_size) == xs::net::RelayCodecErrorCode::None);
+    std::vector<std::byte> buffer(wire_size);
+    XS_CHECK(xs::net::EncodeRelayForwardProxyCall(relay_message, buffer) == xs::net::RelayCodecErrorCode::None);
+    return buffer;
+}
+
+std::string BuildCreateAvatarPayload(std::string_view account_id, std::string_view avatar_id, std::string_view avatar_name,
+                                     std::string_view gate_node_id, std::uint64_t session_id)
+{
+    return std::string("{\"accountId\":\"") + std::string(account_id) +
+           "\",\"avatarId\":\"" + std::string(avatar_id) +
+           "\",\"avatarName\":\"" + std::string(avatar_name) +
+           "\",\"gateNodeId\":\"" + std::string(gate_node_id) +
+           "\",\"sessionId\":" + std::to_string(session_id) + "}";
+}
+
+std::string BuildOnlineAvatarRegistrationPayload(std::string_view account_id, std::string_view entity_id,
+                                                 std::uint64_t session_id, std::string_view gate_node_id,
+                                                 std::string_view game_node_id, std::string_view display_name,
+                                                 std::string_view proxy_route_gate_node_id)
+{
+    return std::string("{\"accountId\":\"") + std::string(account_id) +
+           "\",\"entityId\":\"" + std::string(entity_id) +
+           "\",\"sessionId\":" + std::to_string(session_id) +
+           ",\"gateNodeId\":\"" + std::string(gate_node_id) +
+           "\",\"gameNodeId\":\"" + std::string(game_node_id) +
+           "\",\"displayName\":\"" + std::string(display_name) +
+           "\",\"proxyEntityId\":\"" + std::string(entity_id) +
+           "\",\"proxyRouteGateNodeId\":\"" + std::string(proxy_route_gate_node_id) +
+           "\"}";
 }
 
 void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
@@ -426,6 +531,7 @@ void PopulateManagedInitInput(ManagedInitInput* input, std::string_view node_id)
     input->args.native_callbacks.create_once_timer = nullptr;
     input->args.native_callbacks.cancel_timer = nullptr;
     input->args.native_callbacks.forward_stub_call = nullptr;
+    input->args.native_callbacks.forward_proxy_call = nullptr;
 }
 
 xs::host::ManagedServerStubOwnershipEntry MakeOwnershipEntry(std::string_view entity_type, std::string_view entity_id,
@@ -588,6 +694,7 @@ void TestLoadAndBindExportsSucceed()
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
     init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
     XS_CHECK(exports.init(&init_input.args) == 0);
     XS_CHECK(exports.on_message(nullptr) == 0);
     XS_CHECK(exports.on_tick(1234, 16) == 0);
@@ -666,6 +773,7 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(callback_capture.timers.fired_timer_ids.size() == 1U);
     XS_CHECK(callback_capture.timers.cancelled_timer_ids.empty());
     XS_CHECK(callback_capture.forwarded_stub_calls.call_count == 0U);
+    XS_CHECK(callback_capture.forwarded_proxy_calls.call_count == 0U);
     if (callback_capture.timers.requested_create_once_delays_ms.size() == 1U)
     {
         XS_CHECK(callback_capture.timers.requested_create_once_delays_ms[0] == 5000U);
@@ -767,6 +875,7 @@ void TestManagedRuntimeForwardsRemoteStubCallThroughNativeCallback()
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
     init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
 
     XS_CHECK(exports.init(&init_input.args) == 0);
 
@@ -809,6 +918,116 @@ void TestManagedRuntimeForwardsRemoteStubCallThroughNativeCallback()
     }
 }
 
+void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
+{
+    xs::host::ManagedRuntimeHost host;
+
+    const xs::host::ManagedHostErrorCode load_result = host.Load(MakePrimaryManagedRuntimeHostOptions());
+    XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
+    XS_CHECK_MSG(host.BindExports() == xs::host::ManagedHostErrorCode::None, "BindExports failed.");
+
+    xs::host::ManagedExports exports{};
+    XS_CHECK_MSG(host.GetExports(exports) == xs::host::ManagedHostErrorCode::None, "GetExports failed.");
+
+    ManagedInitInput init_input{};
+    PopulateManagedInitInput(&init_input, "Game0");
+    ManagedCallbackCapture callback_capture{};
+    callback_capture.timers.exports = &exports;
+    init_input.args.native_callbacks.context = &callback_capture;
+    init_input.args.native_callbacks.on_server_stub_ready = &OnServerStubReady;
+    init_input.args.native_callbacks.on_log = &OnManagedLog;
+    init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
+    init_input.args.native_callbacks.cancel_timer = &CancelTimer;
+    init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
+
+    XS_CHECK(exports.init(&init_input.args) == 0);
+
+    std::vector<xs::host::ManagedServerStubOwnershipEntry> assignments;
+    assignments.push_back(MakeOwnershipEntry("OnlineStub", "unknown", "Game0"));
+
+    xs::host::ManagedServerStubOwnershipSync ownership_sync{};
+    ownership_sync.struct_size = sizeof(xs::host::ManagedServerStubOwnershipSync);
+    ownership_sync.assignment_epoch = 17U;
+    ownership_sync.assignment_count = static_cast<std::uint32_t>(assignments.size());
+    ownership_sync.assignments = assignments.data();
+
+    XS_CHECK(exports.apply_server_stub_ownership(&ownership_sync) == 0);
+
+    constexpr std::string_view kAvatarEntityId = "01234567-89ab-cdef-0123-456789abcdef";
+    const std::string registration_payload_text = BuildOnlineAvatarRegistrationPayload(
+        "account-remote",
+        kAvatarEntityId,
+        77U,
+        "Gate7",
+        "Game9",
+        "Remote Hero",
+        "Gate7");
+    const std::span<const std::byte> registration_payload(
+        reinterpret_cast<const std::byte*>(registration_payload_text.data()),
+        registration_payload_text.size());
+    const std::vector<std::byte> register_relay_payload =
+        EncodeRelayForwardStubCallPayload("GM", "Game0", "OnlineStub", 5200U, registration_payload);
+
+    const xs::host::ManagedMessageView register_message{
+        .struct_size = sizeof(xs::host::ManagedMessageView),
+        .msg_id = xs::net::kRelayForwardStubCallMsgId,
+        .seq = 0U,
+        .flags = 0U,
+        .session_id = 0U,
+        .player_id = 0U,
+        .payload = reinterpret_cast<const std::uint8_t*>(register_relay_payload.data()),
+        .payload_length = static_cast<std::uint32_t>(register_relay_payload.size()),
+        .reserved0 = 0U,
+    };
+    XS_CHECK(exports.on_message(&register_message) == 0);
+
+    const std::string broadcast_payload_text = "hello-online";
+    const std::span<const std::byte> broadcast_payload(
+        reinterpret_cast<const std::byte*>(broadcast_payload_text.data()),
+        broadcast_payload_text.size());
+    const std::vector<std::byte> broadcast_relay_payload =
+        EncodeRelayForwardStubCallPayload("GM", "Game0", "OnlineStub", 5201U, broadcast_payload);
+
+    const xs::host::ManagedMessageView broadcast_message{
+        .struct_size = sizeof(xs::host::ManagedMessageView),
+        .msg_id = xs::net::kRelayForwardStubCallMsgId,
+        .seq = 0U,
+        .flags = 0U,
+        .session_id = 0U,
+        .player_id = 0U,
+        .payload = reinterpret_cast<const std::uint8_t*>(broadcast_relay_payload.data()),
+        .payload_length = static_cast<std::uint32_t>(broadcast_relay_payload.size()),
+        .reserved0 = 0U,
+    };
+    XS_CHECK(exports.on_message(&broadcast_message) == 0);
+
+    XS_CHECK(callback_capture.forwarded_proxy_calls.call_count == 1U);
+    XS_CHECK(callback_capture.forwarded_proxy_calls.route_gate_node_ids.size() == 1U);
+    XS_CHECK(callback_capture.forwarded_proxy_calls.target_entity_ids.size() == 1U);
+    XS_CHECK(callback_capture.forwarded_proxy_calls.msg_ids.size() == 1U);
+    XS_CHECK(callback_capture.forwarded_proxy_calls.payloads.size() == 1U);
+    if (callback_capture.forwarded_proxy_calls.route_gate_node_ids.size() == 1U)
+    {
+        XS_CHECK(callback_capture.forwarded_proxy_calls.route_gate_node_ids[0] == "Gate7");
+    }
+    if (callback_capture.forwarded_proxy_calls.target_entity_ids.size() == 1U)
+    {
+        XS_CHECK(callback_capture.forwarded_proxy_calls.target_entity_ids[0] == kAvatarEntityId);
+    }
+    if (callback_capture.forwarded_proxy_calls.msg_ids.size() == 1U)
+    {
+        XS_CHECK(callback_capture.forwarded_proxy_calls.msg_ids[0] == 6201U);
+    }
+    if (callback_capture.forwarded_proxy_calls.payloads.size() == 1U)
+    {
+        const std::string payload_text(
+            reinterpret_cast<const char*>(callback_capture.forwarded_proxy_calls.payloads[0].data()),
+            callback_capture.forwarded_proxy_calls.payloads[0].size());
+        XS_CHECK(payload_text == "hello-online");
+    }
+}
+
 void TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub()
 {
     xs::host::ManagedRuntimeHost host;
@@ -830,6 +1049,7 @@ void TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub()
     init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
     init_input.args.native_callbacks.cancel_timer = &CancelTimer;
     init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
 
     XS_CHECK(exports.init(&init_input.args) == 0);
 
@@ -866,6 +1086,89 @@ void TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub()
     XS_CHECK(exports.on_message(&message) == 0);
     XS_CHECK(CountManagedLogs(callback_capture.logs, static_cast<std::uint32_t>(xs::host::ManagedLogLevel::Info),
                               "MatchStub", "MatchStub received call msgId=5101.") == 1U);
+}
+
+void TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar()
+{
+    xs::host::ManagedRuntimeHost host;
+
+    const xs::host::ManagedHostErrorCode load_result = host.Load(MakePrimaryManagedRuntimeHostOptions());
+    XS_CHECK_MSG(load_result == xs::host::ManagedHostErrorCode::None, DescribeManagedHostResult(load_result).c_str());
+    XS_CHECK_MSG(host.BindExports() == xs::host::ManagedHostErrorCode::None, "BindExports failed.");
+
+    xs::host::ManagedExports exports{};
+    XS_CHECK_MSG(host.GetExports(exports) == xs::host::ManagedHostErrorCode::None, "GetExports failed.");
+
+    ManagedInitInput init_input{};
+    PopulateManagedInitInput(&init_input, "Game1");
+    ManagedCallbackCapture callback_capture{};
+    callback_capture.timers.exports = &exports;
+    init_input.args.native_callbacks.context = &callback_capture;
+    init_input.args.native_callbacks.on_server_stub_ready = &OnServerStubReady;
+    init_input.args.native_callbacks.on_log = &OnManagedLog;
+    init_input.args.native_callbacks.create_once_timer = &CreateOnceTimer;
+    init_input.args.native_callbacks.cancel_timer = &CancelTimer;
+    init_input.args.native_callbacks.forward_stub_call = &ForwardStubCall;
+    init_input.args.native_callbacks.forward_proxy_call = &ForwardProxyCall;
+
+    XS_CHECK(exports.init(&init_input.args) == 0);
+
+    std::vector<xs::host::ManagedServerStubOwnershipEntry> assignments;
+    assignments.push_back(MakeOwnershipEntry("OnlineStub", "unknown", "Game1"));
+
+    xs::host::ManagedServerStubOwnershipSync ownership_sync{};
+    ownership_sync.struct_size = sizeof(xs::host::ManagedServerStubOwnershipSync);
+    ownership_sync.assignment_epoch = 19U;
+    ownership_sync.assignment_count = static_cast<std::uint32_t>(assignments.size());
+    ownership_sync.assignments = assignments.data();
+
+    XS_CHECK(exports.apply_server_stub_ownership(&ownership_sync) == 0);
+
+    constexpr std::string_view kAvatarEntityId = "89abcdef-0123-4567-89ab-cdef01234567";
+    const std::string create_payload_text = BuildCreateAvatarPayload(
+        "proxy-account",
+        kAvatarEntityId,
+        "Proxy Hero",
+        "Gate3",
+        84U);
+    const xs::host::ManagedMessageView create_message{
+        .struct_size = sizeof(xs::host::ManagedMessageView),
+        .msg_id = 2003U,
+        .seq = 0U,
+        .flags = 0U,
+        .session_id = 0U,
+        .player_id = 0U,
+        .payload = reinterpret_cast<const std::uint8_t*>(create_payload_text.data()),
+        .payload_length = static_cast<std::uint32_t>(create_payload_text.size()),
+        .reserved0 = 0U,
+    };
+    XS_CHECK(exports.on_message(&create_message) == 0);
+
+    const std::string forwarded_payload_text = "proxy-delivery";
+    const std::span<const std::byte> forwarded_payload(
+        reinterpret_cast<const std::byte*>(forwarded_payload_text.data()),
+        forwarded_payload_text.size());
+    const std::vector<std::byte> relay_payload =
+        EncodeRelayForwardProxyCallPayload("Game0", "Gate3", kAvatarEntityId, 6201U, forwarded_payload);
+
+    const xs::host::ManagedMessageView message{
+        .struct_size = sizeof(xs::host::ManagedMessageView),
+        .msg_id = xs::net::kRelayForwardProxyCallMsgId,
+        .seq = 0U,
+        .flags = 0U,
+        .session_id = 0U,
+        .player_id = 0U,
+        .payload = reinterpret_cast<const std::uint8_t*>(relay_payload.data()),
+        .payload_length = static_cast<std::uint32_t>(relay_payload.size()),
+        .reserved0 = 0U,
+    };
+
+    XS_CHECK(exports.on_message(&message) == 0);
+    XS_CHECK(callback_capture.forwarded_proxy_calls.call_count == 0U);
+    XS_CHECK(ContainsLogMessageSubstring(
+        callback_capture.logs,
+        "AvatarEntity",
+        "received proxy call msgId=6201."));
 }
 
 void TestLoadAllowsSecondInitializationAfterUnload()
@@ -951,7 +1254,9 @@ int main()
     TestLoadRejectsMissingAssembly();
     TestLoadAndBindExportsSucceed();
     TestManagedRuntimeForwardsRemoteStubCallThroughNativeCallback();
+    TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback();
     TestManagedRuntimeDispatchesForwardedStubCallMessageToTargetStub();
+    TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar();
     TestManagedExportsProvideServerStubCatalogFunctions();
     TestLoadAllowsSecondInitializationAfterUnload();
     TestBindRejectsAbiMismatch();

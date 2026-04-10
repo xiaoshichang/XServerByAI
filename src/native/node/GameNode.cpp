@@ -35,6 +35,8 @@ constexpr std::uint16_t kErrorResponseFlags = kResponseFlags | static_cast<std::
 constexpr std::int64_t kManagedNativeCreateTimerFailed = static_cast<std::int64_t>(xs::core::TimerErrorCode::Unknown);
 constexpr std::int32_t kManagedNativeCallbackInvalidArgument = -1;
 constexpr std::int32_t kManagedNativeCallbackOperationFailed = -2;
+constexpr std::int32_t kManagedNativeProxyCallInvalidArgument = 1;
+constexpr std::int32_t kManagedNativeProxyCallInvalidMessageId = 2;
 constexpr std::int32_t kManagedNativeCallbackTargetNodeUnavailable = 4;
 constexpr std::uint32_t kGateCreateAvatarEntityMsgId = 2003U;
 constexpr std::uint32_t kGameAvatarEntityCreateResultMsgId = 2004U;
@@ -445,6 +447,46 @@ std::int32_t GameNode::HandleManagedForwardStubCallCallback(
     return game_node->ForwardManagedStubCall(target_game_node_id, target_stub_type, msg_id, payload_view);
 }
 
+std::int32_t GameNode::HandleManagedForwardProxyCallCallback(
+    void* context,
+    const std::uint8_t* route_gate_node_id_utf8,
+    std::uint32_t route_gate_node_id_length,
+    const std::uint8_t* target_entity_id_utf8,
+    std::uint32_t target_entity_id_length,
+    std::uint32_t msg_id,
+    const std::uint8_t* payload,
+    std::uint32_t payload_length)
+{
+    if (context == nullptr)
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    std::string_view route_gate_node_id;
+    std::string_view target_entity_id;
+    if (!TryReadManagedUtf8View(route_gate_node_id_utf8, route_gate_node_id_length, &route_gate_node_id) ||
+        !TryReadManagedUtf8View(target_entity_id_utf8, target_entity_id_length, &target_entity_id))
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    if (msg_id == 0U)
+    {
+        return kManagedNativeProxyCallInvalidMessageId;
+    }
+
+    if (payload == nullptr && payload_length != 0U)
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    const std::span<const std::byte> payload_view(
+        reinterpret_cast<const std::byte*>(payload),
+        static_cast<std::size_t>(payload_length));
+    auto* game_node = static_cast<GameNode*>(context);
+    return game_node->ForwardManagedProxyCall(route_gate_node_id, target_entity_id, msg_id, payload_view);
+}
+
 void GameNode::HandleManagedLog(std::uint32_t level, std::string_view category, std::string_view message)
 {
     const std::string_view resolved_category = category.empty() ? kManagedRuntimeLogCategory : category;
@@ -578,6 +620,82 @@ std::int32_t GameNode::ForwardManagedStubCall(
     {
         gate_session->last_protocol_error = std::string(inner_network()->last_error_message());
         logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send forwarded stub call to Gate.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    gate_session->last_protocol_error.clear();
+    return 0;
+}
+
+std::int32_t GameNode::ForwardManagedProxyCall(
+    std::string_view route_gate_node_id,
+    std::string_view target_entity_id,
+    std::uint32_t msg_id,
+    std::span<const std::byte> payload)
+{
+    if (route_gate_node_id.empty() || target_entity_id.empty() || msg_id == 0U || inner_network() == nullptr)
+    {
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    InnerNetworkSession* gate_session = remote_session(route_gate_node_id);
+    if (gate_session == nullptr ||
+        gate_session->process_type != xs::core::ProcessType::Gate ||
+        gate_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !gate_session->registered ||
+        !gate_session->inner_network_ready)
+    {
+        logger().Log(xs::core::LogLevel::Warn, "inner",
+                     "Game node cannot forward proxy call because the route Gate is unavailable.");
+        return kManagedNativeCallbackTargetNodeUnavailable;
+    }
+
+    const xs::net::RelayForwardProxyCall relay_message{
+        .source_game_node_id = std::string(node_id()),
+        .route_gate_node_id = std::string(route_gate_node_id),
+        .target_entity_id = std::string(target_entity_id),
+        .proxy_call_msg_id = msg_id,
+        .relay_flags = 0u,
+        .payload = std::vector<std::byte>(payload.begin(), payload.end()),
+    };
+
+    std::size_t wire_size = 0u;
+    const xs::net::RelayCodecErrorCode wire_size_result =
+        xs::net::GetRelayForwardProxyCallWireSize(relay_message, &wire_size);
+    if (wire_size_result != xs::net::RelayCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(wire_size_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to size forwarded proxy call payload.");
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    std::vector<std::byte> relay_payload(wire_size);
+    const xs::net::RelayCodecErrorCode encode_result =
+        xs::net::EncodeRelayForwardProxyCall(relay_message, relay_payload);
+    if (encode_result != xs::net::RelayCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(encode_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to encode forwarded proxy call payload.");
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    const xs::net::PacketHeader header =
+        xs::net::MakePacketHeader(xs::net::kRelayForwardProxyCallMsgId, xs::net::kPacketSeqNone, 0U,
+                                  static_cast<std::uint32_t>(relay_payload.size()));
+    std::vector<std::byte> packet(xs::net::kPacketHeaderSize + relay_payload.size());
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::EncodePacket(header, relay_payload, packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(xs::net::PacketCodecErrorMessage(packet_result));
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to wrap forwarded proxy call into a packet.");
+        return kManagedNativeProxyCallInvalidArgument;
+    }
+
+    const NodeErrorCode send_result = inner_network()->SendToConnector(route_gate_node_id, packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        gate_session->last_protocol_error = std::string(inner_network()->last_error_message());
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to send forwarded proxy call to Gate.");
         return kManagedNativeCallbackTargetNodeUnavailable;
     }
 
@@ -878,6 +996,7 @@ NodeErrorCode GameNode::InitializeManagedRuntime(const xs::core::ManagedConfig& 
         .create_once_timer = &GameNode::HandleManagedCreateOnceTimerCallback,
         .cancel_timer = &GameNode::HandleManagedCancelTimerCallback,
         .forward_stub_call = &GameNode::HandleManagedForwardStubCallCallback,
+        .forward_proxy_call = &GameNode::HandleManagedForwardProxyCallCallback,
     };
     const xs::host::ManagedInitArgs init_args{
         .struct_size = sizeof(xs::host::ManagedInitArgs),
@@ -1030,6 +1149,67 @@ void GameNode::HandleGmMessage(std::span<const std::byte> payload)
         return;
     }
 
+    if (packet.header.msg_id == xs::net::kRelayForwardStubCallMsgId)
+    {
+        if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+        {
+            session->last_protocol_error = "GM forwarded stub call envelope is invalid.";
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node ignored GM forwarded stub call with an invalid envelope.");
+            return;
+        }
+
+        xs::net::RelayForwardStubCall relay_message{};
+        const xs::net::RelayCodecErrorCode decode_result =
+            xs::net::DecodeRelayForwardStubCall(packet.payload, &relay_message);
+        if (decode_result != xs::net::RelayCodecErrorCode::None)
+        {
+            session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(decode_result));
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode GM forwarded stub call.");
+            return;
+        }
+
+        if (relay_message.target_game_node_id != node_id())
+        {
+            session->last_protocol_error = "GM forwarded stub call target game node mismatch.";
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node rejected GM forwarded stub call for another game node.");
+            return;
+        }
+
+        if (!managed_exports_loaded_ || managed_exports_.on_message == nullptr)
+        {
+            session->last_protocol_error = "Game managed runtime is unavailable for forwarded stub call.";
+            logger().Log(xs::core::LogLevel::Warn, "runtime",
+                         "Game node cannot dispatch GM forwarded stub call before managed exports are ready.");
+            return;
+        }
+
+        const xs::host::ManagedMessageView managed_message{
+            .struct_size = sizeof(xs::host::ManagedMessageView),
+            .msg_id = packet.header.msg_id,
+            .seq = packet.header.seq,
+            .flags = packet.header.flags,
+            .session_id = 0u,
+            .player_id = 0u,
+            .payload = reinterpret_cast<const std::uint8_t*>(packet.payload.data()),
+            .payload_length = static_cast<std::uint32_t>(packet.payload.size()),
+            .reserved0 = 0u,
+        };
+        const std::int32_t managed_result = managed_exports_.on_message(&managed_message);
+        if (managed_result != 0)
+        {
+            session->last_protocol_error =
+                "Game managed runtime rejected GM forwarded stub call with error code " + std::to_string(managed_result) + ".";
+            logger().Log(xs::core::LogLevel::Warn, "runtime",
+                         "Game node observed a managed GM forwarded stub call failure.");
+            return;
+        }
+
+        session->last_protocol_error.clear();
+        return;
+    }
+
     if (packet.header.seq == xs::net::kPacketSeqNone)
     {
         log_invalid_response_envelope("GM response envelope is invalid.",
@@ -1096,6 +1276,67 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         session->last_protocol_error = std::string(protocol_error);
         logger().Log(xs::core::LogLevel::Warn, "inner", log_message);
     };
+
+    if (packet.header.msg_id == xs::net::kRelayForwardProxyCallMsgId)
+    {
+        if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+        {
+            session->last_protocol_error = "Gate forwarded proxy call envelope is invalid.";
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node ignored Gate forwarded proxy call with an invalid envelope.");
+            return;
+        }
+
+        xs::net::RelayForwardProxyCall relay_message{};
+        const xs::net::RelayCodecErrorCode decode_result =
+            xs::net::DecodeRelayForwardProxyCall(packet.payload, &relay_message);
+        if (decode_result != xs::net::RelayCodecErrorCode::None)
+        {
+            session->last_protocol_error = std::string(xs::net::RelayCodecErrorMessage(decode_result));
+            logger().Log(xs::core::LogLevel::Warn, "inner", "Game node failed to decode Gate forwarded proxy call.");
+            return;
+        }
+
+        if (relay_message.route_gate_node_id != gate_node_id)
+        {
+            session->last_protocol_error = "Gate forwarded proxy call route gate node mismatch.";
+            logger().Log(xs::core::LogLevel::Warn, "inner",
+                         "Game node rejected Gate forwarded proxy call addressed to another Gate.");
+            return;
+        }
+
+        if (!managed_exports_loaded_ || managed_exports_.on_message == nullptr)
+        {
+            session->last_protocol_error = "Game managed runtime is unavailable for forwarded proxy call.";
+            logger().Log(xs::core::LogLevel::Warn, "runtime",
+                         "Game node cannot dispatch forwarded proxy call before managed exports are ready.");
+            return;
+        }
+
+        const xs::host::ManagedMessageView managed_message{
+            .struct_size = sizeof(xs::host::ManagedMessageView),
+            .msg_id = packet.header.msg_id,
+            .seq = packet.header.seq,
+            .flags = packet.header.flags,
+            .session_id = 0u,
+            .player_id = 0u,
+            .payload = reinterpret_cast<const std::uint8_t*>(packet.payload.data()),
+            .payload_length = static_cast<std::uint32_t>(packet.payload.size()),
+            .reserved0 = 0u,
+        };
+        const std::int32_t managed_result = managed_exports_.on_message(&managed_message);
+        if (managed_result != 0)
+        {
+            session->last_protocol_error =
+                "Game managed runtime rejected forwarded proxy call with error code " + std::to_string(managed_result) + ".";
+            logger().Log(xs::core::LogLevel::Warn, "runtime",
+                         "Game node observed a managed forwarded proxy call failure.");
+            return;
+        }
+
+        session->last_protocol_error.clear();
+        return;
+    }
 
     if (packet.header.msg_id == xs::net::kRelayForwardStubCallMsgId)
     {

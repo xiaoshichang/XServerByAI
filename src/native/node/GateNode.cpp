@@ -873,6 +873,12 @@ void GateNode::HandleGameMessage(
         return;
     }
 
+    if (raw_header.msg_id == xs::net::kRelayForwardProxyCallMsgId)
+    {
+        HandleGameForwardProxyCallMessage(routing_id, payload);
+        return;
+    }
+
     if (raw_header.msg_id == xs::net::kRelayForwardStubCallMsgId)
     {
         HandleGameForwardStubCallMessage(routing_id, payload);
@@ -1149,6 +1155,160 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
         xs::core::LogContextField{"gameNodeId", game_node_id},
     };
     logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate confirmed AvatarEntity creation back to the client.", success_context);
+}
+
+void GateNode::HandleGameForwardProxyCallMessage(
+    std::span<const std::byte> routing_id,
+    std::span<const std::byte> payload)
+{
+    xs::net::PacketView packet{};
+    const xs::net::PacketCodecErrorCode packet_result = xs::net::DecodePacket(payload, &packet);
+    if (packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"packetError", std::string(xs::net::PacketCodecErrorMessage(packet_result))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node dropped malformed Game forwarded proxy call packet.", context);
+        return;
+    }
+
+    if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+            xs::core::LogContextField{"flags", std::to_string(packet.header.flags)},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node ignored forwarded proxy call with an invalid envelope.", context);
+        return;
+    }
+
+    xs::net::RelayForwardProxyCall relay_message{};
+    const xs::net::RelayCodecErrorCode decode_result =
+        xs::net::DecodeRelayForwardProxyCall(packet.payload, &relay_message);
+    if (decode_result != xs::net::RelayCodecErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", RoutingIdToText(routing_id)},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"relayError", std::string(xs::net::RelayCodecErrorMessage(decode_result))},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to decode forwarded proxy call payload.", context);
+        return;
+    }
+
+    InnerNetworkSession* source_session = inner_network_remote_sessions().FindMutableByRoutingId(routing_id);
+    if (source_session == nullptr || !source_session->registered)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"routingIdBytes", ToString(static_cast<std::uint64_t>(routing_id.size()))},
+            xs::core::LogContextField{"targetEntityId", relay_message.target_entity_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded proxy call from an unregistered Game.", context);
+        return;
+    }
+
+    if (source_session->node_id != relay_message.source_game_node_id)
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"gameNodeId", source_session->node_id},
+            xs::core::LogContextField{"declaredSourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"targetEntityId", relay_message.target_entity_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded proxy call with a mismatched source Game node.", context);
+        return;
+    }
+
+    if (relay_message.route_gate_node_id != node_id())
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"declaredRouteGateNodeId", relay_message.route_gate_node_id},
+            xs::core::LogContextField{"targetEntityId", relay_message.target_entity_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded proxy call addressed to another route Gate.", context);
+        return;
+    }
+
+    const auto avatar_iterator = session_ids_by_avatar_.find(relay_message.target_entity_id);
+    if (avatar_iterator == session_ids_by_avatar_.end())
+    {
+        const std::array<xs::core::LogContextField, 4> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"routeGateNodeId", relay_message.route_gate_node_id},
+            xs::core::LogContextField{"targetEntityId", relay_message.target_entity_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node could not resolve forwarded proxy call target avatar to a live session.", context);
+        return;
+    }
+
+    const std::uint64_t target_session_id = avatar_iterator->second;
+    ClientSessionRecord* client_record = client_session_record(target_session_id);
+    if (client_record == nullptr ||
+        client_record->closed ||
+        client_record->avatar_id != relay_message.target_entity_id ||
+        client_record->game_node_id.empty() ||
+        client_record->gate_node_id != node_id())
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sessionId", ToString(target_session_id)},
+            xs::core::LogContextField{"targetEntityId", relay_message.target_entity_id},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"routeGateNodeId", relay_message.route_gate_node_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected forwarded proxy call because the target avatar session record is stale.", context);
+        return;
+    }
+
+    InnerNetworkSession* target_session = remote_session(client_record->game_node_id);
+    if (target_session == nullptr ||
+        target_session->process_type != xs::core::ProcessType::Game ||
+        target_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !target_session->registered ||
+        !target_session->inner_network_ready ||
+        target_session->routing_id.empty())
+    {
+        const std::array<xs::core::LogContextField, 5> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"targetGameNodeId", client_record->game_node_id},
+            xs::core::LogContextField{"routeGateNodeId", relay_message.route_gate_node_id},
+            xs::core::LogContextField{"targetEntityId", relay_message.target_entity_id},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node cannot forward proxy call because target Game is unavailable.", context);
+        return;
+    }
+
+    if (inner_network() == nullptr)
+    {
+        return;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(target_session->routing_id, payload);
+    if (send_result != NodeErrorCode::None)
+    {
+        const std::array<xs::core::LogContextField, 6> context{
+            xs::core::LogContextField{"nodeId", std::string(node_id())},
+            xs::core::LogContextField{"sourceGameNodeId", relay_message.source_game_node_id},
+            xs::core::LogContextField{"targetGameNodeId", client_record->game_node_id},
+            xs::core::LogContextField{"routeGateNodeId", relay_message.route_gate_node_id},
+            xs::core::LogContextField{"targetEntityId", relay_message.target_entity_id},
+            xs::core::LogContextField{"innerNetworkError", std::string(inner_network()->last_error_message())},
+        };
+        logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node failed to forward proxy call to target Game.", context);
+    }
 }
 
 void GateNode::HandleGameForwardStubCallMessage(

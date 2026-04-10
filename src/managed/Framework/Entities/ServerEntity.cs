@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using XServer.Managed.Framework.Interop;
 using XServer.Managed.Framework.Runtime;
 
@@ -7,6 +7,7 @@ namespace XServer.Managed.Framework.Entities
     public abstract partial class ServerEntity
     {
         private IServerStubCaller? _stubCaller;
+        private IProxyEntityCaller? _proxyEntityCaller;
         private INativeTimerScheduler? _nativeTimerScheduler;
 
         protected ServerEntity()
@@ -48,14 +49,54 @@ namespace XServer.Managed.Framework.Entities
             _stubCaller.CallStub(this, targetStubType, new StubCallMessage(msgId, payload));
         }
 
+        public void CallProxy(ProxyAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)
+        {
+            if (targetAddress == null ||
+                targetAddress.EntityId == Guid.Empty ||
+                string.IsNullOrWhiteSpace(targetAddress.RouteGateNodeId))
+            {
+                LogCallProxyError("Proxy address is invalid.");
+                return;
+            }
+
+            if (msgId == 0)
+            {
+                LogCallProxyError("Proxy call msgId must not be zero.");
+                return;
+            }
+
+            if (_proxyEntityCaller == null)
+            {
+                LogCallProxyError("Proxy caller is not configured for this entity.");
+                return;
+            }
+
+            _proxyEntityCaller.CallProxy(this, targetAddress, new ProxyCallMessage(msgId, payload));
+        }
+
         internal void SetStubCaller(IServerStubCaller? stubCaller)
         {
             _stubCaller = stubCaller;
         }
 
+        internal void SetProxyEntityCaller(IProxyEntityCaller? proxyEntityCaller)
+        {
+            _proxyEntityCaller = proxyEntityCaller;
+        }
+
         internal void SetNativeTimerScheduler(INativeTimerScheduler? nativeTimerScheduler)
         {
             _nativeTimerScheduler = nativeTimerScheduler;
+        }
+
+        internal ProxyCallErrorCode ReceiveProxyCall(ProxyCallMessage message)
+        {
+            if (message.MsgId == 0)
+            {
+                return ProxyCallErrorCode.InvalidMessageId;
+            }
+
+            return OnProxyCall(message);
         }
 
         protected long CreateNativeOnceTimer(TimeSpan delay, Action callback)
@@ -78,7 +119,18 @@ namespace XServer.Managed.Framework.Entities
             return _nativeTimerScheduler.Cancel(timerId);
         }
 
+        protected virtual ProxyCallErrorCode OnProxyCall(ProxyCallMessage message)
+        {
+            _ = message;
+            return ProxyCallErrorCode.EntityRejected;
+        }
+
         private void LogCallStubError(string message)
+        {
+            NativeLoggerBridge.Warn(EntityType, message);
+        }
+
+        private void LogCallProxyError(string message)
         {
             NativeLoggerBridge.Warn(EntityType, message);
         }
