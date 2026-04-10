@@ -94,7 +94,7 @@
 6. M5-06 实现 EntityManager 管理所有ServerEntity。实现Game根据Stub分布表创建ServerStub并调用OnReady通知到Game，去掉之前的临时逻辑。 Deps: M5-04 | 状态: 已完成
 7. M5-07 增加 `SpaceEntity`（负责管理场景，不可迁移）与 `AvatarEntity`（代表玩家角色，可迁移），当前阶段只做占位。Deps: M5-04 | 状态:已完成
 8. M5-08 实现通过 `MailBox` 发送消息。Deps: M2-10, M5-06, M5-07 | 状态: 已完成
-9. M5-09 实现通过 `Proxy` 发送消息。Deps: M1-12, M4-05, M5-08 | 状态: 开发中
+9. M5-09 实现通过 `Proxy` 发送消息。Deps: M1-12, M4-05, M5-08 | 状态: 已完成
 10. M5-10 实现实体 Tick 接口与驱动（C++ 调用）。Deps: M5-02, M5-04 | 状态: 未开发
 11. M5-11 实现状态变更脏标记与同步钩子。Deps: M5-04 | 状态: 未开发
 12. M5-12 实现持久化接口（异步保存/加载）。Deps: M5-04 | 状态: 未开发
