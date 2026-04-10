@@ -10,7 +10,7 @@ namespace XServer.Managed.GameLogic.Services
 
         public IReadOnlyList<ReceivedCall> ReceivedCalls => _receivedCalls;
 
-        protected override StubCallErrorCode OnStubCall(StubCallMessage message)
+        protected override StubCallErrorCode OnStubCall(EntityMessage message)
         {
             NativeLoggerBridge.Info(nameof(MatchStub), $"MatchStub received call msgId={message.MsgId}.");
             _receivedCalls.Add(new ReceivedCall(message.MsgId, message.Payload.ToArray()));

@@ -24,7 +24,7 @@ namespace XServer.Managed.Framework.Interop
 
         public MailboxCallErrorCode ForwardByMailbox(
             MailboxAddress targetAddress,
-            MailboxCallMessage message)
+            EntityMessage message)
         {
             if (targetAddress == null ||
                 targetAddress.EntityId == Guid.Empty ||
@@ -41,7 +41,7 @@ namespace XServer.Managed.Framework.Interop
 
         public MailboxCallErrorCode ForwardByStubType(
             string stubType,
-            MailboxCallMessage message)
+            EntityMessage message)
         {
             if (string.IsNullOrWhiteSpace(stubType))
             {
@@ -56,7 +56,7 @@ namespace XServer.Managed.Framework.Interop
 
         public ProxyCallErrorCode ForwardByServerProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message)
+            EntityMessage message)
         {
             return ForwardProxyCore(
                 targetAddress,
@@ -66,7 +66,7 @@ namespace XServer.Managed.Framework.Interop
 
         public ProxyCallErrorCode ForwardByClientProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message)
+            EntityMessage message)
         {
             return ForwardProxyCore(
                 targetAddress,
@@ -77,7 +77,7 @@ namespace XServer.Managed.Framework.Interop
         private MailboxCallErrorCode ForwardMailboxCore(
             string targetGameNodeId,
             string targetMailboxName,
-            MailboxCallMessage message)
+            EntityMessage message)
         {
             if (string.IsNullOrWhiteSpace(targetMailboxName))
             {
@@ -136,7 +136,7 @@ namespace XServer.Managed.Framework.Interop
 
         private ProxyCallErrorCode ForwardProxyCore(
             ProxyAddress targetAddress,
-            ProxyCallMessage message,
+            EntityMessage message,
             delegate* unmanaged[Cdecl]<void*, byte*, uint, byte*, uint, uint, byte*, uint, int> forwardCallback)
         {
             if (targetAddress == null ||

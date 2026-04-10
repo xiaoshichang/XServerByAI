@@ -162,7 +162,7 @@ namespace XServer.Managed.Framework.Entities
             }
         }
 
-        protected override StubCallErrorCode OnStubCall(StubCallMessage message)
+        protected override StubCallErrorCode OnStubCall(EntityMessage message)
         {
             if (message.MsgId == RegisterOnlineAvatarMessageStubMsgId)
             {
@@ -177,7 +177,7 @@ namespace XServer.Managed.Framework.Entities
             return base.OnStubCall(message);
         }
 
-        private StubCallErrorCode HandleRegisterOnlineAvatar(StubCallMessage message)
+        private StubCallErrorCode HandleRegisterOnlineAvatar(EntityMessage message)
         {
             if (!OnlineAvatarRegistrationPayloadCodec.TryDecode(message.Payload, out OnlineAvatarRegistration registration))
             {
@@ -201,7 +201,7 @@ namespace XServer.Managed.Framework.Entities
             return StubCallErrorCode.None;
         }
 
-        private StubCallErrorCode HandleBroadcastOnlineAvatar(StubCallMessage message)
+        private StubCallErrorCode HandleBroadcastOnlineAvatar(EntityMessage message)
         {
             IReadOnlyList<OnlineAvatarRegistration> registrations = SnapshotRegisteredAvatars();
             foreach (OnlineAvatarRegistration registration in registrations)

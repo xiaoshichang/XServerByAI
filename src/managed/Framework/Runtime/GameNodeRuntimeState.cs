@@ -54,11 +54,11 @@ namespace XServer.Managed.Framework.Runtime
             _ownedServerStubs.Count != 0 &&
             _ownedServerStubs.All(static stub => stub.IsReady);
 
-        internal StubCallErrorCode ReceiveStubCall(string targetStubType, StubCallMessage message)
+        internal StubCallErrorCode ReceiveStubCall(string targetStubType, EntityMessage message)
         {
             MailboxCallErrorCode mailboxResult = ReceiveMailboxCall(
                 targetStubType,
-                new MailboxCallMessage(message.MsgId, message.Payload));
+                message);
             return mailboxResult switch
             {
                 MailboxCallErrorCode.None => StubCallErrorCode.None,
@@ -71,12 +71,12 @@ namespace XServer.Managed.Framework.Runtime
             };
         }
 
-        internal MailboxCallErrorCode ReceiveMailboxCall(string targetMailboxName, MailboxCallMessage message)
+        internal MailboxCallErrorCode ReceiveMailboxCall(string targetMailboxName, EntityMessage message)
         {
             return ReceiveMailboxCall(Guid.Empty, targetMailboxName, message);
         }
 
-        internal MailboxCallErrorCode ReceiveMailboxCall(Guid targetEntityId, string targetMailboxName, MailboxCallMessage message)
+        internal MailboxCallErrorCode ReceiveMailboxCall(Guid targetEntityId, string targetMailboxName, EntityMessage message)
         {
             if (targetEntityId == Guid.Empty && string.IsNullOrWhiteSpace(targetMailboxName))
             {
@@ -119,7 +119,7 @@ namespace XServer.Managed.Framework.Runtime
             return MailboxCallErrorCode.UnknownTargetMailbox;
         }
 
-        internal ProxyCallErrorCode ReceiveProxyCall(Guid targetEntityId, ProxyCallMessage message)
+        internal ProxyCallErrorCode ReceiveProxyCall(Guid targetEntityId, EntityMessage message)
         {
             if (targetEntityId == Guid.Empty)
             {
@@ -139,7 +139,7 @@ namespace XServer.Managed.Framework.Runtime
             return targetEntity.ReceiveProxyCall(message);
         }
 
-        void IServerEntityMessageSender.CallStub(ServerEntity sourceEntity, string targetStubType, StubCallMessage message)
+        void IServerEntityMessageSender.CallStub(ServerEntity sourceEntity, string targetStubType, EntityMessage message)
         {
             StubCallErrorCode result = DispatchStubCall(sourceEntity, targetStubType, message, out string failureMessage);
             if (result != StubCallErrorCode.None)
@@ -148,7 +148,7 @@ namespace XServer.Managed.Framework.Runtime
             }
         }
 
-        void IServerEntityMessageSender.CallMailbox(ServerEntity sourceEntity, MailboxAddress targetAddress, MailboxCallMessage message)
+        void IServerEntityMessageSender.CallMailbox(ServerEntity sourceEntity, MailboxAddress targetAddress, EntityMessage message)
         {
             MailboxCallErrorCode result = DispatchMailboxCall(sourceEntity, targetAddress, message, out string failureMessage);
             if (result != MailboxCallErrorCode.None)
@@ -157,7 +157,7 @@ namespace XServer.Managed.Framework.Runtime
             }
         }
 
-        void IServerEntityMessageSender.CallServerProxy(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
+        void IServerEntityMessageSender.CallServerProxy(ServerEntity sourceEntity, ProxyAddress targetAddress, EntityMessage message)
         {
             if (sourceEntity == null ||
                 targetAddress == null ||
@@ -216,7 +216,7 @@ namespace XServer.Managed.Framework.Runtime
             }
         }
 
-        void IServerEntityMessageSender.CallClient(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message)
+        void IServerEntityMessageSender.CallClient(ServerEntity sourceEntity, ProxyAddress targetAddress, EntityMessage message)
         {
             if (sourceEntity == null ||
                 targetAddress == null ||
@@ -461,7 +461,7 @@ namespace XServer.Managed.Framework.Runtime
             StubCallErrorCode result = DispatchStubCall(
                 sourceAvatar,
                 nameof(OnlineStub),
-                new StubCallMessage(OnlineStub.RegisterOnlineAvatarMessageStubMsgId, payload),
+                new EntityMessage(OnlineStub.RegisterOnlineAvatarMessageStubMsgId, payload),
                 out string failureMessage);
             if (result != StubCallErrorCode.None)
             {
@@ -478,7 +478,7 @@ namespace XServer.Managed.Framework.Runtime
         private MailboxCallErrorCode DispatchMailboxCall(
             ServerEntity sourceEntity,
             MailboxAddress targetAddress,
-            MailboxCallMessage message,
+            EntityMessage message,
             out string failureMessage)
         {
             failureMessage = string.Empty;
@@ -539,7 +539,7 @@ namespace XServer.Managed.Framework.Runtime
         private StubCallErrorCode DispatchStubCall(
             ServerEntity sourceEntity,
             string targetStubType,
-            StubCallMessage message,
+            EntityMessage message,
             out string failureMessage)
         {
             failureMessage = string.Empty;
@@ -593,7 +593,7 @@ namespace XServer.Managed.Framework.Runtime
 
             MailboxCallErrorCode mailboxResult = _messageTransport.ForwardByStubType(
                 targetStubType,
-                new MailboxCallMessage(message.MsgId, message.Payload));
+                message);
             StubCallErrorCode remoteResult = ToStubCallErrorCode(mailboxResult);
             if (remoteResult != StubCallErrorCode.None)
             {

@@ -136,7 +136,7 @@ namespace XServer.Managed.Framework.Tests
             byte[] payload = [0xCA, 0xFE];
             StubCallErrorCode result = onlineRuntime.ReceiveStubCall(
                 nameof(OnlineStub),
-                new StubCallMessage(OnlineStub.BroadcastOnlineAvatarMessageStubMsgId, payload));
+                new EntityMessage(OnlineStub.BroadcastOnlineAvatarMessageStubMsgId, payload));
 
             Assert.Equal(StubCallErrorCode.None, result);
             Assert.Equal(1, transport.ServerProxyForwardCallCount);

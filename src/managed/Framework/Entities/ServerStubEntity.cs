@@ -34,9 +34,9 @@ namespace XServer.Managed.Framework.Entities
             _readyCallback = readyCallback;
         }
 
-        internal StubCallErrorCode ReceiveStubCall(StubCallMessage message)
+        internal StubCallErrorCode ReceiveStubCall(EntityMessage message)
         {
-            return ToStubCallErrorCode(ReceiveMailboxCall(new MailboxCallMessage(message.MsgId, message.Payload)));
+            return ToStubCallErrorCode(ReceiveMailboxCall(message));
         }
 
         protected virtual void OnReady()
@@ -44,15 +44,15 @@ namespace XServer.Managed.Framework.Entities
             NativeLoggerBridge.Log(ManagedLogLevel.Info, "ServerStubEntity", $"Stub {GetType()} is ready.");
         }
 
-        protected virtual StubCallErrorCode OnStubCall(StubCallMessage message)
+        protected virtual StubCallErrorCode OnStubCall(EntityMessage message)
         {
             _ = message;
             return StubCallErrorCode.StubRejected;
         }
 
-        protected override MailboxCallErrorCode OnMailboxCall(MailboxCallMessage message)
+        protected override MailboxCallErrorCode OnMailboxCall(EntityMessage message)
         {
-            return ToMailboxCallErrorCode(OnStubCall(new StubCallMessage(message.MsgId, message.Payload)));
+            return ToMailboxCallErrorCode(OnStubCall(message));
         }
 
         private static StubCallErrorCode ToStubCallErrorCode(MailboxCallErrorCode result)

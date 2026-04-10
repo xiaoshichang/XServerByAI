@@ -113,7 +113,7 @@ namespace XServer.Managed.Framework.Interop
 
                     ProxyCallErrorCode proxyResult = s_runtimeState.ReceiveProxyCall(
                         proxyRelay.TargetEntityId,
-                        new ProxyCallMessage(proxyRelay.ProxyCallMsgId, proxyRelay.Payload));
+                        new EntityMessage(proxyRelay.ProxyCallMsgId, proxyRelay.Payload));
                     if (proxyResult != ProxyCallErrorCode.None)
                     {
                         NativeLoggerBridge.Warn(
@@ -145,7 +145,7 @@ namespace XServer.Managed.Framework.Interop
                 MailboxCallErrorCode result = s_runtimeState.ReceiveMailboxCall(
                     relay.TargetEntityId,
                     relay.TargetMailboxName,
-                    new MailboxCallMessage(relay.MailboxCallMsgId, relay.Payload));
+                    new EntityMessage(relay.MailboxCallMsgId, relay.Payload));
                 if (result != MailboxCallErrorCode.None)
                 {
                     NativeLoggerBridge.Warn(

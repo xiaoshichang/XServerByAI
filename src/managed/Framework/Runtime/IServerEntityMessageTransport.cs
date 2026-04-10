@@ -6,18 +6,18 @@ namespace XServer.Managed.Framework.Runtime
     {
         MailboxCallErrorCode ForwardByMailbox(
             MailboxAddress targetAddress,
-            MailboxCallMessage message);
+            EntityMessage message);
 
         MailboxCallErrorCode ForwardByStubType(
             string stubType,
-            MailboxCallMessage message);
+            EntityMessage message);
 
         ProxyCallErrorCode ForwardByServerProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message);
+            EntityMessage message);
 
         ProxyCallErrorCode ForwardByClientProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message);
+            EntityMessage message);
     }
 }

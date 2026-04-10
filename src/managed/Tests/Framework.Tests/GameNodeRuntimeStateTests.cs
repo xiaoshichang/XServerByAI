@@ -234,7 +234,7 @@ namespace XServer.Managed.Framework.Tests
             byte[] payload = [0x41, 0x42, 0x43];
             MailboxCallErrorCode result = runtimeState.ReceiveMailboxCall(
                 entity.EntityId.ToString("D"),
-                new MailboxCallMessage(7101u, payload));
+                new EntityMessage(7101u, payload));
 
             Assert.Equal(MailboxCallErrorCode.None, result);
             Assert.Collection(
@@ -256,7 +256,7 @@ namespace XServer.Managed.Framework.Tests
 
             MailboxCallErrorCode result = runtimeState.ReceiveMailboxCall(
                 entity.EntityId.ToString("D"),
-                new MailboxCallMessage(7102u, Array.Empty<byte>()));
+                new EntityMessage(7102u, Array.Empty<byte>()));
 
             Assert.Equal(MailboxCallErrorCode.MailboxRejected, result);
         }
@@ -277,7 +277,7 @@ namespace XServer.Managed.Framework.Tests
             return false;
         }
 
-        protected override MailboxCallErrorCode OnMailboxCall(MailboxCallMessage message)
+        protected override MailboxCallErrorCode OnMailboxCall(EntityMessage message)
         {
             _receivedMailboxCalls.Add(new ReceivedMailboxCall(message.MsgId, message.Payload.ToArray()));
             return MailboxCallErrorCode.None;

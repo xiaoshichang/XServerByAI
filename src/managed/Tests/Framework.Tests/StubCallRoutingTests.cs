@@ -225,19 +225,19 @@ namespace XServer.Managed.Framework.Tests
 
         public string? LastTargetGameNodeId { get; private set; }
 
-        public MailboxCallMessage? LastMailboxMessage { get; private set; }
+        public EntityMessage? LastMailboxMessage { get; private set; }
 
         public Guid LastServerProxyTargetEntityId { get; private set; }
 
         public string? LastServerProxyRouteGateNodeId { get; private set; }
 
-        public ProxyCallMessage? LastServerProxyMessage { get; private set; }
+        public EntityMessage? LastServerProxyMessage { get; private set; }
 
         public Guid LastClientProxyTargetEntityId { get; private set; }
 
         public string? LastClientProxyRouteGateNodeId { get; private set; }
 
-        public ProxyCallMessage? LastClientProxyMessage { get; private set; }
+        public EntityMessage? LastClientProxyMessage { get; private set; }
 
         public void Register(GameNodeRuntimeState runtimeState)
         {
@@ -246,7 +246,7 @@ namespace XServer.Managed.Framework.Tests
 
         public MailboxCallErrorCode ForwardByMailbox(
             MailboxAddress targetAddress,
-            MailboxCallMessage message)
+            EntityMessage message)
         {
             ForwardCallCount++;
             LastTargetMailboxName = targetAddress.EntityId.ToString("D");
@@ -263,7 +263,7 @@ namespace XServer.Managed.Framework.Tests
 
         public MailboxCallErrorCode ForwardByStubType(
             string stubType,
-            MailboxCallMessage message)
+            EntityMessage message)
         {
             ForwardCallCount++;
             LastTargetMailboxName = stubType;
@@ -284,7 +284,7 @@ namespace XServer.Managed.Framework.Tests
 
         public ProxyCallErrorCode ForwardByServerProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message)
+            EntityMessage message)
         {
             _ = targetAddress;
             _ = message;
@@ -306,7 +306,7 @@ namespace XServer.Managed.Framework.Tests
 
         public ProxyCallErrorCode ForwardByClientProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message)
+            EntityMessage message)
         {
             ClientProxyForwardCallCount++;
             LastClientProxyTargetEntityId = targetAddress.EntityId;
@@ -322,7 +322,7 @@ namespace XServer.Managed.Framework.Tests
 
         public MailboxCallErrorCode ForwardByMailbox(
             MailboxAddress targetAddress,
-            MailboxCallMessage message)
+            EntityMessage message)
         {
             _ = targetAddress;
             _ = message;
@@ -332,7 +332,7 @@ namespace XServer.Managed.Framework.Tests
 
         public MailboxCallErrorCode ForwardByStubType(
             string stubType,
-            MailboxCallMessage message)
+            EntityMessage message)
         {
             _ = stubType;
             _ = message;
@@ -342,7 +342,7 @@ namespace XServer.Managed.Framework.Tests
 
         public ProxyCallErrorCode ForwardByServerProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message)
+            EntityMessage message)
         {
             _ = targetAddress;
             _ = message;
@@ -351,7 +351,7 @@ namespace XServer.Managed.Framework.Tests
 
         public ProxyCallErrorCode ForwardByClientProxy(
             ProxyAddress targetAddress,
-            ProxyCallMessage message)
+            EntityMessage message)
         {
             _ = targetAddress;
             _ = message;
@@ -374,7 +374,7 @@ namespace XServer.Managed.Framework.Tests
             return false;
         }
 
-        protected override MailboxCallErrorCode OnMailboxCall(MailboxCallMessage message)
+        protected override MailboxCallErrorCode OnMailboxCall(EntityMessage message)
         {
             _receivedMailboxCalls.Add(new ReceivedMailboxCall(message.MsgId, message.Payload.ToArray()));
             return MailboxCallErrorCode.None;

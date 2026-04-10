@@ -45,7 +45,7 @@ namespace XServer.Managed.Framework.Entities
                 return;
             }
 
-            _messageSender.CallStub(this, targetStubType, new StubCallMessage(msgId, payload));
+            _messageSender.CallStub(this, targetStubType, new EntityMessage(msgId, payload));
         }
 
         public void CallMailbox(MailboxAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)
@@ -70,7 +70,7 @@ namespace XServer.Managed.Framework.Entities
                 return;
             }
 
-            _messageSender.CallMailbox(this, targetAddress, new MailboxCallMessage(msgId, payload));
+            _messageSender.CallMailbox(this, targetAddress, new EntityMessage(msgId, payload));
         }
 
         public void CallProxy(ProxyAddress targetAddress, uint msgId, ReadOnlyMemory<byte> payload)
@@ -100,7 +100,7 @@ namespace XServer.Managed.Framework.Entities
                 return;
             }
 
-            _messageSender.CallServerProxy(this, targetAddress, new ProxyCallMessage(msgId, payload));
+            _messageSender.CallServerProxy(this, targetAddress, new EntityMessage(msgId, payload));
         }
 
         internal void SetMessageSender(IServerEntityMessageSender? messageSender)
@@ -113,7 +113,7 @@ namespace XServer.Managed.Framework.Entities
             _nativeTimerScheduler = nativeTimerScheduler;
         }
 
-        internal ProxyCallErrorCode ReceiveProxyCall(ProxyCallMessage message)
+        internal ProxyCallErrorCode ReceiveProxyCall(EntityMessage message)
         {
             if (message.MsgId == 0)
             {
@@ -123,7 +123,7 @@ namespace XServer.Managed.Framework.Entities
             return OnProxyCall(message);
         }
 
-        internal MailboxCallErrorCode ReceiveMailboxCall(MailboxCallMessage message)
+        internal MailboxCallErrorCode ReceiveMailboxCall(EntityMessage message)
         {
             if (message.MsgId == 0)
             {
@@ -158,13 +158,13 @@ namespace XServer.Managed.Framework.Entities
             return _nativeTimerScheduler.Cancel(timerId);
         }
 
-        protected virtual ProxyCallErrorCode OnProxyCall(ProxyCallMessage message)
+        protected virtual ProxyCallErrorCode OnProxyCall(EntityMessage message)
         {
             _ = message;
             return ProxyCallErrorCode.EntityRejected;
         }
 
-        protected virtual MailboxCallErrorCode OnMailboxCall(MailboxCallMessage message)
+        protected virtual MailboxCallErrorCode OnMailboxCall(EntityMessage message)
         {
             _ = message;
             return MailboxCallErrorCode.MailboxRejected;
@@ -192,7 +192,7 @@ namespace XServer.Managed.Framework.Entities
                 return;
             }
 
-            _messageSender.CallClient(this, targetAddress, new ProxyCallMessage(msgId, payload));
+            _messageSender.CallClient(this, targetAddress, new EntityMessage(msgId, payload));
         }
 
         private void LogCallStubError(string message)

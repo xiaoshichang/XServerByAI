@@ -4,12 +4,12 @@ namespace XServer.Managed.Framework.Runtime
 {
     internal interface IServerEntityMessageSender
     {
-        void CallStub(ServerEntity sourceEntity, string targetStubType, StubCallMessage message);
+        void CallStub(ServerEntity sourceEntity, string targetStubType, EntityMessage message);
 
-        void CallMailbox(ServerEntity sourceEntity, MailboxAddress targetAddress, MailboxCallMessage message);
+        void CallMailbox(ServerEntity sourceEntity, MailboxAddress targetAddress, EntityMessage message);
 
-        void CallServerProxy(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message);
+        void CallServerProxy(ServerEntity sourceEntity, ProxyAddress targetAddress, EntityMessage message);
 
-        void CallClient(ServerEntity sourceEntity, ProxyAddress targetAddress, ProxyCallMessage message);
+        void CallClient(ServerEntity sourceEntity, ProxyAddress targetAddress, EntityMessage message);
     }
 }

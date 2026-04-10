@@ -51,7 +51,7 @@ namespace XServer.Managed.Framework.Entities
             Proxy = new ProxyAddress(EntityId, routeGateNodeId);
         }
 
-        protected override ProxyCallErrorCode OnProxyCall(ProxyCallMessage message)
+        protected override ProxyCallErrorCode OnProxyCall(EntityMessage message)
         {
             NativeLoggerBridge.Info(nameof(AvatarEntity), $"AvatarEntity {EntityId:D} received proxy call msgId={message.MsgId}.");
             _receivedProxyMessages.Add(new ReceivedProxyMessage(message.MsgId, message.Payload.ToArray()));
