@@ -1,114 +1,146 @@
 # SESSION_ROUTING
 
-本文档定义 XServerByAI 当前阶段 `Gate` 的会话与路由数据模型。它描述客户端会话、`Gate` 本地路由目录、`Game` 目标绑定以及与分布式实体寻址的关系。实体 ownership、`Mailbox` / `Proxy` 语义仍以 `docs/DISTRIBUTED_ENTITY.md` 为准。
+本文档定义 XServerByAI 当前主线代码里 `Gate` 的会话、认证、avatar 绑定与路由模型。内容以 `ClientSession`、`GateNode::ClientSessionRecord` 与当前 `Gate` 运行期逻辑为准。
 
-**适用范围**
-1. 当前模型覆盖 `Gate` 维护的客户端逻辑会话、`Gate` 视角的 `Game` 路由目录，以及后续 `Gate -> Game -> C#` 转发链路。
-2. 当前模型假定 `Game` 通过 `Inner.NodeRegister` / `Inner.NodeHeartbeat` 主动向每个 `Gate` 完成注册与心跳；`Gate` 本地路由目录来自这些闭环结果，而不是 `GM` 主动推送的目录快照。
-3. `Gate` 只有在收到 `GM` 下发的 `clusterReady = true` 后，才允许真正接纳客户端会话；但它可以在此之前提前维护 `Game` 目录与内部转发目标。
+## 适用范围
 
-**基础约定**
-1. `sessionId` 使用 `uint64`，`0` 为无效值；同一 `Gate` 生命周期内不得复用已分配 `sessionId`。
-2. `playerId` 使用 `uint64`，`0` 表示尚未完成玩家绑定或当前阶段未知。
-3. `gameNodeId` 与 `gateNodeId` 都取自对应节点注册时上报的稳定 `NodeID`。
-4. 目录中的 `innerNetworkEndpoint` 表示 `Gate` 对应 `Game` 的内部转发目标地址。
-5. 所有时间戳字段统一使用 `unixTimeMsUtc` 语义；未知或未发生时为 `0`。
+1. 适用于 `Gate` 的 HTTP 登录预约、KCP 会话接入与会话状态机。
+2. 适用于 `Gate` 侧 avatar 绑定后的路由选择与目录解析。
+3. 适用于 `Relay.PushToClient`、`Relay.ForwardProxyCall` 与 `Relay.ForwardMailboxCall` 的路由落点规则。
 
-**枚举：SessionState**
+## 当前接入流程
 
-| Value | Name | Description |
-| --- | --- | --- |
-| `1` | `Created` | `Gate` 已创建逻辑会话，但尚未完成鉴权 |
-| `2` | `Authenticating` | 会话正在鉴权或加载玩家上下文 |
-| `3` | `Active` | 会话可以收发正常业务消息 |
-| `4` | `Closing` | 会话正在执行关闭流程 |
-| `5` | `Closed` | 会话已关闭 |
+1. 客户端先调用 `authNetwork` 的 `POST /login`。
+2. `Gate` 为登录成功的账号创建一个 30 秒有效的 `conversation` 预约，并返回目标 KCP 端点。
+3. 客户端使用该 `conversation` 打开 KCP 会话。
+4. `Gate` 会校验：
+   - 当前集群已经 `clusterReady = true`
+   - `conversation` 是本 `Gate` 签发的
+   - 远端地址与 HTTP 登录来源一致
+5. 会话通过后，`Gate` 创建 `ClientSession` 与 `ClientSessionRecord`。
+6. 客户端发送 `Client.Hello (45010)` 完成最小探活。
+7. 客户端发送 `Client.SelectAvatar (45013)` 后，`Gate` 选择一个就绪 `Game`，发出 `2003 Gate.CreateAvatarEntity`，等待 `2004 Game.AvatarEntityCreateResult`。
+8. 确认成功后，`Gate` 才把该会话绑定到具体 avatar 与 `Game` 路由。
 
-**枚举：RouteState**
+## 当前核心结构
 
-| Value | Name | Description |
-| --- | --- | --- |
-| `1` | `Unassigned` | 当前会话尚未绑定目标 `Game` |
-| `2` | `Selecting` | `Gate` 正在从可用目录中选择目标 `Game` |
-| `3` | `Bound` | 当前会话已经固定绑定到某个 `Game` |
-| `4` | `RouteLost` | 已绑定 `Game` 失效、掉线或不再可转发 |
-| `5` | `Released` | 会话关闭后，路由关系已经释放 |
-
-**枚举：GameRouteState**
+### `ClientSessionState`
 
 | Value | Name | Description |
 | --- | --- | --- |
-| `1` | `Available` | 可以接收新的会话绑定与业务转发 |
-| `2` | `Draining` | 不再接收新会话，但保留已有绑定会话完成收尾 |
-| `3` | `Unavailable` | 当前不可作为转发目标 |
+| `1` | `Created` | 会话对象已创建 |
+| `2` | `Authenticating` | 正在进入认证/接纳流程 |
+| `3` | `Active` | 会话已可正常收发客户端数据 |
+| `4` | `Closing` | 正在关闭 |
+| `5` | `Closed` | 已关闭 |
 
-**结构：RouteTarget**
+### `ClientRouteState`
+
+| Value | Name | Description |
+| --- | --- | --- |
+| `1` | `Unassigned` | 尚未绑定目标 `Game` |
+| `2` | `Selecting` | 正在等待 `Game` 确认 avatar 创建 |
+| `3` | `Bound` | 已绑定目标 `Game` |
+| `4` | `RouteLost` | 原路由失效 |
+| `5` | `Released` | 会话关闭后路由已释放 |
+
+### `ClientRouteTarget`
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `gameNodeId` | `string` | 当前绑定目标 `Game` 的稳定 `NodeID` |
-| `innerNetworkEndpoint` | `Endpoint` | 当前 `Gate` 向该 `Game` 转发时使用的地址 |
-| `routeEpoch` | `uint64` | 当前目录版本号 |
+| `gameNodeId` | `string` | 当前会话绑定的目标 `Game` `NodeID` |
+| `innerNetworkEndpoint` | `Endpoint` | 当前 `Gate -> Game` 转发使用的内部地址 |
+| `routeEpoch` | `uint64` | 当前路由版本；当前实现使用 `clusterReadyEpoch`，未收到时回退到 `1` |
 
-`RouteTarget` 只表达“当前会话绑定到了哪个 `Game`”，不表达业务实体 ownership 本身。
+### `ClientSession`
 
-**结构：SessionRecord**
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `sessionId` | `uint64` | `Gate` 内唯一的逻辑会话标识 |
-| `gateNodeId` | `string` | 当前承载该会话的 `Gate` `NodeID` |
-| `sessionState` | `uint16` | 取值见 `SessionState` |
-| `playerId` | `uint64` | 当前绑定玩家；未绑定时为 `0` |
-| `routeState` | `uint16` | 取值见 `RouteState` |
-| `routeTarget` | `RouteTarget` | 当前绑定的目标 `Game`；未绑定时视为无效 |
-| `connectedAtUnixMs` | `uint64` | 会话创建时间 |
-| `authenticatedAtUnixMs` | `uint64` | 完成鉴权时间；未发生时为 `0` |
-| `lastActiveUnixMs` | `uint64` | 最近一次业务活动时间 |
-| `closedAtUnixMs` | `uint64` | 会话关闭时间；未关闭时为 `0` |
-| `closeReasonCode` | `int32` | 会话关闭原因；未关闭时为 `0` |
-
-**结构：GameDirectoryEntry**
+`ClientSession` 是 KCP 连接本身的权威状态，当前快照字段包括：
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `gameNodeId` | `string` | `Game` 的稳定 `NodeID` |
-| `routeState` | `uint16` | 取值见 `GameRouteState` |
-| `innerNetworkEndpoint` | `Endpoint` | 当前 `Gate` 对该 `Game` 的内部转发目标地址 |
-| `capabilityTags` | `string[]` | 该 `Game` 注册到当前 `Gate` 时声明的能力标签 |
-| `load` | `LoadSnapshot` | 最近一次心跳带来的负载快照 |
-| `routeEpoch` | `uint64` | 当前 `Gate` 本地目录版本 |
-| `updatedAtUnixMs` | `uint64` | 最近一次刷新目录项的时间 |
+| `gateNodeId` | `string` | 当前承载该会话的 `Gate` |
+| `sessionId` | `uint64` | `Gate` 内唯一会话标识，`0` 非法 |
+| `conversation` | `uint32` | HTTP 登录签发的 KCP conversation |
+| `remoteEndpoint` | `Endpoint` | 客户端远端地址 |
+| `sessionState` | `ClientSessionState` | 会话状态 |
+| `routeState` | `ClientRouteState` | 路由状态 |
+| `routeTarget` | `optional<ClientRouteTarget>` | 绑定后有效 |
+| `connectedAtUnixMs` | `uint64` | 建连时间 |
+| `authenticatedAtUnixMs` | `uint64` | 通过接纳时间 |
+| `lastActiveUnixMs` | `uint64` | 最近活动时间 |
+| `closedAtUnixMs` | `uint64` | 关闭时间 |
+| `closeReasonCode` | `int32` | 关闭原因 |
 
-`GameDirectoryEntry` 的来源是“`Game` 对当前 `Gate` 的注册与心跳会话”，不是 `GM` 主动推送的目录快照。不同 `Gate` 的目录版本由各自本地维护，但都必须建立在同一套 `Game -> Gate` 注册事实之上。
+### `ClientSessionRecord`
 
-**Gate 本地权威表**
-1. `sessionId -> SessionRecord` 是 `Gate` 内部会话状态的权威表。
-2. `playerId -> sessionId[]` 用于按玩家快速定位会话。
-3. `gameNodeId -> sessionId[]` 用于在 `Game` 路由失效时快速找到受影响会话。
-4. `gameNodeId -> GameDirectoryEntry` 是 `Gate` 的本地 `Game` 路由目录。
+`ClientSessionRecord` 是 `GateNode` 维护的业务侧扩展信息：
 
-**路由规则**
-1. `Gate` 只有在本地 `GameDirectoryEntry.routeState = Available` 且自身已经收到 `clusterReady = true` 后，才允许把新客户端会话绑定到该 `Game`。
-2. 默认采用“首次选择后固定绑定”的策略：一旦 `SessionRecord.routeState = Bound`，同一 `sessionId` 不会自动迁移到新的 `Game`。
-3. 当某个 `Game` 到当前 `Gate` 的注册会话断开、心跳超时或被明确标记为不可用时，对应 `GameDirectoryEntry` 必须切换到 `Unavailable` 或 `Draining`，并据此更新受影响会话。
-4. `RouteLost` 只表达当前会话的原始目标已经不再可转发，不等价于自动迁移、自动重登或玩家踢下线；后续如何处理由更高层流程决定。
-5. `Gate` 可以在 `clusterReady = false` 时预热与维护目录，但不得提前接受客户端入口，也不得把本地目录可用性当作替代 `clusterReady` 的结论。
+| Field | Type | Description |
+| --- | --- | --- |
+| `sessionId` | `uint64` | 对应 `ClientSession.sessionId` |
+| `conversation` | `uint32` | 对应登录预约的 conversation |
+| `accountId` | `string` | 当前已认证账号 |
+| `avatarId` | `string` | 当前已绑定 avatar GUID；未绑定时为空 |
+| `avatarName` | `string` | 当前 avatar 显示名 |
+| `gameNodeId` | `string` | 当前 avatar 所属目标 `Game` |
+| `gateNodeId` | `string` | 当前本地 `Gate` `NodeID` |
+| `pendingSelectAvatarSeq` | `uint32` | 等待 `2004` 回包时暂存的客户端请求序号 |
+| `authenticatedAtUnixMs` | `uint64` | 认证通过时间 |
+| `lastActiveUnixMs` | `uint64` | 最近业务活动时间 |
+| `closed` | `bool` | 当前记录是否已关闭 |
 
-**与 Gate↔Game 封装的关系**
-1. `RelayEnvelopeHeader.sessionId` 与 `RelayEnvelopeHeader.playerId` 应直接复用 `SessionRecord` 语义。
-2. `Gate -> Game` 转发时必须校验 `SessionRecord.routeTarget` 是否仍然匹配当前目录中的可用项。
-3. `Game` 处理 `Relay.ForwardToGame` 时，应验证自己是否仍是该会话的预期目标；否则应返回路由失配错误，而不是静默消费。
+## Gate 本地权威索引
 
-**与分布式实体的关系**
-1. `AvatarEntity` 这类可迁移实体通过 `Proxy` 间接依赖 `SessionRecord` 与当前路由目录。
-2. `SpaceEntity`、`ServerStubEntity` 这类静态寻址实体通过 `Mailbox` 直接引用目标 `GameNodeId`，仍然由 `Gate` 根据本地目录完成转发。
-3. 会话路由与实体 ownership 是两套相关但不等价的状态：会话绑定的是“当前客户端入口该发往哪个 `Game`”，实体 ownership 表达的是“哪个 `Game` 持有该逻辑实体的权威活动实例”。
+当前 `Gate` 维护以下权威表：
 
-**后续条目约束**
-1. `M4-05` 应围绕 `sessionId -> SessionRecord` 建立权威会话表。
-2. `M4-06` 应基于“`Game` 已注册到当前 `Gate`”这一事实实现请求转发链路，而不是再引入一套独立的 GM 下发目录模型。
-3. `M4-10` 的会话断开清理应依赖 `gameNodeId -> sessionId[]` 索引，保证 `Game` 路由失效时能快速定位受影响会话。
-4. `M4-11` 的固定绑定策略只允许决定“如何选择首次目标 `Game`”，不应改写 `RouteTarget` 与 `RouteState` 的基础语义。
-5. `M4-12` 的负载感知分配应读取 `GameDirectoryEntry.load`，并只在 `Available` 的目录项中选择候选目标。
+1. `sessionId -> ClientSession`
+2. `sessionId -> ClientSessionRecord`
+3. `accountId -> sessionId`
+4. `avatarId -> sessionId`
 
+说明：
+
+1. 当前主线路由模型围绕 `accountId` 与 `avatarId` 展开，不再把 `playerId` 作为 Gate 侧权威字段。
+2. `avatarId -> sessionId` 是 proxy 与 push 链路的关键索引。
+
+## 路由目录来源
+
+1. `Gate` 的 `Game` 目录来自 `Game -> Gate` 的注册与心跳闭环。
+2. 只有注册完成、链路在线、`inner_network_ready = true` 的 `Game` 才会被视为可路由目标。
+3. 当前选择 avatar 所用的 `ResolveAvatarGameNodeId()` 会在全部可用 `Game` 中随机选择一个。
+
+## 当前路由规则
+
+1. 客户端会话只有在 `clusterReady = true` 后才能被接纳。
+2. 新会话最初处于 `RouteState = Unassigned`。
+3. 当 `Gate` 发送 `2003 Gate.CreateAvatarEntity` 后，会把会话推进到 `Selecting` 流程。
+4. 收到 `2004 Game.AvatarEntityCreateResult` 成功回包后：
+   - `ClientSession.routeState` 变为 `Bound`
+   - `routeTarget.gameNodeId` 指向确认创建该 avatar 的 `Game`
+   - `ClientSessionRecord.avatarId` 与 `gameNodeId` 成为运行期权威值
+5. 如果等待中的 avatar 创建失败，`Gate` 会回滚 `avatarId` / `gameNodeId` / `pendingSelectAvatarSeq`，并向客户端返回失败响应。
+6. 当前没有自动迁移。目标 `Game` 失效后，会话只会进入 `RouteLost` 或等待更高层重新选择。
+
+## 与 relay 的关系
+
+### `Relay.PushToClient (2001)`
+
+1. `Gate` 使用 `targetEntityId` 在 `avatarId -> sessionId` 中查找会话。
+2. 找到会话后，重新封装客户端包并发给对应 KCP 会话。
+
+### `Relay.ForwardProxyCall (2005)`
+
+1. `Gate` 先校验 `routeGateNodeId` 必须等于当前本地 `Gate`。
+2. 再通过 `targetEntityId` 命中 avatar 会话。
+3. 然后读取 `ClientSessionRecord.gameNodeId`，把消息继续转发到当前承载该 avatar 的 `Game`。
+
+### `Relay.ForwardMailboxCall (2002)`
+
+1. mailbox 调用不依赖客户端会话。
+2. `Gate` 直接按 `targetGameNodeId` 转发给目标 `Game`。
+
+## 当前边界
+
+1. 当前路由模型只覆盖单 `Gate` 持有的本地会话目录，不覆盖跨 `Gate` 会话迁移。
+2. 当前会话绑定完成的关键业务身份是 `avatarId`，不是旧设计里的 `playerId`。
+3. `move` / `buyWeapon` 等客户端消息号仍处于联调阶段，尚未进入统一稳定转发链路。

@@ -1,125 +1,123 @@
 # GATE_GAME_ENVELOPE
 
-本文档定义 XServerByAI 当前阶段 Gate 与 Game 之间的中继封装格式。该格式用于承载“客户端请求转发到 Game”“Game 将业务响应回传 Gate”“Game 经由 Gate 主动推送客户端消息”三类链路语义。当前默认 Gate↔Game 传输承载在 ZeroMQ over TCP 全连接链路上。
+本文档定义 XServerByAI 当前主线代码中 `Game <-> Gate` 运行期中继消息的结构与语义。当前活跃的中继协议以 `RelayCodec.h` 为准，重点覆盖 mailbox、proxy 与客户端推送三条链路。
 
-**适用范围**
-1. 当前覆盖 `Relay.ForwardToGame`（`msgId = 2000`）、`Relay.PushToClient`（`msgId = 2001`）与 `Relay.ForwardStubCall`（`msgId = 2002`）三类内部消息。
-2. `Relay.ForwardToGame` 的请求方向为 `Gate -> Game`；成功或失败响应方向为 `Game -> Gate`，响应复用同一 `msgId` 并设置 `PacketHeader.flags.Response`。
-3. `Relay.PushToClient` 的方向为 `Game -> Gate`，当前为单向消息，不定义显式协议级确认。
-4. `PacketHeader.flags.Error` 在本链路中只表达“中继层失败”，不直接等价于客户端业务层失败。
-5. 会话与路由模型的字段语义、状态机与失效规则见 `docs/SESSION_ROUTING.md`；本文仅约定中继封装如何保留并传递最小会话标识字段。
-6. 当前默认同一服务器组内 Gate 与 Game 节点采用全连接 ZeroMQ over TCP 拓扑；Game↔Game 与 Gate↔Gate 不直接通信。
+## 当前生效范围
 
-**共享编码约定**
-1. 所有内部整数统一使用网络字节序（大端）编码。
-2. 中继封装传递的是“客户端消息体语义”，不是客户端原始 `PacketHeader` 字节；Gate 与 Game 都应使用结构化字段重建客户端头部语义。
-3. `clientMsgId` 必须指向客户端可见的消息语义；当前不应使用内部保留号段 `1-3999`。
-4. `clientFlags` 只允许使用 `docs/PACKET_HEADER.md` 中定义的低 3 位；非法组合视为 `3103 Relay.ClientFlagsInvalid`。
-5. 外层 `PacketHeader.flags.Compressed` 表示 Gate↔Game 内部链路压缩；`clientFlags.Compressed` 表示 Gate 发包给客户端时的目标压缩语义，两者互不替代。
-6. `payload` 使用 `uint32 payloadLength + payload bytes` 编码，`payloadLength = 0` 表示空消息体。
-7. 除明确约定的字段外，所有保留字段必须置 `0`。
+1. 当前已实现并在节点代码中实际消费的 relay `msgId` 为：
+   - `2001` `Relay.PushToClient`
+   - `2002` `Relay.ForwardMailboxCall`
+   - `2005` `Relay.ForwardProxyCall`
+2. `2000` `kRelayForwardToGameMsgId` 目前只保留在头文件中，主线节点逻辑没有接通，不应视为当前有效运行期协议。
+3. `2003` / `2004` 是 Gate 与 Game 之间的 avatar 创建请求/结果消息，但它们不是 `RelayCodec` 结构，不属于本文约束范围。
 
-**共享结构：RelayEnvelopeHeader**
+## 共享编码约定
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `sessionId` | `uint64` | 客户端会话标识；当前必须为非零值 |
-| `playerId` | `uint64` | 已绑定玩家标识；未登录或未知时填 `0` |
-| `clientMsgId` | `uint32` | 客户端侧最终语义消息编号 |
-| `clientSeq` | `uint32` | 客户端消息关联序号；无关联时可为 `0` |
-| `clientFlags` | `uint16` | 客户端侧包头标志位语义 |
-| `relayFlags` | `uint16` | 当前保留，必须置 `0` |
+1. 所有 relay 负载都承载在外层 `PacketHeader + payload` 内，消息边界由 ZeroMQ 保证。
+2. 当前三种 relay 消息都要求：
+   - 外层 `PacketHeader.flags = 0`
+   - 外层 `PacketHeader.seq = 0`
+3. 所有整数按网络字节序编码。
+4. 所有字符串字段都使用 `uint16 byteLength + UTF-8 bytes` 编码。
+5. 业务负载统一使用 `uint32 payloadLength + payload bytes` 编码。
+6. `relayFlags` 当前必须为 `0`。
+7. 编解码失败、字段非法或目标不可达时，当前实现以本地日志与丢弃处理为主，没有额外定义协议级 relay 错误响应包。
 
-`RelayEnvelopeHeader` 是中继链路与客户端消息语义之间的最小桥接头。Gate 与 Game 不应在内部链路中重新引入客户端原始头部的 `magic`、`version`、`length` 等字段。
+## Relay.ForwardMailboxCall (`msgId = 2002`)
 
-**Relay.ForwardToGame（`msgId = 2000`）**
-1. 用途：Gate 将客户端请求或经 Gate 归一化后的业务请求转发给同一服务器组内已选中、且已与当前 Gate 建立直接链路的 Game 节点。
-2. 请求时外层 `PacketHeader.seq` 必须为非零值；成功或失败响应必须回显同一 `seq`。
-3. 请求包中的 `clientFlags` 当前不得设置 `Response` 或 `Error`；若原始客户端包存在 `Compressed` 语义，可由 Gate 决定是否在归一化后保留到 `clientFlags`。
+### 用途
 
-请求体：
+1. 供 `Game` 发起 mailbox / stub 调用，并通过 `Gate` 转发到目标 `Game`。
+2. 当前常见来源有：
+   - managed `forward_stub_call` 回调
+   - `GM` 转发到 `OnlineStub` 的管理消息
+
+### 结构
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `relay` | `RelayEnvelopeHeader` | 会话、玩家与客户端包元数据 |
-| `payloadLength` | `uint32` | 客户端语义消息体长度 |
-| `payload` | `bytes` | 客户端语义消息体 |
+| `sourceGameNodeId` | `string16` | 发起调用的源 `GameNodeId`，不能为空 |
+| `targetGameNodeId` | `string16` | 目标 `GameNodeId`，不能为空 |
+| `targetEntityId` | `string16` | 目标实体 GUID；可为空 |
+| `targetMailboxName` | `string16` | 目标 mailbox 名；当 `targetEntityId` 为空时必须非空 |
+| `mailboxCallMsgId` | `uint32` | mailbox 调用消息号，必须非零 |
+| `relayFlags` | `uint32` | 当前必须为 `0` |
+| `payloadLength` | `uint32` | 负载长度 |
+| `payload` | `bytes` | mailbox 调用负载 |
 
-成功响应体（`Response`）：
+### 语义约束
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `relay` | `RelayEnvelopeHeader` | 回显会话、玩家与客户端包元数据 |
-| `payloadLength` | `uint32` | 返回给客户端的业务消息体长度 |
-| `payload` | `bytes` | 返回给客户端的业务消息体 |
+1. `sourceGameNodeId` 与 `targetGameNodeId` 必须是非空 `NodeID`。
+2. `targetEntityId` 如果存在，必须是 canonical GUID 字符串。
+3. `targetMailboxName` 与 `targetEntityId` 允许同时出现；但如果 `targetEntityId` 为空，则 `targetMailboxName` 不能为空。
+4. `Gate` 当前只负责：
+   - 校验来源连接与 `sourceGameNodeId` 一致
+   - 确认目标 `Game` 已注册且可转发
+   - 原样把中继包发送到目标 `Game`
+5. `Gate` 不参与 mailbox 业务分发，也不重写 payload。
 
-成功响应约束：
-1. `relay.clientMsgId` 必须是 Gate 需要发给客户端的目标消息编号。
-2. `relay.clientFlags` 必须设置 `Response` 位；如该业务响应携带业务错误语义，可同时设置 `Error` 位。
-3. `relay.clientSeq` 通常沿用客户端请求的关联序号。
+## Relay.ForwardProxyCall (`msgId = 2005`)
 
-失败响应体（`Response + Error`）：
+### 用途
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `sessionId` | `uint64` | 发生失败的目标会话 |
-| `playerId` | `uint64` | 当前绑定玩家标识；未知时为 `0` |
-| `clientMsgId` | `uint32` | 原始请求的客户端语义消息编号 |
-| `clientSeq` | `uint32` | 原始请求的客户端关联序号 |
-| `errorCode` | `int32` | 中继失败原因，取值见 `docs/ERROR_CODE.md` |
+1. 供 `Game` 发起面向可迁移实体的 proxy 调用。
+2. `routeGateNodeId` 指明“当前持有该实体会话目录的 Gate”；由该 Gate 决定目标实体当前应该转发到哪个 `Game`。
 
-失败响应约束：
-1. 外层 `PacketHeader.flags.Error` 只表示中继链路失败，例如目标会话不存在、路由不匹配、客户端消息编号非法。
-2. 该失败响应不直接等价于客户端业务失败包；Gate 可以根据 `errorCode` 做日志、断连、丢弃或后续转换策略。
-3. 常见错误码为 `3100 Relay.ClientMessageIdInvalid`、`3101 Relay.SessionNotFound`、`3102 Relay.RouteOwnershipMismatch`、`3103 Relay.ClientFlagsInvalid`。
-
-**Relay.PushToClient（`msgId = 2001`）**
-1. 用途：Game 节点主动要求 Gate 向客户端发送单向推送消息。
-2. 外层 `PacketHeader.seq` 当前应为 `0`；若后续引入推送确认或重试，再扩展新的协议字段或消息类型。
-3. 该消息不定义协议级响应；Gate 的本地投递失败由日志、metrics 或未来的诊断消息处理。
-
-消息体：
+### 结构
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `relay` | `RelayEnvelopeHeader` | 目标会话、玩家与客户端包元数据 |
-| `payloadLength` | `uint32` | 推送消息体长度 |
-| `payload` | `bytes` | 推送消息体 |
+| `sourceGameNodeId` | `string16` | 发起调用的源 `GameNodeId`，不能为空 |
+| `routeGateNodeId` | `string16` | 路由 Gate 的 `NodeID`，不能为空 |
+| `targetEntityId` | `string16` | 目标实体 GUID，必须是 canonical GUID |
+| `proxyCallMsgId` | `uint32` | proxy 调用消息号，必须非零 |
+| `relayFlags` | `uint32` | 当前必须为 `0` |
+| `payloadLength` | `uint32` | 负载长度 |
+| `payload` | `bytes` | proxy 调用负载 |
 
-推送约束：
-1. `relay.clientFlags` 不得设置 `Response` 位；如推送本身携带客户端错误语义，可按客户端协议需要设置 `Error` 位。
-2. `relay.clientSeq` 默认应为 `0`；只有客户端协议明确要求推送也携带关联序号时，才允许使用非零值。
-3. `relay.clientMsgId` 应指向客户端可见的推送消息编号，不能复用 `Inner` 或中继 `msgId`。
+### 语义约束
 
-**Relay.ForwardStubCall（`msgId = 2002`）**
-1. 用途：源 `Game` 将基于 `Mailbox` ownership 解析得到的目标 `ServerStub` 调用，经 `Gate` 中转到目标 `Game`。
-2. 外层 `PacketHeader.seq` 当前必须为 `0`，`PacketHeader.flags` 必须为 `0`；当前版本不定义协议级响应、确认或回执。
-3. 该消息不携带客户端会话字段，而是携带最小的 Stub 路由元数据；`Gate` 只负责校验并按 `targetGameNodeId` 转发，不参与业务分发。
+1. `routeGateNodeId` 必须等于实际接收该包的 `Gate` `NodeID`；否则当前实现会拒绝处理。
+2. `Gate` 使用 `targetEntityId` 在本地 `avatarId -> sessionId` 索引中查找活跃会话。
+3. 查到会话后，`Gate` 会从对应 `ClientSessionRecord.game_node_id` 解析目标 `Game`，再把 relay 包原样转发给该 `Game`。
+4. 如果目标 avatar 会话不存在、已关闭或目标 `Game` 不可达，当前实现只记录日志，不回送协议级失败包。
 
-消息体：
+## Relay.PushToClient (`msgId = 2001`)
+
+### 用途
+
+1. 供 `Game` 通过 `Gate` 向客户端推送单向消息。
+2. 当前 managed `push_client_message` 回调最终会编码为该结构。
+
+### 结构
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `sourceGameNodeId` | `string16` | 发起调用的源 `GameNodeId` |
-| `targetGameNodeId` | `string16` | 目标 Stub 当前 owner 所在 `GameNodeId` |
-| `targetStubType` | `string16` | 目标 `ServerStubEntity` 类型名 |
-| `stubCallMsgId` | `uint32` | Stub 内部消息编号；必须非零 |
-| `relayFlags` | `uint32` | 当前保留，必须置 `0` |
-| `payloadLength` | `uint32` | Stub 调用负载长度 |
-| `payload` | `bytes` | Stub 调用负载 |
+| `sourceGameNodeId` | `string16` | 发起推送的源 `GameNodeId`，不能为空 |
+| `routeGateNodeId` | `string16` | 目标 `Gate` `NodeID`，不能为空 |
+| `targetEntityId` | `string16` | 目标 avatar GUID，必须是 canonical GUID |
+| `clientMsgId` | `uint32` | 下发给客户端的消息号，必须非零 |
+| `relayFlags` | `uint32` | 当前必须为 `0` |
+| `payloadLength` | `uint32` | 负载长度 |
+| `payload` | `bytes` | 客户端消息体 |
 
-转发约束：
-1. `sourceGameNodeId`、`targetGameNodeId` 与 `targetStubType` 都必须为非空字符串。
-2. `stubCallMsgId = 0` 视为非法中继包。
-3. `relayFlags` 当前必须为 `0`；后续如需扩展确认、追踪或压缩语义，应分配新的协议字段或新的 `msgId`。
-4. `Gate` 收到该消息后，应校验源 `Game` 路由身份与 `sourceGameNodeId` 一致，再按 `targetGameNodeId` 查找目标 `Game` 会话并转发原始中继包。
-5. 目标 `Game` 收到后，应校验 `targetGameNodeId` 等于当前本地节点，再将其解码并投递给本地 `ServerStubEntity.OnStubCall(...)`。
+### 语义约束
 
-**字段与校验规则**
-1. `sessionId = 0` 一律视为非法中继包。
-2. `playerId = 0` 仅表示“当前无玩家绑定”或“该阶段未知”，不得与合法玩家编号冲突。
-3. `clientMsgId = 0` 或落在内部保留号段时，应返回或记录 `3100 Relay.ClientMessageIdInvalid`。
-4. `clientFlags` 中的未定义位、请求包带 `Response/Error`、推送包带 `Response` 等情况，应返回或记录 `3103 Relay.ClientFlagsInvalid`。
-5. Game 在处理 `Relay.ForwardToGame` 时，如果目标会话不存在，应返回 `3101 Relay.SessionNotFound`；如果会话存在但不属于当前 Game，应返回 `3102 Relay.RouteOwnershipMismatch`。
-6. Gate 在重新封装客户端下行包时，应使用 `relay.clientMsgId`、`relay.clientSeq` 与 `relay.clientFlags` 生成客户端侧 `PacketHeader`，而不是复用外层 Gate↔Game 的 `PacketHeader`。
-7. 当前不在中继封装中定义显式 `routeId`、`traceId`、`authContext` 等扩展字段；如后续需要，应在保持兼容性的前提下新增版本或扩展结构。
+1. `Gate` 当前通过 `targetEntityId` 定位本地活跃 avatar 会话。
+2. 找到会话后，`Gate` 会重新封装客户端侧 `PacketHeader`：
+   - `msgId = clientMsgId`
+   - `seq = 0`
+   - `flags = 0`
+3. 当前没有为推送定义协议级 ACK、重试或压缩位语义。
+
+## 当前实现边界
+
+1. relay codec 只定义 `Game <-> Gate` 的负载编码，不定义客户端侧 JSON 或业务对象结构。
+2. 运行期错误目前主要由节点本地日志承担，没有为 relay 流量定义单独的对外 `errorCode` 响应协议。
+3. `Gate` 当前只维护 avatar 会话路由；没有实现通用的“任意客户端消息统一转发到 Game 再统一回包”的老式 `ForwardToGame` 方案。
+
+## 关联文档
+
+1. 路由与会话模型见 [SESSION_ROUTING.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/SESSION_ROUTING.md)。
+2. `msgId` 登记见 [MSG_ID.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/MSG_ID.md)。
+3. managed 回调与 runtime 约定见 [MANAGED_INTEROP.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/MANAGED_INTEROP.md)。

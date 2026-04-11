@@ -1,358 +1,216 @@
-﻿# dotnet 常见命令行操作
+# dotnet 常见命令行操作
 
-本文档整理 `dotnet` CLI 的常见操作，适合作为日常开发速查表。  
-示例默认使用 PowerShell，路径以当前仓库的 `src/managed/` 目录为参考。
+本文档整理 XServerByAI 仓库当前最常用的 `dotnet` CLI 命令，重点覆盖已经存在的 managed 解决方案、服务端项目、客户端项目与测试项目。
 
-**适用范围**
-1. 创建 .NET 解决方案与项目。
-2. 还原依赖、构建、运行、测试与发布。
-3. 管理 NuGet 包、项目引用与常见辅助命令。
+## 当前仓库中的 .NET 项目
 
-**前置说明**
-1. `dotnet` 命令来自 .NET SDK，不是单独的运行时。
-2. 先确认本机已安装 SDK，再执行创建、构建、测试等命令。
-3. 如果目录里同时存在多个 `.sln` 或 `.csproj`，建议显式指定目标文件，避免命令作用到错误对象。
+### 服务端 managed 解决方案
+
+当前解决方案文件：`XServerByAI.Managed.sln`
+
+包含项目：
+
+1. `src/managed/Foundation/Foundation.csproj`
+2. `src/managed/Framework/Framework.csproj`
+3. `src/managed/GameLogic/GameLogic.csproj`
+4. `src/managed/EntityProperties.Generator/EntityProperties.Generator.csproj`
+5. `src/managed/Tests/Framework.Tests/Framework.Tests.csproj`
+6. `src/managed/Tests/ManagedInteropAbiMismatch.Tests/ManagedInteropAbiMismatch.Tests.csproj`
+7. `src/managed/Tests/ManagedInteropMissingExports.Tests/ManagedInteropMissingExports.Tests.csproj`
+
+### 客户端项目
+
+客户端项目当前不并入 `XServerByAI.Managed.sln`，需要单独按项目操作：
+
+1. `client/XServer.Client.Framework/XServer.Client.Framework.csproj`
+2. `client/XServer.Client.GameLogic/XServer.Client.GameLogic.csproj`
+3. `client/XServer.Client.App/XServer.Client.App.csproj`
+4. `client/Tests/XServer.Client.Tests/XServer.Client.Tests.csproj`
+
+### 当前目标框架
+
+1. `Foundation`、`Framework`、`GameLogic`、managed tests 与 client projects 当前目标框架都是 `net10.0`。
+2. `EntityProperties.Generator` 当前目标框架是 `netstandard2.0`。
 
 ## 环境检查
 
-**查看 SDK 版本**
 ```powershell
 dotnet --version
-```
-
-**查看 SDK 与运行时详情**
-```powershell
 dotnet --info
-```
-
-**列出已安装 SDK**
-```powershell
 dotnet --list-sdks
-```
-
-**列出已安装运行时**
-```powershell
 dotnet --list-runtimes
 ```
 
-## 创建项目
+## 常用服务端命令
 
-**查看可用模板**
+### 还原
+
 ```powershell
-dotnet new list
+dotnet restore .\XServerByAI.Managed.sln
 ```
 
-**创建解决方案**
+### 构建
+
 ```powershell
-dotnet new sln -n XServerByAI.Managed -f sln
+dotnet build .\XServerByAI.Managed.sln -c Debug
+dotnet build .\XServerByAI.Managed.sln -c Release
 ```
 
-**创建类库项目**
+### 测试
+
 ```powershell
-dotnet new classlib -n Foundation -o .\src\managed\Foundation
+dotnet test .\XServerByAI.Managed.sln -c Debug
+dotnet test .\XServerByAI.Managed.sln -c Release
 ```
 
-**创建控制台项目**
-```powershell
-dotnet new console -n ServerTool -o .\src\managed\ServerTool
-```
+### 列出解决方案项目
 
-**创建 xUnit 测试项目**
-```powershell
-dotnet new xunit -n Foundation.Tests -o .\src\managed\Tests\Foundation.Tests
-```
-
-**查看某个模板的参数**
-```powershell
-dotnet new console -h
-```
-
-**常见模板**
-1. `console`：控制台应用。
-2. `classlib`：类库。
-3. `xunit` / `nunit` / `mstest`：测试项目。
-4. `webapi`：ASP.NET Core Web API。
-5. `worker`：后台服务。
-
-## 管理解决方案与项目引用
-
-**将项目加入解决方案**
-```powershell
-dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Foundation\Foundation.csproj
-dotnet sln .\XServerByAI.Managed.sln add .\src\managed\GameLogic\GameLogic.csproj
-```
-
-**查看解决方案中的项目**
 ```powershell
 dotnet sln .\XServerByAI.Managed.sln list
 ```
 
-**从解决方案中移除项目**
+## 常用客户端命令
+
+### 构建客户端控制台程序
+
 ```powershell
-dotnet sln .\XServerByAI.Managed.sln remove .\src\managed\GameLogic\GameLogic.csproj
+dotnet build .\client\XServer.Client.App\XServer.Client.App.csproj -c Debug
 ```
 
-**给项目添加项目引用**
+### 运行客户端控制台程序
+
 ```powershell
-dotnet add .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Foundation\Foundation.csproj
+dotnet run --project .\client\XServer.Client.App\XServer.Client.App.csproj -c Debug
 ```
 
-**移除项目引用**
+### 运行客户端测试
+
 ```powershell
-dotnet remove .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Foundation\Foundation.csproj
+dotnet test .\client\Tests\XServer.Client.Tests\XServer.Client.Tests.csproj -c Debug
 ```
 
-## NuGet 包管理
+## 单项目定位命令
 
-**添加 NuGet 包**
+### 只构建 `Framework`
+
 ```powershell
-dotnet add .\src\managed\GameLogic\GameLogic.csproj package Newtonsoft.Json
+dotnet build .\src\managed\Framework\Framework.csproj -c Debug
 ```
 
-**指定版本添加包**
+### 只构建 `GameLogic`
+
 ```powershell
-dotnet add .\src\managed\GameLogic\GameLogic.csproj package Newtonsoft.Json --version 13.0.3
+dotnet build .\src\managed\GameLogic\GameLogic.csproj -c Debug
 ```
 
-**移除 NuGet 包**
+### 只跑 `Framework.Tests`
+
 ```powershell
-dotnet remove .\src\managed\GameLogic\GameLogic.csproj package Newtonsoft.Json
+dotnet test .\src\managed\Tests\Framework.Tests\Framework.Tests.csproj -c Debug
 ```
 
-**列出项目依赖包**
+### 只跑 ABI / 缺导出负面测试
+
 ```powershell
-dotnet list .\src\managed\GameLogic\GameLogic.csproj package
+dotnet test .\src\managed\Tests\ManagedInteropAbiMismatch.Tests\ManagedInteropAbiMismatch.Tests.csproj -c Debug
+dotnet test .\src\managed\Tests\ManagedInteropMissingExports.Tests\ManagedInteropMissingExports.Tests.csproj -c Debug
 ```
 
-**检查可升级的包**
+## 解决方案与引用管理
+
+### 向解决方案添加项目
+
 ```powershell
-dotnet list .\src\managed\GameLogic\GameLogic.csproj package --outdated
+dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Framework\Framework.csproj
 ```
 
-**清理本地 NuGet 缓存**
+### 从解决方案移除项目
+
 ```powershell
-dotnet nuget locals all --clear
+dotnet sln .\XServerByAI.Managed.sln remove .\src\managed\Framework\Framework.csproj
 ```
 
-## 依赖还原
+### 添加项目引用
 
-**还原当前目录下的项目或解决方案依赖**
 ```powershell
-dotnet restore
+dotnet add .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Framework\Framework.csproj
 ```
 
-**还原指定解决方案**
+### 移除项目引用
+
 ```powershell
-dotnet restore .\XServerByAI.Managed.sln
+dotnet remove .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Framework\Framework.csproj
 ```
 
-**常见说明**
-1. `dotnet build`、`dotnet test`、`dotnet run` 默认会隐式执行还原。
-2. 在 CI 或重复执行场景下，可先单独执行 `restore`，后续搭配 `--no-restore` 提升效率。
+## NuGet 包操作
 
-## 构建
+### 添加包
 
-**构建当前目录项目**
 ```powershell
-dotnet build
+dotnet add .\src\managed\Framework\Framework.csproj package Newtonsoft.Json
 ```
 
-**构建指定解决方案**
+### 指定版本添加包
+
 ```powershell
-dotnet build .\XServerByAI.Managed.sln
+dotnet add .\src\managed\Framework\Framework.csproj package Newtonsoft.Json --version 13.0.3
 ```
 
-**使用 Release 配置构建**
+### 移除包
+
 ```powershell
-dotnet build .\XServerByAI.Managed.sln -c Release
+dotnet remove .\src\managed\Framework\Framework.csproj package Newtonsoft.Json
 ```
 
-**跳过还原直接构建**
+### 查看项目包引用
+
 ```powershell
-dotnet build .\XServerByAI.Managed.sln -c Release --no-restore
+dotnet list .\src\managed\Framework\Framework.csproj package
 ```
 
-**指定输出目录**
+## 格式化与清理
+
 ```powershell
-dotnet build .\src\managed\GameLogic\GameLogic.csproj -c Release -o .\artifacts\build\GameLogic
-```
-
-## 运行
-
-**运行当前目录项目**
-```powershell
-dotnet run
-```
-
-**运行指定项目**
-```powershell
-dotnet run --project .\src\managed\GameLogic\GameLogic.csproj
-```
-
-**使用 Release 配置运行**
-```powershell
-dotnet run --project .\src\managed\GameLogic\GameLogic.csproj -c Release
-```
-
-**向程序传递参数**
-```powershell
-dotnet run --project .\src\managed\GameLogic\GameLogic.csproj -- --config .\configs\game.json
-```
-
-**说明**
-1. `--` 之后的内容会原样传给应用程序，而不是 `dotnet` CLI。
-2. 如果项目不是可执行项目，例如 `classlib`，则不能直接 `dotnet run`。
-
-## 测试
-
-**运行当前目录测试**
-```powershell
-dotnet test
-```
-
-**运行指定测试项目**
-```powershell
-dotnet test .\src\managed\Tests\Foundation.Tests\Foundation.Tests.csproj
-```
-
-**使用 Release 配置测试**
-```powershell
-dotnet test .\XServerByAI.Managed.sln -c Release
-```
-
-**跳过构建直接测试**
-```powershell
-dotnet test .\XServerByAI.Managed.sln -c Release --no-build
-```
-
-**生成测试结果文件**
-```powershell
-dotnet test .\XServerByAI.Managed.sln --logger "trx;LogFileName=test-results.trx"
-```
-
-## 发布
-
-**发布可执行项目**
-```powershell
-dotnet publish .\src\managed\GameLogic\GameLogic.csproj -c Release
-```
-
-**指定运行时发布**
-```powershell
-dotnet publish .\src\managed\GameLogic\GameLogic.csproj -c Release -r win-x64
-```
-
-**发布到指定目录**
-```powershell
-dotnet publish .\src\managed\GameLogic\GameLogic.csproj -c Release -o .\artifacts\publish\GameLogic
-```
-
-**自包含发布**
-```powershell
-dotnet publish .\src\managed\GameLogic\GameLogic.csproj -c Release -r win-x64 --self-contained true
-```
-
-**框架依赖发布**
-```powershell
-dotnet publish .\src\managed\GameLogic\GameLogic.csproj -c Release -r win-x64 --self-contained false
-```
-
-**说明**
-1. 自包含发布会把 .NET 运行时一起带上，产物更大，但目标机器不需要预装运行时。
-2. 框架依赖发布体积更小，但目标机器需要安装对应运行时。
-
-## 清理与格式化
-
-**清理构建输出**
-```powershell
-dotnet clean
-```
-
-**清理指定解决方案**
-```powershell
-dotnet clean .\XServerByAI.Managed.sln -c Release
-```
-
-**代码格式化**
-```powershell
+dotnet clean .\XServerByAI.Managed.sln -c Debug
 dotnet format .\XServerByAI.Managed.sln
 ```
 
-## 打包
+## 当前仓库的推荐日常流程
 
-**将类库打成 NuGet 包**
-```powershell
-dotnet pack .\src\managed\Foundation\Foundation.csproj -c Release
-```
-
-**输出到指定目录**
-```powershell
-dotnet pack .\src\managed\Foundation\Foundation.csproj -c Release -o .\artifacts\packages
-```
-
-## 工作负载与工具
-
-**查看已安装 workload**
-```powershell
-dotnet workload list
-```
-
-**安装 workload**
-```powershell
-dotnet workload install maui
-```
-
-**查看全局工具**
-```powershell
-dotnet tool list --global
-```
-
-**安装全局工具**
-```powershell
-dotnet tool install --global dotnet-ef
-```
-
-**更新全局工具**
-```powershell
-dotnet tool update --global dotnet-ef
-```
-
-## 常用参数速查
-
-1. `-c` / `--configuration`：指定配置，如 `Debug`、`Release`。
-2. `-o` / `--output`：指定输出目录。
-3. `-r` / `--runtime`：指定目标运行时，如 `win-x64`、`linux-x64`。
-4. `--framework`：指定目标框架，如 `net8.0`。
-5. `--no-restore`：跳过依赖还原。
-6. `--no-build`：跳过构建。
-7. `-v` / `--verbosity`：指定日志详细程度。
-
-## 针对当前仓库的一个参考流程
-
-如果后续要为 `src/managed/` 补齐 .NET 解决方案与项目，可以参考以下命令顺序：
+### 服务端 managed 回归
 
 ```powershell
-dotnet new sln -n XServerByAI.Managed -f sln
-dotnet new classlib -n Foundation -o .\src\managed\Foundation
-dotnet new classlib -n GameLogic -o .\src\managed\GameLogic
-dotnet sln .\XServerByAI.Managed.sln add .\src\managed\Foundation\Foundation.csproj
-dotnet sln .\XServerByAI.Managed.sln add .\src\managed\GameLogic\GameLogic.csproj
-dotnet add .\src\managed\GameLogic\GameLogic.csproj reference .\src\managed\Foundation\Foundation.csproj
 dotnet restore .\XServerByAI.Managed.sln
 dotnet build .\XServerByAI.Managed.sln -c Debug
+dotnet test .\XServerByAI.Managed.sln -c Debug
 ```
+
+### 客户端回归
+
+```powershell
+dotnet build .\client\XServer.Client.App\XServer.Client.App.csproj -c Debug
+dotnet test .\client\Tests\XServer.Client.Tests\XServer.Client.Tests.csproj -c Debug
+```
+
+## 与 `configs/local-dev.json` 的关系
+
+1. 当前 [configs/local-dev.json](/C:/Users/xiao/Documents/GitHub/XServerByAI/configs/local-dev.json) 默认指向：
+   - `src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.dll`
+   - `src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.runtimeconfig.json`
+   - `src/managed/GameLogic/bin/Debug/net10.0/XServer.Managed.GameLogic.dll`
+2. 因此本地联调前，至少需要先构建 `Framework` 与 `GameLogic` 的 `Debug` 产物。
+3. 如果改用 `Release` 构建，需要同步修改配置文件中的 managed 路径。
 
 ## 常见问题
 
-**1. `dotnet build` 和 `dotnet publish` 有什么区别？**  
-`build` 主要用于编译，产物通常服务于本地开发与测试；`publish` 面向部署，会整理最终运行所需文件。
+### 1. 为什么 `dotnet run` 不能直接跑 `Framework` 或 `GameLogic`？
 
-**2. 为什么我执行 `dotnet run` 失败？**  
-常见原因是当前项目不是可执行项目，或者没有指定正确的 `.csproj` 文件。
+因为这两个项目当前都是类库，不是可执行入口。当前可直接运行的是客户端控制台项目 `client/XServer.Client.App`。
 
-**3. 为什么已经执行过 `restore`，后续命令还在还原？**  
-因为很多命令默认会隐式还原。需要显式关闭时，可加 `--no-restore`。
+### 2. 为什么客户端项目没有出现在 `XServerByAI.Managed.sln` 里？
 
-**4. 什么时候应该用解决方案文件，什么时候直接对 `.csproj` 操作？**  
-多项目协同时优先对 `.sln` 操作；单项目定位问题或局部构建时，直接指定 `.csproj` 更精确。
+这是当前仓库结构的设计选择。服务端 managed 代码与客户端代码分开维护，因此客户端项目需要按 `.csproj` 单独构建和测试。
 
+### 3. 为什么本地集群启动时提示找不到 managed DLL？
+
+通常是因为还没有先执行 `dotnet build` 生成 `Debug/net10.0` 产物，或者配置文件里的路径与实际构建配置不一致。

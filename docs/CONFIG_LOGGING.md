@@ -1,56 +1,64 @@
 # CONFIG_LOGGING
 
-鏈枃妗ｅ畾涔?XServerByAI 褰撳墠闃舵鐨勯厤缃粍缁囨柟寮忋€佺綉缁滃懡鍚嶈鑼冧笌鏃ュ織杈撳嚭鍩虹嚎銆傚悗缁?`M1-16`銆乣M2-01`銆乣M2-02`銆乣M3-06`銆乣M4-02`銆乣M5-17`銆乣M6-06` 涓?`M6-09` 搴斾互鏈枃浠朵负鍑嗐€?
+本文档定义 XServerByAI 当前主线代码使用的集群配置模型、节点命名约定与日志输出基线。本文档只保留当前有效配置，不再记录历史版本迁移过程。
 
-**缃戠粶鍛藉悕瑙勮寖**
-1. `Inner` 琛ㄧず鑺傜偣涓庤妭鐐逛箣闂寸殑鍐呴儴缃戠粶锛屼緥濡?`InnerNetwork`銆乣innerNetwork.listenEndpoint`銆乣innerNetworkEndpoint`銆?
-2. `Control` 琛ㄧず ctrl 宸ュ叿涓?`GM` 涔嬮棿鐨勭鐞嗙綉缁溿€傚綋鍓嶉樁娈靛凡钀藉湴 `GM` 鏈湴 HTTP 绠＄悊鎺ュ彛閰嶇疆鍧楋紝缁熶竴浣跨敤 `ControlNetwork`銆乣controlNetwork.listenEndpoint` 绛夊懡鍚嶃€?
-3. `Client` 琛ㄧず `Gate` 涓庡鎴风涔嬮棿鐨勭綉缁滐紝渚嬪 `ClientNetwork`銆乣clientNetwork.listenEndpoint`銆?
-4. 涓嶅啀浣跨敤鍘嗗彶閬楃暀鏈鍘昏〃杈捐妭鐐归棿閾捐矾鎴栧疄渚嬮€夋嫨銆?
+## 适用范围
 
-**缁熶竴鍚姩鍏ュ彛**
-1. native 缁熶竴浣跨敤 `xserver-node <configPath> <nodeId>` 鍚姩銆?
-2. `configPath` 鎸囧悜鍗曚釜 UTF-8 JSON 閰嶇疆鏂囦欢锛屼緥濡?`configs/local-dev.json`銆?
-3. `nodeId` 褰撳墠鍙帴鍙?`GM`銆乣Gate<index>`銆乣Game<index>` 褰㈠紡锛屼緥濡?`GM`銆乣Gate0`銆乣Game1`銆?
-4. `nodeId` 鍙礋璐ｅ湪鍗曟枃浠朵腑閫夋嫨瀹炰緥锛涚ǔ瀹氶€昏緫韬唤缁熶竴绉颁负 `NodeID`锛屽綋鍓嶄笌鍚姩鍙傛暟鍙栧€间竴鑷淬€?
+1. 适用于 `xserver-node <configPath> <nodeId>` 读取的单个 UTF-8 JSON 集群配置文件。
+2. 适用于 native `GM`、`Gate`、`Game` 三类节点的配置选择逻辑。
+3. 适用于 `src/native/core/Config.*` 与 `src/native/core/Logging.*` 当前实现。
 
-**椤跺眰閰嶇疆鍧?*
+## 启动入口与 NodeID
 
-| Block | Required | Applies To | Description |
+1. native 统一使用 `xserver-node <configPath> <nodeId>` 启动。
+2. `configPath` 必须指向单个 UTF-8 JSON 配置文件，例如 `configs/local-dev.json`。
+3. `nodeId` 当前支持 `GM`、`Gate<index>`、`Game<index>`，例如 `GM`、`Gate0`、`Game1`。
+4. `Gate` 与 `Game` 的稳定逻辑身份统一称为 `NodeID`；当前命令行参数里的 `nodeId` 与配置键名保持一致。
+
+## 顶层配置模型
+
+当前配置文件固定包含以下顶层块：
+
+| Key | Required | Scope | Description |
 | --- | --- | --- | --- |
-| `env` | Yes | `GM` / `Gate` / `Game` | 鏈嶅姟鍣ㄧ粍韬唤涓庣幆澧冩爣绛?|
-| `logging` | Yes | `GM` / `Gate` / `Game` | 闆嗙兢绾ф棩蹇楅厤缃?|
-| kcp | Yes | Gate | 闆嗙兢绾у鎴风 KCP 鍙傛暟 |
-| managed | Yes | GM / Game | 共享托管程序集标识与 runtime asset 路径 |
-| `gm` | Yes | `GM` | `GM` 鍗曚緥閰嶇疆 |
-| `gate` | Yes | `Gate` | 浠?`NodeID` 涓洪敭鐨?Gate 瀹炰緥闆嗗悎 |
-| `game` | Yes | `Game` | 浠?`NodeID` 涓洪敭鐨?Game 瀹炰緥闆嗗悎 |
+| `env` | Yes | cluster | 服务器组标识与环境标签 |
+| `logging` | Yes | cluster | 日志根目录、等级与滚动策略 |
+| `kcp` | Yes | cluster | `Gate -> Client` KCP 参数 |
+| `managed` | Yes | cluster | CLR 宿主装载 `Framework` 的路径与搜索目录 |
+| `gm` | Yes | cluster | `GM` 的 `Inner` / `Control` 监听地址 |
+| `gate` | Yes | cluster | 全部 `Gate` 实例配置，键名直接使用 `NodeID` |
+| `game` | Yes | cluster | 全部 `Game` 实例配置，键名直接使用 `NodeID` |
 
-**瀹炰緥閫夋嫨瑙勫垯**
-1. `nodeId = GM` 鏃讹紝鍔犺浇椤跺眰 `gm` 閰嶇疆鍧椼€?
-2. `nodeId = Gate0` 鏃讹紝鍔犺浇 `gate.Gate0` 閰嶇疆鍧椼€?
-3. `nodeId = Game0` 鏃讹紝鍔犺浇 `game.Game0` 閰嶇疆鍧椼€?
-4. `gate` / `game` 瀛愰敭鐩存帴浣跨敤 `NodeID`锛屼緥濡?`gate.Gate0`銆乣game.Game0`銆?
-5. 褰撳墠瀹炵幇鍙澶栨毚闇蹭袱绫绘帴鍙ｏ細鍔犺浇瀹屾暣 `ClusterConfig`锛屼互鍙婂熀浜?`ClusterConfig + nodeId` 閫夋嫨鍏蜂綋 `NodeConfig`銆?
+当前实现中：
 
-**鑺傜偣閰嶇疆瑕佹眰**
-1. `gm.innerNetwork.listenEndpoint` 蹇呭～锛岃〃绀?`GM` 鐨?`InnerNetwork` 鐩戝惉鍦板潃銆?
-2. `gm.controlNetwork.listenEndpoint` 蹇呭～锛岃〃绀?`GM` 鐨勬湰鍦?HTTP 绠＄悊鎺ュ彛鐩戝惉鍦板潃銆?
-3. `gate.<NodeID>.innerNetwork.listenEndpoint` 蹇呭～锛岃〃绀鸿 Gate 鐨?`InnerNetwork` 鐩戝惉鍦板潃銆?
-4. `gate.<NodeID>.clientNetwork.listenEndpoint` 蹇呭～锛岃〃绀鸿 Gate 鐨?`ClientNetwork` 鐩戝惉鍦板潃銆?
-5. `game.<NodeID>.innerNetwork.listenEndpoint` 蹇呭～锛岃〃绀鸿 Game 鐨?`InnerNetwork` 鐩戝惉鍦板潃銆?
-6. `managed.assemblyName` 默认为 `XServer.Managed.Framework`；`managed.assemblyPath`、`managed.runtimeConfigPath` 与 `managed.searchAssemblyPaths` 由顶层共享提供。
-7. `logging` 涓?`kcp` 宸茬Щ鍔ㄥ埌闆嗙兢灞傦紱涓嶅啀鍦?`NodeConfig` 鍐呴噸澶嶅瓨鏀捐繖浜涘叕鍏卞瓧娈点€?
-8. `NodeConfig` 涓嶅啀鏄惧紡淇濆瓨鍘嗗彶鐨勮繘绋嬬被鍨嬪瓧娈典笌鑺傜偣鏍囪瘑瀛楁锛涜妭鐐硅鑹茬敱娲剧敓绫诲瀷浣撶幇锛屽疄渚嬬敱 `ClusterConfig` 涓?`gm` / `gate` / `game` 鐨勯敭鍊间綋鐜般€?
+1. `logging`、`kcp` 与 `managed` 是集群级共享配置。
+2. `GM` 使用 `gm`。
+3. `Gate` 从 `gate.<NodeID>` 读取实例级配置。
+4. `Game` 从 `game.<NodeID>` 读取实例级配置，并额外继承顶层 `managed`。
 
-**鍛藉悕涓庤В鏋愮害鏉?*
-1. JSON 閿粺涓€浣跨敤 `lowerCamelCase`銆?
-2. 鏃堕暱瀛楁缁熶竴浣跨敤 `*Ms` 鍚庣紑銆?
-3. 绔偣瀛楁缁熶竴浣跨敤 `*Endpoint` 鍛藉悕锛屽苟閲囩敤 `{ "host": string, "port": uint16 }` 缁撴瀯銆?
-4. 椤跺眰鏈煡閰嶇疆鍧椾笌宸插缓妯″璞′腑鐨勬湭鐭ュ瓧娈甸粯璁よ涓洪厤缃敊璇€?
-5. 当前实现对 `env`、`logging`、`kcp`、`managed`、`gm.innerNetwork`、`gm.controlNetwork`、`gate.*.innerNetwork`、`gate.*.clientNetwork` 与 `game.*.innerNetwork` 都执行显式字段校验。
+## JSON 命名与校验规则
 
-**鏈€灏忛厤缃ず渚?*
+1. 所有 JSON 键统一使用 `lowerCamelCase`。
+2. 时长字段统一使用 `*Ms` 后缀。
+3. 监听地址统一使用：
+
+```json
+{
+  "listenEndpoint": {
+    "host": "127.0.0.1",
+    "port": 5000
+  }
+}
+```
+
+4. 当前配置解析是严格模式：缺失必填字段会失败，未知字段也会失败。
+5. `port` 必须大于 `0`。
+6. `host` 不允许为空字符串。
+7. 路径字段按当前配置文件所在目录解析相对路径。
+
+## 当前示例配置
+
+当前仓库样例文件是 [configs/local-dev.json](/C:/Users/xiao/Documents/GitHub/XServerByAI/configs/local-dev.json)，其结构如下：
 
 ```json
 {
@@ -78,6 +86,15 @@
     "deadLinkCount": 20,
     "streamMode": false
   },
+  "managed": {
+    "assemblyName": "XServer.Managed.Framework",
+    "assemblyPath": "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.dll",
+    "runtimeConfigPath": "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.runtimeconfig.json",
+    "searchAssemblyPaths": [
+      "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.dll",
+      "../src/managed/GameLogic/bin/Debug/net10.0/XServer.Managed.GameLogic.dll"
+    ]
+  },
   "gm": {
     "innerNetwork": {
       "listenEndpoint": {
@@ -96,14 +113,40 @@
     "Gate0": {
       "innerNetwork": {
         "listenEndpoint": {
-          "host": "0.0.0.0",
+          "host": "127.0.0.1",
           "port": 7000
+        }
+      },
+      "authNetwork": {
+        "listenEndpoint": {
+          "host": "0.0.0.0",
+          "port": 4100
         }
       },
       "clientNetwork": {
         "listenEndpoint": {
           "host": "0.0.0.0",
           "port": 4000
+        }
+      }
+    },
+    "Gate1": {
+      "innerNetwork": {
+        "listenEndpoint": {
+          "host": "127.0.0.1",
+          "port": 7001
+        }
+      },
+      "authNetwork": {
+        "listenEndpoint": {
+          "host": "0.0.0.0",
+          "port": 4101
+        }
+      },
+      "clientNetwork": {
+        "listenEndpoint": {
+          "host": "0.0.0.0",
+          "port": 4001
         }
       }
     }
@@ -115,66 +158,117 @@
           "host": "127.0.0.1",
           "port": 7100
         }
-      },
-      "managed": {
-        "assemblyName": "XServer.Managed.Framework",
-        "assemblyPath": "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.dll",
-        "runtimeConfigPath": "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.runtimeconfig.json",
-        "searchAssemblyPaths": [
-          "../src/managed/Framework/bin/Debug/net10.0/XServer.Managed.Framework.dll",
-          "../src/managed/GameLogic/bin/Debug/net10.0/XServer.Managed.GameLogic.dll"
-        ]
+      }
+    },
+    "Game1": {
+      "innerNetwork": {
+        "listenEndpoint": {
+          "host": "127.0.0.1",
+          "port": 7101
+        }
       }
     }
   }
 }
 ```
 
-褰撳墠浠撳簱绀轰緥鏂囦欢浣嶄簬 `configs/local-dev.json`銆?
+## 各配置块说明
 
-**`logging` 閰嶇疆椤?*
+### `env`
 
-| Item | Type | Default | Description |
+| Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `rootDir` | `string` | `logs` | 鏃ュ織杈撳嚭鏍圭洰褰?|
-| `minLevel` | `enum` | `Info` | 鏈€灏忚緭鍑虹瓑绾?|
-| `flushIntervalMs` | `uint32` | `1000` | 甯歌鍒风洏闂撮殧 |
-| `rotateDaily` | `bool` | `true` | 鏄惁鎸?UTC 鏃ュ巻鏃ュ垏鍒嗘棩蹇?|
-| `maxFileSizeMB` | `uint32` | `64` | 鍗曟枃浠跺ぇ灏忎笂闄?|
-| `maxRetainedFiles` | `uint32` | `10` | 姣忎釜瀹炰緥鍓嶇紑淇濈暀鐨勬渶澶у巻鍙叉枃浠舵暟 |
+| `id` | `string` | Yes | 当前服务器组标识，例如 `local-dev` |
+| `environment` | `string` | Yes | 环境标签，例如 `dev` / `staging` / `prod` |
 
-**鏃ュ織绛夌骇**
-1. 缁熶竴绛夌骇闆嗗悎涓?`Trace`銆乣Debug`銆乣Info`銆乣Warn`銆乣Error`銆乣Fatal`銆?
-2. 杩囨护瑙勫垯涓鸿緭鍑烘墍鏈?`>= minLevel` 鐨勬棩蹇椼€?
-3. `Error` 涓?`Fatal` 蹇呴』灏藉揩鍒风洏銆?
+### `logging`
 
-**鏃ュ織鏂囦欢缁勭粐**
-1. 瀹炰緥鏍囪瘑 `instanceId` 鍥哄畾浣跨敤 `GM` 鎴栧搴?`NodeID`銆?
-2. 榛樿鏂囦欢璺緞鏍煎紡涓?`<rootDir>/<instanceId>-YYYY-MM-DD.log`銆?
-3. 鍚屼竴澶╄秴鍑?`maxFileSizeMB` 鍚庯紝鎸?`<instanceId>-YYYY-MM-DD.1.log`銆乣.2.log` 閫掑鍒嗗嵎銆?
+| Field | Type | Required | Default | Description |
+| --- | --- | --- | --- | --- |
+| `rootDir` | `string` | Yes | `logs` | 日志根目录 |
+| `minLevel` | `enum` | Yes | `Info` | 最低输出等级 |
+| `flushIntervalMs` | `uint32` | Yes | `1000` | 周期性 flush 间隔，必须大于 `0` |
+| `rotateDaily` | `bool` | Yes | `true` | 是否按 UTC 日期滚动 |
+| `maxFileSizeMB` | `uint32` | Yes | `64` | 单文件大小上限，必须大于 `0` |
+| `maxRetainedFiles` | `uint32` | Yes | `10` | 允许保留的历史日志文件数量，必须大于 `0` |
 
-**鍗曡鏃ュ織瀛楁**
+`minLevel` 当前支持：
 
-| Field | Required | Description |
-| --- | --- | --- |
-| `timestampUtc` | Yes | UTC 鏃堕棿鎴?|
-| `level` | Yes | 鏃ュ織绛夌骇 |
-| `processType` | Yes | `GM`銆乣Gate`銆乣Game` |
-| `instanceId` | Yes | `GM` 鎴?`NodeID` |
-| `pid` | Yes | 褰撳墠杩涚▼鍙?|
-| `category` | Yes | 绋冲畾鍒嗙被鍚嶏紝渚嬪 `inner.register`銆乣client.kcp` |
-| `message` | Yes | 浜虹被鍙娑堟伅 |
-| `errorCode` | Conditional | 鑻ュ搴旂ǔ瀹氶敊璇爜鍒欒緭鍑?|
-| `errorName` | Conditional | 涓?`errorCode` 瀵瑰簲鐨勮鑼冭嫳鏂囧悕 |
-| `context` | Optional | 缁撴瀯鍖栦笂涓嬫枃 |
+1. `Trace`
+2. `Debug`
+3. `Info`
+4. `Warn`
+5. `Error`
+6. `Fatal`
 
-**瀹炵幇绾︽潫**
-1. `M2-02` 鐨勯厤缃姞杞藉繀椤昏嚦灏戞敮鎸?`ClusterConfig` 鍔犺浇銆乣NodeConfig` 閫夋嫨銆佸繀濉潡鏍￠獙涓庢湭鐭ュ瓧娈靛け璐ャ€?
-2. `M4-02` 鐨?Gate 瀹㈡埛绔洃鍚繀椤讳娇鐢?`gate.<NodeID>.clientNetwork.listenEndpoint` 涓庨《灞?`kcp`銆?
-3. `M3-07` 鐨?`GM` 鏈湴 HTTP 绠＄悊鎺ュ彛浣跨敤 `gm.controlNetwork.listenEndpoint`锛涘悗缁嫢鎵╁睍澶栭儴 ctrl 宸ュ叿锛屼篃蹇呴』缁х画娌跨敤 `ControlNetwork`銆乣controlNetwork.listenEndpoint` 绛夊懡鍚嶃€?
+### `kcp`
 
-**M3-17 补充：顶层 managed**
-1. 顶层新增 `managed` 配置块，当前由 `GM` 与全部 `Game` 共用；`game.<NodeID>` 不再内嵌 `managed`。
-2. `managed` 当前包含 `assemblyName`、`assemblyPath`、`runtimeConfigPath` 与 `searchAssemblyPaths` 四个字段；路径字段都支持相对配置文件所在目录解析。
-3. `GM` 通过顶层 `managed` 加载托管程序集并读取 ServerStub catalog；`Game` 仍复用同一块配置初始化托管运行时。
-4. 配置校验会对顶层 `managed` 做显式字段检查，未知字段与缺失必需路径都会按配置错误处理。
+字段定义与默认值见 [KCP_CONFIG.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/KCP_CONFIG.md)。当前这些参数只作用于 `Gate` 的 `clientNetwork`。
+
+### `managed`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `assemblyName` | `string` | Yes | CLR 宿主加载的根程序集名，当前默认 `XServer.Managed.Framework` |
+| `assemblyPath` | `path` | Yes | 根程序集 `.dll` 路径 |
+| `runtimeConfigPath` | `path` | Yes | `.runtimeconfig.json` 路径 |
+| `searchAssemblyPaths` | `path[]` | No | 额外可扫描程序集路径，`GM` 用它发现 `ServerStub` catalog |
+
+当前实现中：
+
+1. `GM` 会加载 `managed`，但只读取 stub catalog，不调用 `GameNativeInit`。
+2. 所有 `Game` 节点都会继承同一份 `managed` 配置。
+
+### `gm`
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `innerNetwork.listenEndpoint` | `Endpoint` | Yes | `GM` 的内部监听地址 |
+| `controlNetwork.listenEndpoint` | `Endpoint` | Yes | `GM` 管理 HTTP 监听地址 |
+
+当前 `GM` 的 `controlNetwork` 已落地以下 HTTP 路由：
+
+1. `GET /healthz`
+2. `GET /status`
+3. `GET /boardcase`
+4. `POST /shutdown`
+
+### `gate`
+
+每个 `gate.<NodeID>` 都必须包含：
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `innerNetwork.listenEndpoint` | `Endpoint` | Yes | `Gate` 的内部监听地址，供 `Game -> Gate` 注册与转发 |
+| `authNetwork.listenEndpoint` | `Endpoint` | Yes | `Gate` 的 HTTP 登录入口 |
+| `clientNetwork.listenEndpoint` | `Endpoint` | Yes | `Gate` 的 KCP 客户端入口 |
+
+当前 `authNetwork` 已落地以下 HTTP 路由：
+
+1. `GET /healthz`
+2. `POST /login`
+
+### `game`
+
+每个 `game.<NodeID>` 当前只要求：
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `innerNetwork.listenEndpoint` | `Endpoint` | Yes | `Game` 的内部监听地址 |
+
+`Game` 的 managed 配置不再写在 `game.<NodeID>` 下，而是统一继承顶层 `managed`。
+
+## 日志输出约定
+
+1. `LoggerOptions.instance_id` 当前固定使用 `GM` 或实际 `NodeID`，例如 `Gate0`、`Game1`。
+2. 默认文件路径格式为 `<rootDir>/<instanceId>-YYYY-MM-DD.log`。
+3. 同一天内超过 `maxFileSizeMB` 后，会继续写入 `<instanceId>-YYYY-MM-DD.1.log`、`.2.log` 等分卷。
+4. `rotateDaily = false` 时，当前实例持续写同一日期基准文件，直到达到大小滚动条件。
+5. `Error` 与 `Fatal` 会立即 flush；其余等级按 `flushIntervalMs` 周期 flush。
+6. 每行日志至少包含 UTC 时间、等级、进程类型、实例标识、category、message；若提供 `errorCode` / `errorName` / 上下文字段，也会一并输出。
+
+## 关联文档
+
+1. 项目总览见 [PROJECT.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/PROJECT.md)。
+2. KCP 参数见 [KCP_CONFIG.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/KCP_CONFIG.md)。
+3. managed ABI 与宿主约定见 [MANAGED_INTEROP.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/MANAGED_INTEROP.md)。

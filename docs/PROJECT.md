@@ -1,85 +1,94 @@
-# 项目说明（初版）
+# 项目说明
 
-本文档描述 XServerByAI 当前阶段的目标、节点拓扑、网络分层与关键技术边界。当前阶段以“统一节点入口 + 配置基线 + 协议骨架 + 运行时骨架”为主，不展开完整业务玩法实现。
+本文档描述 XServerByAI 当前主线代码的目标、节点拓扑、网络分层与已经落地的关键能力。本文档不再使用“初版/骨架阶段”的表述，内容以当前仓库实现为准。
 
-**目标**
+## 当前目标
+
 1. 以单个 `xserver-node` 可执行程序承载 `GM`、`Gate`、`Game` 三类节点。
-2. 以 C++ 负责底层运行时、网络与宿主边界，以 C# 负责 `Game` 侧业务逻辑。
-3. 以单个 UTF-8 JSON 配置文件描述一个服务器组的集群配置与节点实例配置。
-4. 为 `Inner` 集群通信、`Client` 接入以及 `Control` 管理能力提供统一命名和稳定骨架。
+2. 以 C++ 负责配置、日志、事件循环、ZeroMQ、KCP、宿主边界与节点编排。
+3. 以 C# 负责 `Game` 侧实体框架、stub catalog、avatar 创建、mailbox/proxy 路由与客户端推送桥接。
+4. 以单个 UTF-8 JSON 文件描述一个服务器组的全部实例配置。
 
-**非目标**
-1. 当前阶段不引入独立分布式注册中心、跨机房复制或跨地域多活部署能力。
-2. 不引入第三方 RPC 框架；节点间二进制协议仍由项目自定义实现。当前 native 基础设施依赖为 `spdlog`、`zeromq/libzmq`、standalone `asio`、header-only `nlohmann/json` 与 vendored `KCP/ikcp`（不携带其他 Boost 组件）；此外为 C++↔C# 宿主链路 vendored 官方 .NET native hosting artifacts（`nethost` / `hostfxr` 头文件与平台 `nethost` 链接工件），其中 `nlohmann/json` 仅用于 JSON 序列化/反序列化与配置载体读写。
-3. 不在本阶段定义完整的业务玩法、场景迁移或多活写入模型。
+## 当前已落地能力
 
-**平台与依赖**
-1. 目标平台为 Windows 与 Linux。
-2. C++ 构建使用 CMake。
-3. C# 构建使用 `dotnet`（.NET 运行时由 `nethost` 加载）。
-4. 基础第三方依赖以 vendored 源码或官方 host pack 工件形式统一放在 `3rd/`，当前基线为 `spdlog`、`zeromq/libzmq`、standalone `asio`、header-only `nlohmann/json`、`KCP/ikcp` 与 .NET 官方 `dotnet_host`（`nethost` / `hostfxr` headers + platform `nethost` link artifacts）。
+1. `GM`
+   - 负责 `Gate/Game -> GM` 注册、心跳、节点在线聚合、mesh ready 聚合、stub ownership 下发、ready 聚合与 `clusterReady` 下发。
+   - 暴露本地控制 HTTP：`GET /healthz`、`GET /status`、`GET /boardcase`、`POST /shutdown`。
+   - 会短暂加载 managed `Framework` 程序集，读取 `ServerStub` catalog，并构建 bootstrap ownership 表。
+2. `Gate`
+   - 向 `GM` 注册并维护心跳。
+   - 监听来自全部 `Game` 的 `Inner` 注册与心跳，维护本地 Game 目录。
+   - 暴露 `authNetwork` HTTP：`GET /healthz`、`POST /login`。
+   - 暴露 `clientNetwork` KCP 入口，并且只在收到 `clusterReady = true` 后开放客户端接入。
+   - 当前支持 `clientHello (45010)` 与 `selectAvatar (45013)` 两条客户端主线消息。
+   - 当前支持 `Game -> Gate` 三类中继：`Relay.PushToClient (2001)`、`Relay.ForwardMailboxCall (2002)`、`Relay.ForwardProxyCall (2005)`。
+3. `Game`
+   - 向 `GM` 注册并维护心跳。
+   - 在收到 `allNodesOnline = true` 后，对全部 `Gate` 建立注册/心跳闭环，并上报 mesh ready。
+   - 宿主 CLR，绑定 `GameNativeInit`、`GameNativeOnMessage`、ownership/catalog 相关导出。
+   - 基于 ownership 创建本地 `ServerStubEntity`，聚合 ready 后回报 `GM`。
+   - 当前已接通 `Gate -> Game` 的 avatar 创建请求 `2003`，以及 `Game -> Gate` 的创建结果回传 `2004`。
 
-**节点角色**
-1. `GM`：集群协调节点，负责注册、心跳、“所有节点已上线”通知、Game↔Gate mesh ready 聚合、ownership 分配、ready 聚合与 `clusterReady` 编排。
-2. `Gate`：客户端接入节点，负责 `Client` 网络、会话管理、维护已注册 `Game` 目录以及 Gate/Game 中继。
-3. `Game`：业务承载节点，负责托管逻辑、实体状态、对全部 `Gate` 的注册/心跳、mesh ready 上报、按 ownership 初始化 Stub 以及本地 ready 上报。
+## 拓扑与网络分层
 
-**网络分层命名**
-1. `Inner`：节点与节点之间的网络，当前主要承载 `GM <-> Gate/Game` 与 `Game -> Gate` 的注册、心跳及启动编排消息。
-2. `Control`：ctrl 工具与 `GM` 之间的管理网络。当前阶段已落地 `GM` 本地 HTTP 管理接口，并统一沿用 `ControlNetwork`、`controlNetwork.listenEndpoint` 命名。
-3. `Client`：`Gate` 与客户端之间的网络，对应 `ClientNetwork`、`clientNetwork.listenEndpoint` 与集群级 `kcp`。
+1. 当前默认拓扑是 `1 GM + N Gate + M Game`，其中 `N >= 1`、`M >= 1`。
+2. `Inner`
+   - 承载 `GM <-> Gate/Game` 的注册、心跳与启动编排。
+   - 承载 `Game -> Gate` 的注册、心跳与后续中继流量。
+   - 当前实现基于 ZeroMQ over TCP。
+3. `Control`
+   - 只用于管理 `GM`。
+   - 当前实现是 `GM` 本地 HTTP 控制面。
+4. `Auth`
+   - 只用于 `Gate` 的 HTTP 登录授予。
+   - `/login` 返回 KCP 会话预约信息，包括 host、port、conversation 与有效期。
+5. `Client`
+   - 只用于客户端与 `Gate` 的 KCP 数据面。
+   - 当前由顶层 `kcp` 配置块控制算法参数。
 
-**NodeID 约定**
-1. Gate 与 Game 的稳定逻辑身份统一称为 `NodeID`。
-2. `NodeID` 使用 `<ProcessType><index>` 形式，例如 `Gate0`、`Gate1`、`Game0`、`Game1`。
-3. 启动参数中的 `nodeId` 只用于实例选择；当前与 `NodeID` 取值保持一致。
+## 当前主线业务闭环
 
-**拓扑**
-1. 当前默认拓扑为 `1 GM + N Gate + M Game`，其中 `N >= 1`、`M >= 1`。
-2. `GM` 与每个 `Gate` / `Game` 通过 `Inner` 网络直接通信。
-3. `Gate` 与 `Game` 之间通过 `Inner` 网络形成“`Game` 主动注册到全部 `Gate`”的中继平面。
-4. 客户端只与 `Gate` 的 `Client` 网络通信。
-5. `Gate` 与 `Gate`、`Game` 与 `Game` 当前不直接形成业务通道。
+1. `GM` 启动并监听 `Inner` 与 `Control`。
+2. `Game`、`Gate` 各自向 `GM` 注册并进入心跳。
+3. `GM` 确认期望节点全部在线后，通知全部 `Game` 开始 `Game -> Gate` 全连接闭环。
+4. `Game` 完成到全部 `Gate` 的注册/心跳后，上报 mesh ready。
+5. `GM` 下发 stub ownership。
+6. `Game` 初始化本地 stub，并在全部 ready 后上报 `GM`。
+7. `GM` 向全部 `Gate` 下发 `clusterReady = true`。
+8. 客户端先调用 `Gate /login` 获取 KCP 预约，再通过 `clientHello` 建立受控会话。
+9. 客户端发送 `selectAvatar` 后，`Gate` 选择一个就绪 `Game`，发送 `2003` 创建 avatar 请求；`Game` 完成处理后回送 `2004`，`Gate` 绑定路由并给客户端确认。
+10. 运行期 managed 逻辑可继续通过 `Relay.ForwardMailboxCall`、`Relay.ForwardProxyCall` 与 `Relay.PushToClient` 驱动跨节点和下行消息。
 
-**统一启动入口**
-1. native 统一使用 `xserver-node <configPath> <nodeId>` 启动。
-2. `configPath` 指向单个 UTF-8 JSON 配置文件。
-3. `nodeId` 当前支持 `GM`、`Gate<index>`、`Game<index>`。
+## managed 与客户端项目
 
-**开发期管理脚本**
-1. `M3-17` 当前提供 Python 主入口 `tools/cluster_ctl.py`，用于执行 `start` / `kill` 两类本地开发管理命令。
-2. Windows 下提供薄包装脚本 `tools/start_local_cluster.bat` 与 `tools/kill_local_cluster.bat`，默认面向 `configs/local-dev.json`。
-3. `start` 命令按 `GM -> Game[*] -> Gate[*]` 顺序拉起节点，并通过 `GM` 的本地 HTTP `GET /healthz` / `GET /status` 做最小启动探活。
-4. `kill` 命令当前只覆盖 Windows，按“配置路径 + `NodeID` + `xserver-node.exe`”精确匹配并强制终止本机进程，不接入优雅退出流程。
+当前仓库中已落地的 managed / client 项目包括：
 
-**客户端模拟器**
-1. 顶层 `client/` 目录用于放置独立的客户端侧代码、脚本与客户端测试，不混入 `src/managed/` 的服务端业务项目。
-2. 当前 `M4-03` 已提供 `client/XServer.Client/` 控制台模拟客户端，用于连接 `Gate` 的 `ClientNetwork` KCP 入口、构造基础协议包并通过 REPL / 脚本模拟登录、移动、购买武器等行为。
-3. `client/demo.txt` 提供一个最小脚本示例，可用于本地集群联调与回归演示。
+1. `src/managed/Foundation`
+2. `src/managed/Framework`
+3. `src/managed/GameLogic`
+4. `src/managed/EntityProperties.Generator`
+5. `src/managed/Tests/*`
+6. `client/XServer.Client.Framework`
+7. `client/XServer.Client.GameLogic`
+8. `client/XServer.Client.App`
+9. `client/Tests/XServer.Client.Tests`
 
-**配置模型**
-1. 顶层配置块固定为 `env`、`logging`、`kcp`、`managed`、`gm`、`gate`、`game`。
-2. `logging`、`kcp` 与 `managed` 是集群级公共配置。
-3. `gm.innerNetwork.listenEndpoint` 表示 `GM` 的内部监听地址。
-4. `gm.controlNetwork.listenEndpoint` 表示 `GM` 的本地 HTTP 管理接口监听地址。
-5. `gate.<NodeID>` 同时包含 `innerNetwork.listenEndpoint` 与 `clientNetwork.listenEndpoint`。
-6. `managed` 包含 `assemblyName`、`assemblyPath`、`runtimeConfigPath` 与 `searchAssemblyPaths`，由 `GM` 与全部 `Game` 共用；`game.<NodeID>` 只包含实例级 `innerNetwork.listenEndpoint`。
-7. 当前仓库样例配置位于 `configs/local-dev.json`。
+其中：
 
-**协议与运行时**
-1. 节点间消息统一使用二进制包头与消息体编码，包头定义见 `docs/PACKET_HEADER.md`。
-2. `msgId` 规范见 `docs/MSG_ID.md`，错误码规范见 `docs/ERROR_CODE.md`。
-3. 启动期与集群期 `Inner` 消息规范见 `docs/PROCESS_INNER.md`。
-4. `Gate` 的客户端路由语义见 `docs/SESSION_ROUTING.md` 与 `docs/GATE_GAME_ENVELOPE.md`。
+1. `Framework` 与 `GameLogic` 当前目标框架是 `net10.0`。
+2. `EntityProperties.Generator` 当前目标框架是 `netstandard2.0`。
+3. 客户端项目不并入 `XServerByAI.Managed.sln`，而是按项目单独构建与测试。
 
-**托管互操作**
-1. 当前阶段 `Game` 进程承载 CLR 业务入口；`GM` 会在启动编排阶段短暂加载 `Framework` 程序集，并结合 `managed.searchAssemblyPaths` 读取 ServerStub catalog，但不会运行 `GameNativeInit` / `GameNativeOnMessage` / `GameNativeOnTick` 业务循环。
-2. 默认托管程序集名为 `XServer.Managed.Framework`。
-3. `src/managed/Foundation` 承载通用契约与互操作共享类型，`src/managed/Framework` 承载 `ServerEntity` / `ServerStubEntity` 等分布式实体框架公共抽象，`src/managed/GameLogic` 承载业务逻辑并依赖 `Framework`。
-4. ABI 与导出函数约定见 `docs/MANAGED_INTEROP.md`。
+## 当前不做的事情
 
-**关联文档**
-1. 配置与日志：`docs/CONFIG_LOGGING.md`
-2. KCP：`docs/KCP_CONFIG.md`
-3. 启动顺序：`docs/STARTUP_FLOW.md`
-4. 分布式实体：`docs/DISTRIBUTED_ENTITY.md`
+1. 不引入独立分布式注册中心、跨地域多活或跨机房复制。
+2. 不引入第三方 RPC 框架；当前节点间协议仍由项目自行编码。
+3. 不把 `Gate <-> Game` 运行期消息抽象成完整通用 RPC 系统；当前主线仍以 avatar bootstrap 和 mailbox/proxy/push 三类运行期流量为主。
+
+## 关联文档
+
+1. 配置与日志见 [CONFIG_LOGGING.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/CONFIG_LOGGING.md)。
+2. 启动顺序见 [STARTUP_FLOW.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/STARTUP_FLOW.md)。
+3. `Inner` 协议见 [PROCESS_INNER.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/PROCESS_INNER.md)。
+4. managed ABI 见 [MANAGED_INTEROP.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/MANAGED_INTEROP.md)。
+5. Gate/Game 中继见 [GATE_GAME_ENVELOPE.md](/C:/Users/xiao/Documents/GitHub/XServerByAI/docs/GATE_GAME_ENVELOPE.md)。
