@@ -1,4 +1,5 @@
 using XServer.Client.Configuration;
+using XServer.Client.Entities;
 using XServer.Client.Runtime;
 
 namespace XServer.Client.Tests;
@@ -23,23 +24,28 @@ public sealed class ClientRuntimeStateTests
         Assert.Equal(profile, state.LastLoginProfile);
         Assert.Equal(issuedAt, state.LastLoginIssuedAt);
         Assert.Equal(expiresAt, state.LastLoginExpiresAt);
-        Assert.Contains("avatarSelection=<waiting>", state.BuildStatusText(0, 0U, 0U), StringComparison.Ordinal);
+        Assert.Equal(0, state.EntityManager.Count);
+        Assert.Contains("AvatarSession: <none>", state.BuildStatusText(0, 0U, 0U), StringComparison.Ordinal);
 
-        AvatarView avatar = state.SelectAvatar();
+        AvatarEntity avatar = state.SelectAvatar();
 
         Assert.Equal(ClientLifecycleState.AvatarSelecting, state.LifecycleState);
         Assert.NotNull(state.Avatar);
-        Assert.Same(state.Avatar, state.Account.Avatar);
+        Assert.Equal(state.Avatar!.EntityId, state.AvatarSession.SelectedAvatarEntityId);
         Assert.Equal("demo-account", state.Avatar!.AccountId);
         Assert.Same(avatar, state.Avatar);
+        Assert.Equal(1, state.EntityManager.Count);
         Assert.True(Guid.TryParse(state.Avatar.AvatarId, out Guid avatarId));
         Assert.NotEqual(Guid.Empty, avatarId);
         Assert.Equal($"TempAvatar-{state.Avatar.AvatarId[..8]}", state.Avatar.DisplayName);
-        Assert.False(state.Avatar.IsServerConfirmed);
+        Assert.False(state.HasConfirmedAvatar);
+        Assert.False(state.AvatarSession.IsSelectionConfirmed);
 
-        Assert.True(state.ConfirmAvatarSelection("demo-account", state.Avatar.AvatarId, state.Avatar.DisplayName));
+        Assert.True(state.ConfirmAvatarSelection("demo-account", state.Avatar.AvatarId, state.Avatar.DisplayName, "Game0", 7UL));
         Assert.True(state.HasConfirmedAvatar);
-        Assert.True(state.Avatar.IsServerConfirmed);
+        Assert.True(state.AvatarSession.IsSelectionConfirmed);
+        Assert.Equal("Game0", state.AvatarSession.GameNodeId);
+        Assert.Equal(7UL, state.AvatarSession.SessionId);
         Assert.Equal(ClientLifecycleState.AvatarReady, state.LifecycleState);
     }
 
@@ -80,6 +86,7 @@ public sealed class ClientRuntimeStateTests
         Assert.Equal("account-b", state.Account!.AccountId);
         Assert.Null(state.Avatar);
         Assert.False(state.HasAvatar);
+        Assert.Equal(0, state.EntityManager.Count);
         Assert.Equal(ClientLifecycleState.LoggedIn, state.LifecycleState);
         Assert.Equal(secondProfile, state.LastLoginProfile);
     }
@@ -91,18 +98,18 @@ public sealed class ClientRuntimeStateTests
         ResolvedClientProfile profile = CreateProfile();
 
         state.StoreLoginGrant("demo-account", profile, DateTimeOffset.FromUnixTimeMilliseconds(1712131200000), DateTimeOffset.FromUnixTimeMilliseconds(1712131500000));
-        AvatarView avatar = state.SelectAvatar();
+        AvatarEntity avatar = state.SelectAvatar();
         Assert.Equal(ClientLifecycleState.AvatarSelecting, state.LifecycleState);
 
         Assert.True(state.ConfirmAvatarSelection("demo-account", avatar.AvatarId, avatar.DisplayName));
 
         string status = state.BuildStatusText(3, 11U, 7U);
 
+        Assert.Contains("Entities: total=1", status, StringComparison.Ordinal);
         Assert.Contains("Account: id=demo-account", status, StringComparison.Ordinal);
-        Assert.Contains($"avatarSelection={avatar.AvatarId}", status, StringComparison.Ordinal);
-        Assert.Contains("avatarConfirmed=True", status, StringComparison.Ordinal);
+        Assert.Contains($"AvatarSession: entityId={avatar.EntityId:D}, confirmed=True", status, StringComparison.Ordinal);
         Assert.Contains(
-            $"Avatar: id={avatar.AvatarId}, account=demo-account, name={avatar.DisplayName}, confirmed=True",
+            $"Avatar: id={avatar.AvatarId}, account=demo-account, name={avatar.DisplayName}",
             status,
             StringComparison.Ordinal);
     }
@@ -114,8 +121,8 @@ public sealed class ClientRuntimeStateTests
         ResolvedClientProfile profile = CreateProfile();
         state.StoreLoginGrant("demo-account", profile, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        AvatarView firstAvatar = state.SelectAvatar();
-        AvatarView secondSelection = state.CreateTemporaryAvatarSelection();
+        AvatarEntity firstAvatar = state.SelectAvatar();
+        AvatarEntity secondSelection = state.CreateTemporaryAvatarSelection();
 
         Assert.NotEqual(firstAvatar.AvatarId, secondSelection.AvatarId);
         Assert.Equal("demo-account", secondSelection.AccountId);
@@ -128,7 +135,7 @@ public sealed class ClientRuntimeStateTests
         ClientRuntimeState state = new();
         ResolvedClientProfile profile = CreateProfile();
         state.StoreLoginGrant("demo-account", profile, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
-        AvatarView avatar = state.SelectAvatar();
+        AvatarEntity avatar = state.SelectAvatar();
 
         Assert.False(state.ConfirmAvatarSelection("other-account", avatar.AvatarId, avatar.DisplayName));
         Assert.False(state.ConfirmAvatarSelection("demo-account", Guid.NewGuid().ToString("D"), avatar.DisplayName));
@@ -148,6 +155,7 @@ public sealed class ClientRuntimeStateTests
 
         Assert.False(state.HasAvatar);
         Assert.False(state.HasConfirmedAvatar);
+        Assert.Equal(0, state.EntityManager.Count);
         Assert.Equal(ClientLifecycleState.LoggedIn, state.LifecycleState);
     }
 

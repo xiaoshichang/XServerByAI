@@ -1,5 +1,6 @@
 using System.IO;
 using XServer.Client.Configuration;
+using XServer.Client.Entities;
 using XServer.Managed.Foundation.Protocol;
 
 namespace XServer.Client.Runtime;
@@ -14,7 +15,23 @@ public sealed class ClientRuntimeState
     public ResolvedClientProfile? LastLoginProfile => Account?.LastLoginProfile;
     public DateTimeOffset? LastLoginIssuedAt => Account?.LastLoginIssuedAt;
     public DateTimeOffset? LastLoginExpiresAt => Account?.LastLoginExpiresAt;
-    public AvatarView? Avatar => Account?.Avatar;
+    public EntityManager EntityManager { get; } = new();
+    public AvatarSessionState AvatarSession { get; } = new();
+    public AvatarEntity? Avatar
+    {
+        get
+        {
+            if (AvatarSession.SelectedAvatarEntityId is not Guid avatarEntityId)
+            {
+                return null;
+            }
+
+            return EntityManager.TryGet<AvatarEntity>(avatarEntityId, out AvatarEntity? avatar)
+                ? avatar
+                : null;
+        }
+    }
+
     public uint NextPacketSequence { get; private set; } = 1U;
     public int SentPacketCount { get; private set; }
     public int ReceivedPacketCount { get; private set; }
@@ -24,7 +41,7 @@ public sealed class ClientRuntimeState
     public bool IsConnected => Profile is not null;
     public bool HasAccount => Account is not null;
     public bool HasAvatar => Avatar is not null;
-    public bool HasConfirmedAvatar => Avatar?.IsServerConfirmed ?? false;
+    public bool HasConfirmedAvatar => Avatar is not null && AvatarSession.IsSelectionConfirmed;
     public bool HasCachedLoginGrant => Account?.HasCachedLoginGrant ?? false;
 
     public void MarkConnected(ResolvedClientProfile profile, string? localEndpointText)
@@ -59,6 +76,8 @@ public sealed class ClientRuntimeState
     {
         if (Account is null || !string.Equals(Account.AccountId, account, StringComparison.Ordinal))
         {
+            EntityManager.Clear();
+            AvatarSession.Clear();
             Account = new AccountView
             {
                 AccountId = account,
@@ -106,29 +125,24 @@ public sealed class ClientRuntimeState
         LastReceivedAt = DateTimeOffset.UtcNow;
     }
 
-    public AvatarView CreateTemporaryAvatarSelection()
+    public AvatarEntity CreateTemporaryAvatarSelection()
     {
         EnsureAccountReady();
 
         string accountId = Account!.AccountId;
-        string avatarId = Guid.NewGuid().ToString("D");
-        string avatarName = BuildTemporaryAvatarName(avatarId);
-        return new AvatarView
-        {
-            AccountId = accountId,
-            AvatarId = avatarId,
-            DisplayName = avatarName,
-        };
+        Guid avatarEntityId = Guid.NewGuid();
+        string avatarName = BuildTemporaryAvatarName(avatarEntityId);
+        return new AvatarEntity(avatarEntityId, accountId, avatarName);
     }
 
-    public AvatarView SelectAvatar()
+    public AvatarEntity SelectAvatar()
     {
-        AvatarView avatar = CreateTemporaryAvatarSelection();
+        AvatarEntity avatar = CreateTemporaryAvatarSelection();
         SelectAvatar(avatar);
         return avatar;
     }
 
-    public void SelectAvatar(AvatarView avatar)
+    public void SelectAvatar(AvatarEntity avatar)
     {
         ArgumentNullException.ThrowIfNull(avatar);
         EnsureAccountReady();
@@ -148,42 +162,57 @@ public sealed class ClientRuntimeState
             throw new ArgumentException("Avatar selection display name must not be empty.", nameof(avatar));
         }
 
-        Account.BindAvatar(avatar);
+        if (AvatarSession.SelectedAvatarEntityId.HasValue &&
+            AvatarSession.SelectedAvatarEntityId.Value != avatar.EntityId &&
+            EntityManager.TryGet<AvatarEntity>(AvatarSession.SelectedAvatarEntityId.Value, out AvatarEntity? previousAvatar) &&
+            !AvatarSession.IsSelectionConfirmed)
+        {
+            EntityManager.Unregister(previousAvatar.EntityId);
+        }
+
+        if (!EntityManager.TryGet<AvatarEntity>(avatar.EntityId, out AvatarEntity? existingAvatar))
+        {
+            EntityManagerErrorCode registerResult = EntityManager.Register(avatar);
+            if (registerResult != EntityManagerErrorCode.None)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to register AvatarEntity {avatar.AvatarId}: {EntityManagerError.Message(registerResult)}");
+            }
+        }
+        else if (!ReferenceEquals(existingAvatar, avatar))
+        {
+            throw new InvalidOperationException(
+                $"Client EntityManager already contains AvatarEntity {avatar.AvatarId}.");
+        }
+
+        AvatarSession.Bind(avatar.EntityId);
         RefreshLifecycleState();
     }
 
-    public bool ConfirmAvatarSelection(string accountId, string avatarId, string? avatarName = null)
+    public bool ConfirmAvatarSelection(
+        string accountId,
+        string avatarId,
+        string? avatarName = null,
+        string? gameNodeId = null,
+        ulong? sessionId = null)
     {
         EnsureAccountReady();
 
-        AvatarView? currentAvatar = Avatar;
-        if (currentAvatar is null ||
-            !string.Equals(Account!.AccountId, accountId, StringComparison.Ordinal) ||
-            !string.Equals(currentAvatar.AvatarId, avatarId, StringComparison.Ordinal))
+        if (!Guid.TryParse(avatarId, out Guid avatarEntityId))
         {
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(avatarName) &&
-            !string.Equals(currentAvatar.DisplayName, avatarName, StringComparison.Ordinal))
+        AvatarEntity? currentAvatar = Avatar;
+        if (currentAvatar is null ||
+            !string.Equals(Account!.AccountId, accountId, StringComparison.Ordinal) ||
+            currentAvatar.EntityId != avatarEntityId)
         {
-            Account.BindAvatar(new AvatarView
-            {
-                AccountId = currentAvatar.AccountId,
-                AvatarId = currentAvatar.AvatarId,
-                DisplayName = avatarName,
-                PositionX = currentAvatar.PositionX,
-                PositionY = currentAvatar.PositionY,
-                PositionZ = currentAvatar.PositionZ,
-            });
-
-            foreach (KeyValuePair<string, int> entry in currentAvatar.WeaponInventory)
-            {
-                Account.Avatar!.WeaponInventory[entry.Key] = entry.Value;
-            }
+            return false;
         }
 
-        Account.Avatar!.MarkServerConfirmed();
+        currentAvatar.UpdateDisplayName(avatarName);
+        AvatarSession.Confirm(gameNodeId, sessionId);
         RefreshLifecycleState();
         return true;
     }
@@ -195,7 +224,13 @@ public sealed class ClientRuntimeState
             return;
         }
 
-        Account.ClearAvatar();
+        Guid? avatarEntityId = AvatarSession.SelectedAvatarEntityId;
+        AvatarSession.Clear();
+        if (avatarEntityId.HasValue)
+        {
+            EntityManager.Unregister(avatarEntityId.Value);
+        }
+
         RefreshLifecycleState();
     }
 
@@ -225,6 +260,7 @@ public sealed class ClientRuntimeState
             $"Conversation: {Profile?.Conversation.ToString() ?? "<none>"}",
             $"PacketSeq.Next: {NextPacketSequence}",
             $"Packets: sent={SentPacketCount}, received={ReceivedPacketCount}",
+            $"Entities: total={EntityManager.Count}",
             $"KCP: pendingAck={pendingAckCount}, nextSendSn={nextKcpSendSequence}, nextRecvSn={nextKcpReceiveSequence}",
             $"LastSentAt: {LastSentAt?.ToString("O") ?? "<none>"}",
             $"LastReceivedAt: {LastReceivedAt?.ToString("O") ?? "<none>"}",
@@ -236,14 +272,22 @@ public sealed class ClientRuntimeState
         }
         else
         {
-            string avatarConfirmedText = Account.Avatar is null
-                ? "<none>"
-                : Account.Avatar.IsServerConfirmed.ToString();
             lines.Add(
                 $"Account: id={Account.AccountId}, cached={(HasCachedLoginGrant ? LastLoginProfile!.DisplayEndpoint : "<none>")}, " +
-                $"issuedAt={LastLoginIssuedAt?.ToString("O") ?? "<none>"}, expiresAt={LastLoginExpiresAt?.ToString("O") ?? "<none>"}, " +
-                $"avatarSelection={(Account.Avatar?.AvatarId ?? "<waiting>")}, " +
-                $"avatarConfirmed={avatarConfirmedText}");
+                $"issuedAt={LastLoginIssuedAt?.ToString("O") ?? "<none>"}, expiresAt={LastLoginExpiresAt?.ToString("O") ?? "<none>"}");
+        }
+
+        if (!AvatarSession.HasSelection)
+        {
+            lines.Add("AvatarSession: <none>");
+        }
+        else
+        {
+            lines.Add(
+                $"AvatarSession: entityId={AvatarSession.SelectedAvatarEntityId!.Value:D}, " +
+                $"confirmed={AvatarSession.IsSelectionConfirmed}, " +
+                $"game={AvatarSession.GameNodeId ?? "<unknown>"}, " +
+                $"sessionId={AvatarSession.SessionId?.ToString() ?? "<unknown>"}");
         }
 
         if (Avatar is null)
@@ -257,7 +301,7 @@ public sealed class ClientRuntimeState
                 : string.Join(", ", Avatar.WeaponInventory.Select(entry => $"{entry.Key}x{entry.Value}"));
             lines.Add(
                 $"Avatar: id={Avatar.AvatarId}, account={Avatar.AccountId}, name={Avatar.DisplayName}, " +
-                $"confirmed={Avatar.IsServerConfirmed}, pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapons={weapons}");
+                $"pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapons={weapons}");
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -280,7 +324,7 @@ public sealed class ClientRuntimeState
                 "The simulated client does not have a local Avatar bound to an Account yet. Run login <url> <account> <password> and then selectAvatar first.");
         }
 
-        if (!Avatar.IsServerConfirmed)
+        if (!AvatarSession.IsSelectionConfirmed)
         {
             throw new InvalidOperationException(
                 "The local Avatar selection is still waiting for server confirmation. Wait for the selectAvatar success response first.");
@@ -289,7 +333,7 @@ public sealed class ClientRuntimeState
 
     private void RefreshLifecycleState()
     {
-        if (Avatar is not null && Avatar.IsServerConfirmed)
+        if (Avatar is not null && AvatarSession.IsSelectionConfirmed)
         {
             LifecycleState = ClientLifecycleState.AvatarReady;
             return;
@@ -316,8 +360,9 @@ public sealed class ClientRuntimeState
         LifecycleState = ClientLifecycleState.Disconnected;
     }
 
-    private static string BuildTemporaryAvatarName(string avatarId)
+    private static string BuildTemporaryAvatarName(Guid avatarEntityId)
     {
+        string avatarId = avatarEntityId.ToString("D");
         int suffixLength = Math.Min(8, avatarId.Length);
         return $"TempAvatar-{avatarId[..suffixLength]}";
     }

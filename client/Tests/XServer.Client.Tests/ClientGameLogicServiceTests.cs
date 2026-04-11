@@ -1,5 +1,6 @@
 using System.Text.Json;
 using XServer.Client.Configuration;
+using XServer.Client.Entities;
 using XServer.Client.GameLogic;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
@@ -24,6 +25,7 @@ public sealed class ClientGameLogicServiceTests
 
         Assert.True(state.HasAvatar);
         Assert.False(state.HasConfirmedAvatar);
+        Assert.Equal(1, state.EntityManager.Count);
         Assert.Equal(ClientLifecycleState.AvatarSelecting, state.LifecycleState);
     }
 
@@ -37,7 +39,7 @@ public sealed class ClientGameLogicServiceTests
         OutboundGameRequest request = service.PrepareSelectAvatarRequest(state);
         request.ApplyAfterSend?.Invoke();
 
-        AvatarView avatar = state.Avatar!;
+        AvatarEntity avatar = state.Avatar!;
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
             new
             {
@@ -63,6 +65,8 @@ public sealed class ClientGameLogicServiceTests
         Assert.NotNull(message);
         Assert.Contains("selectAvatar confirmed", message, StringComparison.Ordinal);
         Assert.True(state.HasConfirmedAvatar);
+        Assert.Equal("Game0", state.AvatarSession.GameNodeId);
+        Assert.Equal(7UL, state.AvatarSession.SessionId);
         Assert.Equal(ClientLifecycleState.AvatarReady, state.LifecycleState);
     }
 
@@ -105,7 +109,7 @@ public sealed class ClientGameLogicServiceTests
     {
         ClientRuntimeState state = new();
         state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
-        AvatarView avatar = state.SelectAvatar();
+        AvatarEntity avatar = state.SelectAvatar();
         Assert.True(state.ConfirmAvatarSelection("demo-account", avatar.AvatarId, avatar.DisplayName));
         return state;
     }

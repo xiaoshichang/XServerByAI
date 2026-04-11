@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using XServer.Client.Entities;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
 
@@ -35,7 +36,7 @@ public sealed class ClientGameLogicService
         EnsureAccountReady(state);
 
         string accountId = state.Account!.AccountId;
-        AvatarView selectedAvatar = state.CreateTemporaryAvatarSelection();
+        AvatarEntity selectedAvatar = state.CreateTemporaryAvatarSelection();
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
             new
             {
@@ -188,7 +189,12 @@ public sealed class ClientGameLogicService
             return "selectAvatar confirmation payload was incomplete.";
         }
 
-        if (!state.ConfirmAvatarSelection(response.AccountId, response.AvatarId, response.AvatarName))
+        if (!state.ConfirmAvatarSelection(
+                response.AccountId,
+                response.AvatarId,
+                response.AvatarName,
+                response.GameNodeId,
+                response.SessionId))
         {
             return
                 $"selectAvatar confirmation did not match the local pending selection account={response.AccountId} avatarId={response.AvatarId}";
