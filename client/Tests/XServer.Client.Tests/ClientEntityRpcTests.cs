@@ -4,7 +4,6 @@ using XServer.Client.GameLogic;
 using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
-using XServer.Managed.Foundation.Rpc;
 
 namespace XServer.Client.Tests;
 

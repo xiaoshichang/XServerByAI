@@ -1,7 +1,13 @@
 using System.Globalization;
 using System.Text.Json;
 
-namespace XServer.Managed.Foundation.Rpc;
+#if XSERVER_CLIENT_FRAMEWORK
+namespace XServer.Client.Rpc;
+#elif XSERVER_MANAGED_FRAMEWORK
+namespace XServer.Managed.Framework.Rpc;
+#else
+#error EntityRpc shared sources must be compiled by a framework project.
+#endif
 
 public static class EntityRpcJsonCodec
 {

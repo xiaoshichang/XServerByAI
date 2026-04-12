@@ -1,5 +1,4 @@
 using System.Reflection;
-using XServer.Managed.Foundation.Rpc;
 using XServer.Managed.Framework.Entities;
 
 namespace XServer.Managed.Framework.Rpc

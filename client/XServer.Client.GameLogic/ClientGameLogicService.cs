@@ -1,9 +1,9 @@
 using System.Text;
 using System.Text.Json;
 using XServer.Client.Entities;
+using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
-using XServer.Managed.Foundation.Rpc;
 
 namespace XServer.Client.GameLogic;
 

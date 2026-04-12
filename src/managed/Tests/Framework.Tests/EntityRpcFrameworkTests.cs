@@ -1,5 +1,5 @@
-using XServer.Managed.Foundation.Rpc;
 using XServer.Managed.Framework.Entities;
+using XServer.Managed.Framework.Rpc;
 using XServer.Managed.Framework.Runtime;
 
 namespace XServer.Managed.Framework.Tests

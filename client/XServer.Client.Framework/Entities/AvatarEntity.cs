@@ -1,4 +1,4 @@
-using XServer.Managed.Foundation.Rpc;
+using XServer.Client.Rpc;
 
 namespace XServer.Client.Entities;
 

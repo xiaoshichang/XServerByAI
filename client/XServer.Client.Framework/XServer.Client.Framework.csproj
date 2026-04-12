@@ -2,12 +2,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\managed\Foundation\Foundation.csproj" />
+    <Compile Include="..\..\src\shared\EntityRpc\*.cs" />
   </ItemGroup>
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <DefineConstants>$(DefineConstants);XSERVER_CLIENT_FRAMEWORK</DefineConstants>
     <AssemblyName>XServer.Client.Framework</AssemblyName>
     <RootNamespace>XServer.Client</RootNamespace>
   </PropertyGroup>

@@ -1,5 +1,3 @@
-using XServer.Managed.Foundation.Rpc;
-
 namespace XServer.Client.Rpc;
 
 public sealed record ClientEntityRpcRequest(
