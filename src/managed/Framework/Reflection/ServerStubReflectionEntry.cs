@@ -1,10 +1,10 @@
 using System.Text;
 
-namespace XServer.Managed.Framework.Catalog
+namespace XServer.Managed.Framework.Reflection
 {
-    public sealed class ServerStubCatalogEntry
+    public sealed class ServerStubReflectionEntry
     {
-        public ServerStubCatalogEntry(string entityType, string entityId)
+        public ServerStubReflectionEntry(string entityType, string entityId)
         {
             EntityType = entityType;
             EntityId = entityId;

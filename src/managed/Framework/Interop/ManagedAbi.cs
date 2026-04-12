@@ -64,7 +64,7 @@ namespace XServer.Managed.Framework.Interop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public unsafe struct ManagedServerStubCatalogEntry
+    public unsafe struct ManagedServerStubReflectionEntry
     {
         public uint StructSize;
         public uint EntityTypeLength;

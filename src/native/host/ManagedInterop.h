@@ -25,10 +25,10 @@ inline constexpr std::string_view kManagedGameApplyServerStubOwnershipMethodName
 inline constexpr std::string_view kManagedGameResetServerStubOwnershipMethodName = "GameNativeResetServerStubOwnership";
 inline constexpr std::string_view kManagedGameGetReadyServerStubCountMethodName = "GameNativeGetReadyServerStubCount";
 inline constexpr std::string_view kManagedGameGetReadyServerStubEntryMethodName = "GameNativeGetReadyServerStubEntry";
-inline constexpr std::string_view kManagedGameGetServerStubCatalogCountMethodName =
-    "GameNativeGetServerStubCatalogCount";
-inline constexpr std::string_view kManagedGameGetServerStubCatalogEntryMethodName =
-    "GameNativeGetServerStubCatalogEntry";
+inline constexpr std::string_view kManagedGameGetServerStubReflectionCountMethodName =
+    "GameNativeGetServerStubReflectionCount";
+inline constexpr std::string_view kManagedGameGetServerStubReflectionEntryMethodName =
+    "GameNativeGetServerStubReflectionEntry";
 inline constexpr std::size_t XS_MANAGED_NODE_ID_MAX_UTF8_BYTES = 128u;
 inline constexpr std::size_t XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES = 128u;
 inline constexpr std::size_t XS_MANAGED_SERVER_STUB_ENTITY_ID_MAX_UTF8_BYTES = 128u;
@@ -122,9 +122,9 @@ struct ManagedMessageView
     std::uint32_t reserved0;
 };
 
-struct ManagedServerStubCatalogEntry
+struct ManagedServerStubReflectionEntry
 {
-    std::uint32_t struct_size{sizeof(ManagedServerStubCatalogEntry)};
+    std::uint32_t struct_size{sizeof(ManagedServerStubReflectionEntry)};
     std::uint32_t entity_type_length{0u};
     std::uint8_t entity_type_utf8[XS_MANAGED_SERVER_STUB_ENTITY_TYPE_MAX_UTF8_BYTES]{};
     std::uint32_t entity_id_length{0u};
@@ -178,9 +178,9 @@ using ManagedResetServerStubOwnershipFn = std::int32_t(XS_MANAGED_CALLTYPE*)();
 using ManagedGetReadyServerStubCountFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint32_t* count);
 using ManagedGetReadyServerStubEntryFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint32_t index,
                                                                             ManagedServerStubReadyEntry* entry);
-using ManagedGetServerStubCatalogCountFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint32_t* count);
-using ManagedGetServerStubCatalogEntryFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint32_t index,
-                                                                              ManagedServerStubCatalogEntry* entry);
+using ManagedGetServerStubReflectionCountFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint32_t* count);
+using ManagedGetServerStubReflectionEntryFn = std::int32_t(XS_MANAGED_CALLTYPE*)(std::uint32_t index,
+                                                                                 ManagedServerStubReflectionEntry* entry);
 
 struct ManagedExports
 {
@@ -194,8 +194,8 @@ struct ManagedExports
     ManagedResetServerStubOwnershipFn reset_server_stub_ownership{nullptr};
     ManagedGetReadyServerStubCountFn get_ready_server_stub_count{nullptr};
     ManagedGetReadyServerStubEntryFn get_ready_server_stub_entry{nullptr};
-    ManagedGetServerStubCatalogCountFn get_server_stub_catalog_count{nullptr};
-    ManagedGetServerStubCatalogEntryFn get_server_stub_catalog_entry{nullptr};
+    ManagedGetServerStubReflectionCountFn get_server_stub_reflection_count{nullptr};
+    ManagedGetServerStubReflectionEntryFn get_server_stub_reflection_entry{nullptr};
 };
 
 } // namespace xs::host

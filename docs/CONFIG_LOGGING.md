@@ -212,11 +212,11 @@
 | `assemblyName` | `string` | Yes | CLR 宿主加载的根程序集名，当前默认 `XServer.Managed.Framework` |
 | `assemblyPath` | `path` | Yes | 根程序集 `.dll` 路径 |
 | `runtimeConfigPath` | `path` | Yes | `.runtimeconfig.json` 路径 |
-| `searchAssemblyPaths` | `path[]` | No | 额外可扫描程序集路径，`GM` 用它发现 `ServerStub` catalog |
+| `searchAssemblyPaths` | `path[]` | No | 额外可扫描程序集路径，`GM` 用它发现 `ServerStub` reflection |
 
 当前实现中：
 
-1. `GM` 会加载 `managed`，但只读取 stub catalog，不调用 `GameNativeInit`。
+1. `GM` 会加载 `managed`，但只读取 stub reflection，不调用 `GameNativeInit`。
 2. 所有 `Game` 节点都会继承同一份 `managed` 配置。
 
 ### `gm`

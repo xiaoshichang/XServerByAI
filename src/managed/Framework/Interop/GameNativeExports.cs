@@ -2,8 +2,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
-using XServer.Managed.Framework.Catalog;
 using XServer.Managed.Framework.Entities;
+using XServer.Managed.Framework.Reflection;
 using XServer.Managed.Framework.Runtime;
 
 namespace XServer.Managed.Framework.Interop
@@ -283,8 +283,8 @@ namespace XServer.Managed.Framework.Interop
             }
         }
 
-        [UnmanagedCallersOnly(EntryPoint = "GameNativeGetServerStubCatalogCount", CallConvs = [typeof(CallConvCdecl)])]
-        public static int GameNativeGetServerStubCatalogCount(uint* count)
+        [UnmanagedCallersOnly(EntryPoint = "GameNativeGetServerStubReflectionCount", CallConvs = [typeof(CallConvCdecl)])]
+        public static int GameNativeGetServerStubReflectionCount(uint* count)
         {
             if (count == null)
             {
@@ -293,7 +293,7 @@ namespace XServer.Managed.Framework.Interop
 
             try
             {
-                *count = checked((uint)ServerStubCatalog.Entries.Count);
+                *count = checked((uint)ServerStubReflection.Entries.Count);
                 return 0;
             }
             catch
@@ -303,27 +303,27 @@ namespace XServer.Managed.Framework.Interop
             }
         }
 
-        [UnmanagedCallersOnly(EntryPoint = "GameNativeGetServerStubCatalogEntry", CallConvs = [typeof(CallConvCdecl)])]
-        public static int GameNativeGetServerStubCatalogEntry(uint index, ManagedServerStubCatalogEntry* entry)
+        [UnmanagedCallersOnly(EntryPoint = "GameNativeGetServerStubReflectionEntry", CallConvs = [typeof(CallConvCdecl)])]
+        public static int GameNativeGetServerStubReflectionEntry(uint index, ManagedServerStubReflectionEntry* entry)
         {
-            if (entry == null || entry->StructSize < sizeof(ManagedServerStubCatalogEntry))
+            if (entry == null || entry->StructSize < sizeof(ManagedServerStubReflectionEntry))
             {
                 return InvalidArgument;
             }
 
             try
             {
-                if (index >= (uint)ServerStubCatalog.Entries.Count)
+                if (index >= (uint)ServerStubReflection.Entries.Count)
                 {
-                    ResetCatalogEntry(entry);
+                    ResetReflectionEntry(entry);
                     return IndexOutOfRange;
                 }
 
-                ServerStubCatalogEntry catalogEntry = ServerStubCatalog.Entries[(int)index];
-                ResetCatalogEntry(entry);
+                ServerStubReflectionEntry reflectionEntry = ServerStubReflection.Entries[(int)index];
+                ResetReflectionEntry(entry);
 
                 int entityTypeResult = CopyUtf8(
-                    catalogEntry.EntityTypeUtf8,
+                    reflectionEntry.EntityTypeUtf8,
                     entry->EntityTypeUtf8,
                     ManagedAbi.ServerStubEntityTypeMaxUtf8Bytes,
                     &entry->EntityTypeLength);
@@ -333,7 +333,7 @@ namespace XServer.Managed.Framework.Interop
                 }
 
                 int entityIdResult = CopyUtf8(
-                    catalogEntry.EntityIdUtf8,
+                    reflectionEntry.EntityIdUtf8,
                     entry->EntityIdUtf8,
                     ManagedAbi.ServerStubEntityIdMaxUtf8Bytes,
                     &entry->EntityIdLength);
@@ -346,7 +346,7 @@ namespace XServer.Managed.Framework.Interop
             }
             catch
             {
-                ResetCatalogEntry(entry);
+                ResetReflectionEntry(entry);
                 return InvalidArgument;
             }
         }
@@ -441,9 +441,9 @@ namespace XServer.Managed.Framework.Interop
             return new ServerStubOwnershipSnapshot(sync->AssignmentEpoch, assignments);
         }
 
-        private static void ResetCatalogEntry(ManagedServerStubCatalogEntry* entry)
+        private static void ResetReflectionEntry(ManagedServerStubReflectionEntry* entry)
         {
-            entry->StructSize = (uint)sizeof(ManagedServerStubCatalogEntry);
+            entry->StructSize = (uint)sizeof(ManagedServerStubReflectionEntry);
             entry->EntityTypeLength = 0;
             entry->EntityIdLength = 0;
             entry->Reserved0 = 0;

@@ -54,8 +54,8 @@ class GmNode final : public ServerNode
     struct ServerStubStateTable final
     {
         std::vector<ServerStubEntry> entries{};
-        bool catalog_loaded{false};
-        bool catalog_load_failed{false};
+        bool reflection_loaded{false};
+        bool reflection_load_failed{false};
     };
 
     struct StartupState final
@@ -91,7 +91,7 @@ class GmNode final : public ServerNode
     void InitializeStartupState();
     void ResetServerStubStateTable() noexcept;
     void ResetServerStubStates() noexcept;
-    [[nodiscard]] bool LoadManagedServerStubCatalog();
+    [[nodiscard]] bool LoadManagedServerStubReflection();
     [[nodiscard]] bool EnsureServerStubAssignments();
     void OnAllNodeOnline();
     void OnAllGameReady();

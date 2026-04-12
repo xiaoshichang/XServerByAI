@@ -1,6 +1,6 @@
 using System.Linq;
-using XServer.Managed.Framework.Catalog;
 using XServer.Managed.Framework.Entities;
+using XServer.Managed.Framework.Reflection;
 using XServer.Managed.GameLogic.Services;
 
 namespace XServer.Managed.Framework.Tests
@@ -64,9 +64,9 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
-        public void ServerEntityCatalog_ReturnsConcreteEntityTypesAcrossFrameworkAndGameLogicAssemblies()
+        public void ServerEntityReflection_ReturnsConcreteEntityTypesAcrossFrameworkAndGameLogicAssemblies()
         {
-            var entityTypeNames = ServerEntityCatalog.EntityTypes
+            var entityTypeNames = ServerEntityReflection.EntityTypes
                 .Select(static type => type.Name)
                 .ToArray();
 
@@ -81,19 +81,19 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
-        public void ServerStubCatalog_ProjectsDiscoveredStubTypesWithDefaultUnknownEntityIds()
+        public void ServerStubReflection_ProjectsDiscoveredStubTypesWithDefaultUnknownEntityIds()
         {
-            var entries = ServerStubCatalog.Entries.ToArray();
+            var entries = ServerStubReflection.Entries.ToArray();
             var entryTypeNames = entries
                 .Select(static entry => entry.EntityType)
                 .ToArray();
-            var discoveredStubTypeNames = ServerEntityCatalog.StubTypes
+            var discoveredStubTypeNames = ServerEntityReflection.StubTypes
                 .Select(static type => type.Name)
                 .ToArray();
 
             Assert.NotEmpty(entries);
             Assert.Equal(discoveredStubTypeNames, entryTypeNames);
-            Assert.All(entries, static entry => Assert.Equal(ServerStubCatalog.UnknownEntityId, entry.EntityId));
+            Assert.All(entries, static entry => Assert.Equal(ServerStubReflection.UnknownEntityId, entry.EntityId));
             Assert.Contains(nameof(OnlineStub), entryTypeNames);
             Assert.Contains(nameof(ChatStub), entryTypeNames);
             Assert.Contains(nameof(LeaderboardStub), entryTypeNames);
@@ -103,9 +103,9 @@ namespace XServer.Managed.Framework.Tests
         }
 
         [Fact]
-        public void ServerStubCatalog_DoesNotIncludeAbstractBaseType()
+        public void ServerStubReflection_DoesNotIncludeAbstractBaseType()
         {
-            Assert.DoesNotContain(ServerStubCatalog.Entries, entry => entry.EntityType == nameof(ServerStubEntity));
+            Assert.DoesNotContain(ServerStubReflection.Entries, entry => entry.EntityType == nameof(ServerStubEntity));
         }
 
         [Fact]

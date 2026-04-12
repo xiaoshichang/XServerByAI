@@ -2,9 +2,9 @@ using System.Reflection;
 using System.Runtime.Loader;
 using XServer.Managed.Framework.Entities;
 
-namespace XServer.Managed.Framework.Catalog
+namespace XServer.Managed.Framework.Reflection
 {
-    public static class ServerEntityCatalog
+    public static class ServerEntityReflection
     {
         public const string DiscoveryAssemblyPathsEnvironmentVariable = "XS_MANAGED_DISCOVERY_ASSEMBLY_PATHS";
 
@@ -19,7 +19,7 @@ namespace XServer.Managed.Framework.Catalog
         {
             get
             {
-                EnsureCatalogLoaded();
+                EnsureReflectionLoaded();
                 return _entityTypes;
             }
         }
@@ -28,24 +28,24 @@ namespace XServer.Managed.Framework.Catalog
         {
             get
             {
-                EnsureCatalogLoaded();
+                EnsureReflectionLoaded();
                 return _stubTypes;
             }
         }
 
         public static bool TryResolveEntityType(string entityType, out Type? type)
         {
-            EnsureCatalogLoaded();
+            EnsureReflectionLoaded();
             return _entityTypesByName.TryGetValue(entityType, out type);
         }
 
         public static bool TryResolveStubType(string entityType, out Type? type)
         {
-            EnsureCatalogLoaded();
+            EnsureReflectionLoaded();
             return _stubTypesByName.TryGetValue(entityType, out type);
         }
 
-        private static void EnsureCatalogLoaded()
+        private static void EnsureReflectionLoaded()
         {
             string discoverySignature = NormalizeDiscoverySignature(
                 Environment.GetEnvironmentVariable(DiscoveryAssemblyPathsEnvironmentVariable));
@@ -111,7 +111,7 @@ namespace XServer.Managed.Framework.Catalog
         {
             HashSet<string> yieldedPaths = new(StringComparer.OrdinalIgnoreCase);
 
-            string currentAssemblyPath = NormalizeAssemblyLocation(typeof(ServerEntityCatalog).Assembly.Location);
+            string currentAssemblyPath = NormalizeAssemblyLocation(typeof(ServerEntityReflection).Assembly.Location);
             if (!string.IsNullOrEmpty(currentAssemblyPath) && yieldedPaths.Add(currentAssemblyPath))
             {
                 yield return currentAssemblyPath;
@@ -201,7 +201,7 @@ namespace XServer.Managed.Framework.Catalog
             {
                 // Native-hosted components are not guaranteed to live in AssemblyLoadContext.Default.
                 AssemblyLoadContext loadContext =
-                    AssemblyLoadContext.GetLoadContext(typeof(ServerEntityCatalog).Assembly) ??
+                    AssemblyLoadContext.GetLoadContext(typeof(ServerEntityReflection).Assembly) ??
                     AssemblyLoadContext.Default;
                 return loadContext.LoadFromAssemblyPath(normalizedAssemblyPath);
             }

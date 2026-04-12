@@ -487,14 +487,14 @@ void GmNode::ResetServerStubStates() noexcept
     }
 }
 
-bool GmNode::LoadManagedServerStubCatalog()
+bool GmNode::LoadManagedServerStubReflection()
 {
-    if (server_stub_state_table_.catalog_loaded)
+    if (server_stub_state_table_.reflection_loaded)
     {
         return true;
     }
 
-    if (server_stub_state_table_.catalog_load_failed)
+    if (server_stub_state_table_.reflection_load_failed)
     {
         return false;
     }
@@ -508,8 +508,8 @@ bool GmNode::LoadManagedServerStubCatalog()
             std::string_view entry_index = {},
             std::string_view export_result = {}) {
             server_stub_state_table_.entries.clear();
-            server_stub_state_table_.catalog_loaded = false;
-            server_stub_state_table_.catalog_load_failed = true;
+            server_stub_state_table_.reflection_loaded = false;
+            server_stub_state_table_.reflection_load_failed = true;
 
             std::vector<xs::core::LogContextField> context;
             context.reserve(6);
@@ -540,7 +540,7 @@ bool GmNode::LoadManagedServerStubCatalog()
     if (load_result != xs::host::ManagedHostErrorCode::None)
     {
         return log_failure(
-            "GM failed to load managed server stub catalog runtime.",
+            "GM failed to load managed server stub reflection runtime.",
             xs::host::ManagedHostErrorCanonicalName(load_result),
             DescribeManagedHostError(load_result));
     }
@@ -554,8 +554,8 @@ bool GmNode::LoadManagedServerStubCatalog()
             DescribeManagedHostError(bind_result));
     }
 
-    xs::host::ManagedExports catalog_exports{};
-    const xs::host::ManagedHostErrorCode exports_result = runtime_host.GetExports(catalog_exports);
+    xs::host::ManagedExports reflection_exports{};
+    const xs::host::ManagedHostErrorCode exports_result = runtime_host.GetExports(reflection_exports);
     if (exports_result != xs::host::ManagedHostErrorCode::None)
     {
         return log_failure(
@@ -564,47 +564,47 @@ bool GmNode::LoadManagedServerStubCatalog()
             DescribeManagedHostError(exports_result));
     }
 
-    if (catalog_exports.get_server_stub_catalog_count == nullptr || catalog_exports.get_server_stub_catalog_entry == nullptr)
+    if (reflection_exports.get_server_stub_reflection_count == nullptr || reflection_exports.get_server_stub_reflection_entry == nullptr)
     {
         return log_failure(
             "GM resolved incomplete managed exports.",
-            "Interop.InvalidCatalogExports",
-            "Managed exports must provide both server stub catalog delegates.");
+            "Interop.InvalidReflectionExports",
+            "Managed exports must provide both server stub reflection delegates.");
     }
 
-    std::uint32_t catalog_count = 0U;
-    const std::int32_t count_result = catalog_exports.get_server_stub_catalog_count(&catalog_count);
+    std::uint32_t reflection_count = 0U;
+    const std::int32_t count_result = reflection_exports.get_server_stub_reflection_count(&reflection_count);
     if (count_result != 0)
     {
         return log_failure(
-            "GM failed to read managed server stub catalog count.",
-            "Interop.ManagedCatalogCountFailed",
-            "Managed server stub catalog count export returned an error.",
+            "GM failed to read managed server stub reflection count.",
+            "Interop.ManagedReflectionCountFailed",
+            "Managed server stub reflection count export returned an error.",
             {},
             std::to_string(count_result));
     }
 
-    if (catalog_count == 0U)
+    if (reflection_count == 0U)
     {
         return log_failure(
-            "GM loaded an empty managed server stub catalog.",
-            "Interop.ManagedCatalogEmpty",
-            "Managed server stub catalog must contain at least one entry.");
+            "GM loaded an empty managed server stub reflection.",
+            "Interop.ManagedReflectionEmpty",
+            "Managed server stub reflection must contain at least one entry.");
     }
 
-    std::vector<ServerStubEntry> catalog_entries;
-    catalog_entries.reserve(catalog_count);
+    std::vector<ServerStubEntry> reflection_entries;
+    reflection_entries.reserve(reflection_count);
 
-    for (std::uint32_t index = 0U; index < catalog_count; ++index)
+    for (std::uint32_t index = 0U; index < reflection_count; ++index)
     {
-        xs::host::ManagedServerStubCatalogEntry catalog_entry{};
-        const std::int32_t entry_result = catalog_exports.get_server_stub_catalog_entry(index, &catalog_entry);
+        xs::host::ManagedServerStubReflectionEntry reflection_entry{};
+        const std::int32_t entry_result = reflection_exports.get_server_stub_reflection_entry(index, &reflection_entry);
         if (entry_result != 0)
         {
             return log_failure(
-                "GM failed to read a managed server stub catalog entry.",
-                "Interop.ManagedCatalogEntryFailed",
-                "Managed server stub catalog entry export returned an error.",
+                "GM failed to read a managed server stub reflection entry.",
+                "Interop.ManagedReflectionEntryFailed",
+                "Managed server stub reflection entry export returned an error.",
                 std::to_string(index),
                 std::to_string(entry_result));
         }
@@ -612,31 +612,31 @@ bool GmNode::LoadManagedServerStubCatalog()
         ServerStubEntry definition{};
         const bool entity_type_ok = TryReadManagedUtf8String(
             std::span<const std::uint8_t>(
-                catalog_entry.entity_type_utf8,
-                std::size(catalog_entry.entity_type_utf8)),
-            catalog_entry.entity_type_length,
+                reflection_entry.entity_type_utf8,
+                std::size(reflection_entry.entity_type_utf8)),
+            reflection_entry.entity_type_length,
             &definition.entity_type);
         const bool entity_id_ok = TryReadManagedUtf8String(
             std::span<const std::uint8_t>(
-                catalog_entry.entity_id_utf8,
-                std::size(catalog_entry.entity_id_utf8)),
-            catalog_entry.entity_id_length,
+                reflection_entry.entity_id_utf8,
+                std::size(reflection_entry.entity_id_utf8)),
+            reflection_entry.entity_id_length,
             &definition.entity_id);
         if (!entity_type_ok || !entity_id_ok)
         {
             return log_failure(
-                "GM received an invalid UTF-8 buffer description from the managed server stub catalog.",
-                "Interop.ManagedCatalogEntryInvalid",
-                "Managed server stub catalog entry lengths exceeded their declared native buffers.",
+                "GM received an invalid UTF-8 buffer description from the managed server stub reflection.",
+                "Interop.ManagedReflectionEntryInvalid",
+                "Managed server stub reflection entry lengths exceeded their declared native buffers.",
                 std::to_string(index));
         }
 
         if (definition.entity_type.empty())
         {
             return log_failure(
-                "GM received an empty managed server stub catalog entry.",
-                "Interop.ManagedCatalogEntryInvalid",
-                "Managed server stub catalog entries must provide a non-empty entityType value.",
+                "GM received an empty managed server stub reflection entry.",
+                "Interop.ManagedReflectionEntryInvalid",
+                "Managed server stub reflection entries must provide a non-empty entityType value.",
                 std::to_string(index));
         }
 
@@ -646,27 +646,27 @@ bool GmNode::LoadManagedServerStubCatalog()
         }
 
         const auto duplicate_iterator = std::find_if(
-            catalog_entries.begin(),
-            catalog_entries.end(),
+            reflection_entries.begin(),
+            reflection_entries.end(),
             [&definition](const ServerStubEntry& existing) {
                 return existing.entity_type == definition.entity_type &&
                        existing.entity_id == definition.entity_id;
             });
-        if (duplicate_iterator != catalog_entries.end())
+        if (duplicate_iterator != reflection_entries.end())
         {
             return log_failure(
-                "GM found a duplicate managed server stub catalog entry.",
-                "Interop.ManagedCatalogDuplicate",
+                "GM found a duplicate managed server stub reflection entry.",
+                "Interop.ManagedReflectionDuplicate",
                 definition.entity_type + "/" + definition.entity_id,
                 std::to_string(index));
         }
 
-        catalog_entries.push_back(std::move(definition));
+        reflection_entries.push_back(std::move(definition));
     }
 
-    server_stub_state_table_.entries = std::move(catalog_entries);
-    server_stub_state_table_.catalog_loaded = true;
-    server_stub_state_table_.catalog_load_failed = false;
+    server_stub_state_table_.entries = std::move(reflection_entries);
+    server_stub_state_table_.reflection_loaded = true;
+    server_stub_state_table_.reflection_load_failed = false;
     ResetServerStubStates();
 
     const std::array<xs::core::LogContextField, 4> context{
@@ -675,13 +675,13 @@ bool GmNode::LoadManagedServerStubCatalog()
         xs::core::LogContextField{"runtimeConfigPath", managed_config.runtime_config_path.string()},
         xs::core::LogContextField{"entryCount", ToString(server_stub_state_table_.entries.size())},
     };
-    logger().Log(xs::core::LogLevel::Info, "runtime", "GM loaded managed server stub catalog.", context);
+    logger().Log(xs::core::LogLevel::Info, "runtime", "GM loaded managed server stub reflection.", context);
     return true;
 }
 
 bool GmNode::EnsureServerStubAssignments()
 {
-    if (!LoadManagedServerStubCatalog())
+    if (!LoadManagedServerStubReflection())
     {
         return false;
     }
@@ -770,8 +770,8 @@ GmControlHttpStatusSnapshot GmNode::BuildControlHttpStatusSnapshot() const
         startup_state_.last_all_nodes_online_server_now_unix_ms;
     snapshot.startup_flow.all_expected_games_mesh_ready =
         startup_state_.all_expected_games_mesh_ready;
-    snapshot.startup_flow.catalog_loaded = server_stub_state_table_.catalog_loaded;
-    snapshot.startup_flow.catalog_load_failed = server_stub_state_table_.catalog_load_failed;
+    snapshot.startup_flow.reflection_loaded = server_stub_state_table_.reflection_loaded;
+    snapshot.startup_flow.reflection_load_failed = server_stub_state_table_.reflection_load_failed;
     snapshot.startup_flow.total_stub_count = static_cast<std::uint64_t>(server_stub_state_table_.entries.size());
 
     const std::uint64_t assigned_stub_count = static_cast<std::uint64_t>(std::count_if(
@@ -1206,7 +1206,7 @@ void GmNode::OnAllGameReady()
     {
         const std::array<xs::core::LogContextField, 2> context{
             xs::core::LogContextField{"expectedGameCount", ToString(startup_state_.expected_game_entries.size())},
-            xs::core::LogContextField{"catalogEntryCount", ToString(server_stub_state_table_.entries.size())},
+            xs::core::LogContextField{"reflectionEntryCount", ToString(server_stub_state_table_.entries.size())},
         };
         logger().Log(
             xs::core::LogLevel::Error,

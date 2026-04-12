@@ -35,8 +35,8 @@ struct GmControlHttpStatusSnapshot
         bool all_nodes_online{false};
         std::uint64_t last_all_nodes_online_server_now_unix_ms{0};
         bool all_expected_games_mesh_ready{false};
-        bool catalog_loaded{false};
-        bool catalog_load_failed{false};
+        bool reflection_loaded{false};
+        bool reflection_load_failed{false};
         bool ownership_active{false};
         std::uint64_t assignment_epoch{0};
         std::uint64_t total_stub_count{0};

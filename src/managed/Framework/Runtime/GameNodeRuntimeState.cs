@@ -1,6 +1,6 @@
-using XServer.Managed.Framework.Catalog;
 using XServer.Managed.Framework.Entities;
 using XServer.Managed.Framework.Interop;
+using XServer.Managed.Framework.Reflection;
 
 namespace XServer.Managed.Framework.Runtime
 {
@@ -279,7 +279,7 @@ namespace XServer.Managed.Framework.Runtime
 
             foreach (ServerStubOwnershipAssignment assignment in nextOwnedAssignments)
             {
-                if (!ServerEntityCatalog.TryResolveStubType(assignment.EntityType, out Type? stubType) || stubType == null)
+                if (!ServerEntityReflection.TryResolveStubType(assignment.EntityType, out Type? stubType) || stubType == null)
                 {
                     DestroyEntities(createdStubs);
                     return GameNodeRuntimeStateErrorCode.UnknownStubType;

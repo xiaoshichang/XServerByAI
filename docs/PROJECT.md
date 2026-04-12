@@ -14,7 +14,7 @@
 - 负责 `Gate/Game -> GM` 注册与心跳。
 - 汇总 `allNodesOnline`、`meshReady`、stub ownership、service ready 与 `clusterReady`。
 - 暴露本地控制 HTTP：`/healthz`、`/status`、`/boardcase`、`/shutdown`。
-- 能临时加载 managed `Framework` 程序集，读取 stub catalog 并参与 bootstrap ownership。
+- 能临时加载 managed `Framework` 程序集，读取 stub reflection 并参与 bootstrap ownership。
 
 ### 2. Gate
 - 负责与 `GM` 的注册 / 心跳闭环。

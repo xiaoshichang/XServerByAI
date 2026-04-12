@@ -5,7 +5,7 @@
 ## 适用范围
 
 1. `Game` 进程会宿主 CLR，加载 `XServer.Managed.Framework`，绑定并调用 `GameNative*` 导出。
-2. `GM` 进程也会加载同一 managed 程序集，但当前只使用 catalog 导出读取 `ServerStub` 目录，不调用 `GameNativeInit`，也不驱动 managed 业务循环。
+2. `GM` 进程也会加载同一 managed 程序集，但当前只使用 reflection 导出读取 `ServerStub` 目录，不调用 `GameNativeInit`，也不驱动 managed 业务循环。
 3. 本文档只描述 native <-> managed ABI 与当前实现约束，不重复定义业务消息、路由、实体或全局错误码语义；这些内容分别复用 `docs/MSG_ID.md`、`docs/SESSION_ROUTING.md`、`docs/DISTRIBUTED_ENTITY.md` 和 `docs/ERROR_CODE.md`。
 
 ## 当前生效版本
@@ -20,7 +20,7 @@
 
 - `ManagedNativeCallbacks = 72` bytes
 - `ManagedInitArgs = 120` bytes
-- `ManagedServerStubCatalogEntry = 272` bytes
+- `ManagedServerStubReflectionEntry = 272` bytes
 - `ManagedServerStubOwnershipEntry = 404` bytes
 - `ManagedServerStubReadyEntry = 276` bytes
 
@@ -39,8 +39,8 @@
    - `GameNativeResetServerStubOwnership`
    - `GameNativeGetReadyServerStubCount`
    - `GameNativeGetReadyServerStubEntry`
-   - `GameNativeGetServerStubCatalogCount`
-   - `GameNativeGetServerStubCatalogEntry`
+   - `GameNativeGetServerStubReflectionCount`
+   - `GameNativeGetServerStubReflectionEntry`
 
 ## ABI 基础约定
 
@@ -103,7 +103,7 @@
 | `payload_length` | `uint32` | 消息体长度 |
 | `reserved0` | `uint32` | 保留 |
 
-### `ManagedServerStubCatalogEntry`
+### `ManagedServerStubReflectionEntry`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -111,10 +111,10 @@
 | `entity_type_length` | `uint32` | `entity_type_utf8` 有效长度 |
 | `entity_type_utf8` | `uint8[128]` | `ServerStub` 类型名 |
 | `entity_id_length` | `uint32` | `entity_id_utf8` 有效长度 |
-| `entity_id_utf8` | `uint8[128]` | 当前 catalog 阶段的实体 ID 占位值 |
+| `entity_id_utf8` | `uint8[128]` | 当前 reflection 阶段的实体 ID 占位值 |
 | `reserved0` | `uint32` | 保留 |
 
-当前实现中，catalog 的 `entity_id` 固定返回占位值 `unknown`。真实运行时实体 ID 来自 stub 实例化后产生的 managed 实体。
+当前实现中，reflection 的 `entity_id` 固定返回占位值 `unknown`。真实运行时实体 ID 来自 stub 实例化后产生的 managed 实体。
 
 ### `ManagedServerStubOwnershipEntry`
 
@@ -209,7 +209,7 @@
 - 提供 query-style ready 快照读取。
 - 当前仍保留，主要用于测试、诊断与兼容；实际启动链路中的 authoritative ready 上报已是 callback-driven。
 
-### `GameNativeGetServerStubCatalogCount` / `GameNativeGetServerStubCatalogEntry`
+### `GameNativeGetServerStubReflectionCount` / `GameNativeGetServerStubReflectionEntry`
 
 - 供 `GM` 读取 managed server stub 目录。
 - `GM` 当前只依赖这两个导出做 stub 发现，不进入 `GameNativeInit`。
@@ -255,7 +255,7 @@
 
 1. `GM` 加载 managed runtime host。
 2. 绑定所有导出。
-3. 仅读取 `GameNativeGetServerStubCatalogCount/Entry`。
+3. 仅读取 `GameNativeGetServerStubReflectionCount/Entry`。
 4. 生成 server stub 状态表，并把 `entity_id` 初始占位为 `unknown`。
 
 ### `Game` 启动流程

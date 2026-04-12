@@ -538,29 +538,29 @@ class ManagedRuntimeHost::Impl final
         resolved_exports.get_ready_server_stub_entry =
             reinterpret_cast<ManagedGetReadyServerStubEntryFn>(raw_get_ready_server_stub_entry);
 
-        void* raw_get_server_stub_catalog_count = nullptr;
+        void* raw_get_server_stub_reflection_count = nullptr;
         result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
                                           kManagedExportsTypeName,
-                                          kManagedGameGetServerStubCatalogCountMethodName,
-                                          &raw_get_server_stub_catalog_count);
+                                          kManagedGameGetServerStubReflectionCountMethodName,
+                                          &raw_get_server_stub_reflection_count);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
         }
-        resolved_exports.get_server_stub_catalog_count =
-            reinterpret_cast<ManagedGetServerStubCatalogCountFn>(raw_get_server_stub_catalog_count);
+        resolved_exports.get_server_stub_reflection_count =
+            reinterpret_cast<ManagedGetServerStubReflectionCountFn>(raw_get_server_stub_reflection_count);
 
-        void* raw_get_server_stub_catalog_entry = nullptr;
+        void* raw_get_server_stub_reflection_entry = nullptr;
         result = ResolveManagedEntryPoint(load_assembly_and_get_function_pointer_, assembly_path_,
                                           kManagedExportsTypeName,
-                                          kManagedGameGetServerStubCatalogEntryMethodName,
-                                          &raw_get_server_stub_catalog_entry);
+                                          kManagedGameGetServerStubReflectionEntryMethodName,
+                                          &raw_get_server_stub_reflection_entry);
         if (result != ManagedHostErrorCode::None)
         {
             return result;
         }
-        resolved_exports.get_server_stub_catalog_entry =
-            reinterpret_cast<ManagedGetServerStubCatalogEntryFn>(raw_get_server_stub_catalog_entry);
+        resolved_exports.get_server_stub_reflection_entry =
+            reinterpret_cast<ManagedGetServerStubReflectionEntryFn>(raw_get_server_stub_reflection_entry);
 
         exports_ = resolved_exports;
         exports_bound_ = true;

@@ -730,8 +730,8 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(exports.reset_server_stub_ownership != nullptr);
     XS_CHECK(exports.get_ready_server_stub_count != nullptr);
     XS_CHECK(exports.get_ready_server_stub_entry != nullptr);
-    XS_CHECK(exports.get_server_stub_catalog_count != nullptr);
-    XS_CHECK(exports.get_server_stub_catalog_entry != nullptr);
+    XS_CHECK(exports.get_server_stub_reflection_count != nullptr);
+    XS_CHECK(exports.get_server_stub_reflection_entry != nullptr);
     XS_CHECK(exports.get_abi_version() == xs::host::XS_MANAGED_ABI_VERSION);
 
     ManagedInitInput init_input{};
@@ -857,7 +857,7 @@ void TestLoadAndBindExportsSucceed()
     XS_CHECK(after_unload_result == xs::host::ManagedHostErrorCode::EntryPointNotBound);
 }
 
-void TestManagedExportsProvideServerStubCatalogFunctions()
+void TestManagedExportsProvideServerStubReflectionFunctions()
 {
     xs::host::ManagedRuntimeHost host;
 
@@ -882,19 +882,19 @@ void TestManagedExportsProvideServerStubCatalogFunctions()
     XS_CHECK_MSG(get_exports_result == xs::host::ManagedHostErrorCode::None,
                  DescribeManagedHostResult(get_exports_result).c_str());
     XS_CHECK(exports.abi_version == xs::host::XS_MANAGED_ABI_VERSION);
-    XS_CHECK(exports.get_server_stub_catalog_count != nullptr);
-    XS_CHECK(exports.get_server_stub_catalog_entry != nullptr);
+    XS_CHECK(exports.get_server_stub_reflection_count != nullptr);
+    XS_CHECK(exports.get_server_stub_reflection_entry != nullptr);
 
     std::uint32_t count = 0U;
-    XS_CHECK(exports.get_server_stub_catalog_count(&count) == 0);
+    XS_CHECK(exports.get_server_stub_reflection_count(&count) == 0);
     XS_CHECK(count > 0U);
 
     std::vector<std::string> entity_types;
     entity_types.reserve(count);
     for (std::uint32_t index = 0U; index < count; ++index)
     {
-        xs::host::ManagedServerStubCatalogEntry entry{};
-        XS_CHECK(exports.get_server_stub_catalog_entry(index, &entry) == 0);
+        xs::host::ManagedServerStubReflectionEntry entry{};
+        XS_CHECK(exports.get_server_stub_reflection_entry(index, &entry) == 0);
         entity_types.push_back(ReadManagedUtf8(entry.entity_type_utf8, entry.entity_type_length));
         XS_CHECK(ReadManagedUtf8(entry.entity_id_utf8, entry.entity_id_length) == "unknown");
     }
@@ -1334,7 +1334,7 @@ int main()
     TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback();
     TestManagedRuntimeDispatchesForwardedMailboxCallMessageToTargetStub();
     TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar();
-    TestManagedExportsProvideServerStubCatalogFunctions();
+    TestManagedExportsProvideServerStubReflectionFunctions();
     TestLoadAllowsSecondInitializationAfterUnload();
     TestBindRejectsAbiMismatch();
     TestBindRejectsMissingExport();

@@ -610,8 +610,8 @@ def describe_current_waiting_step(
     ready_stub_count = coerce_int(startup_flow.get("readyStubCount"))
     ready_epoch = coerce_int(startup_flow.get("readyEpoch"))
     cluster_ready = coerce_bool(startup_flow.get("clusterReady"))
-    catalog_loaded = coerce_bool(startup_flow.get("catalogLoaded"))
-    catalog_load_failed = coerce_bool(startup_flow.get("catalogLoadFailed"))
+    reflection_loaded = coerce_bool(startup_flow.get("reflectionLoaded"))
+    reflection_load_failed = coerce_bool(startup_flow.get("reflectionLoadFailed"))
 
     registered_nodes = [
         node_name
@@ -697,10 +697,10 @@ def describe_current_waiting_step(
 
     if 5 not in emitted_steps and not ownership_active:
         detail = (
-            "managed catalog load failed"
-            if catalog_load_failed
+            "managed reflection load failed"
+            if reflection_load_failed
             else (
-                f"catalogLoaded={str(catalog_loaded).lower()}, "
+                f"reflectionLoaded={str(reflection_loaded).lower()}, "
                 f"assignmentEpoch={assignment_epoch}, assigned={assigned_stub_count}/{total_stub_count}"
             )
         )
@@ -766,8 +766,8 @@ def describe_startup_problem(plan: ClusterPlan, payload: dict[str, object]) -> s
     registered_games = coerce_int(startup_flow.get("registeredGameCount"))
     registered_gates = coerce_int(startup_flow.get("registeredGateCount"))
 
-    if coerce_bool(startup_flow.get("catalogLoadFailed")):
-        return "GM failed to load the managed server stub catalog."
+    if coerce_bool(startup_flow.get("reflectionLoadFailed")):
+        return "GM failed to load the managed server stub reflection."
 
     if registered_games < expected_games or registered_gates < expected_gates:
         pending_nodes = [
