@@ -1,5 +1,7 @@
-﻿using System;
+using System;
+using XServer.Managed.Foundation.Rpc;
 using XServer.Managed.Framework.Interop;
+using XServer.Managed.Framework.Rpc;
 using XServer.Managed.Framework.Runtime;
 
 namespace XServer.Managed.Framework.Entities
@@ -103,6 +105,37 @@ namespace XServer.Managed.Framework.Entities
             _messageSender.CallServerProxy(this, targetAddress, new EntityMessage(msgId, payload));
         }
 
+        public void CallClientRpc(string rpcName, params object?[] arguments)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(rpcName);
+            ArgumentNullException.ThrowIfNull(arguments);
+
+            ProxyAddress? targetAddress = GetDefaultClientRpcTargetAddress();
+            if (targetAddress == null)
+            {
+                NativeLoggerBridge.Warn(EntityType, $"CallClientRpc rpcName={rpcName} failed: default client proxy is unavailable.");
+                return;
+            }
+
+            byte[] payload;
+            try
+            {
+                payload = EntityRpcJsonCodec.Encode(EntityId, rpcName, arguments);
+            }
+            catch (ArgumentException exception)
+            {
+                NativeLoggerBridge.Warn(EntityType, $"CallClientRpc rpcName={rpcName} failed: {exception.Message}");
+                return;
+            }
+
+            PushToClient(targetAddress, EntityRpcMessageIds.ServerToClientEntityRpcMsgId, payload);
+        }
+
+        public void CallClientRPC(string rpcName, params object?[] arguments)
+        {
+            CallClientRpc(rpcName, arguments);
+        }
+
         internal void SetMessageSender(IServerEntityMessageSender? messageSender)
         {
             _messageSender = messageSender;
@@ -118,6 +151,11 @@ namespace XServer.Managed.Framework.Entities
             if (message.MsgId == 0)
             {
                 return ProxyCallErrorCode.InvalidMessageId;
+            }
+
+            if (message.MsgId == EntityRpcMessageIds.ClientToServerEntityRpcMsgId)
+            {
+                return ReceiveClientRpc(message.Payload);
             }
 
             return OnProxyCall(message);
@@ -195,6 +233,11 @@ namespace XServer.Managed.Framework.Entities
             _messageSender.CallClient(this, targetAddress, new EntityMessage(msgId, payload));
         }
 
+        protected virtual ProxyAddress? GetDefaultClientRpcTargetAddress()
+        {
+            return null;
+        }
+
         private void LogCallStubError(string message)
         {
             NativeLoggerBridge.Warn(EntityType, message);
@@ -213,6 +256,29 @@ namespace XServer.Managed.Framework.Entities
         private void LogPushToClientError(string message)
         {
             NativeLoggerBridge.Warn(EntityType, message);
+        }
+
+        private ProxyCallErrorCode ReceiveClientRpc(ReadOnlyMemory<byte> payload)
+        {
+            EntityRpcDispatchErrorCode result = ServerEntityRpcDispatcher.Dispatch(
+                this,
+                payload,
+                out string rpcName,
+                out string errorMessage);
+            if (result != EntityRpcDispatchErrorCode.None)
+            {
+                NativeLoggerBridge.Warn(
+                    EntityType,
+                    $"ReceiveClientRpc rpcName={rpcName} entityId={EntityId:D} failed: {errorMessage}");
+                return result is EntityRpcDispatchErrorCode.InvalidPayload or
+                    EntityRpcDispatchErrorCode.InvalidArgumentCount or
+                    EntityRpcDispatchErrorCode.InvalidArgumentType
+                    ? ProxyCallErrorCode.InvalidArgument
+                    : ProxyCallErrorCode.EntityRejected;
+            }
+
+            NativeLoggerBridge.Info(EntityType, $"ReceiveClientRpc rpcName={rpcName} entityId={EntityId:D} succeeded.");
+            return ProxyCallErrorCode.None;
         }
     }
 }

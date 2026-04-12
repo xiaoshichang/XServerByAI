@@ -1,12 +1,16 @@
 using System.IO;
 using XServer.Client.Configuration;
 using XServer.Client.Entities;
+using XServer.Client.Rpc;
 using XServer.Managed.Foundation.Protocol;
+using XServer.Managed.Foundation.Rpc;
 
 namespace XServer.Client.Runtime;
 
 public sealed class ClientRuntimeState
 {
+    private IClientEntityRpcSender? _rpcSender;
+
     public ClientLifecycleState LifecycleState { get; private set; } = ClientLifecycleState.Disconnected;
     public ResolvedClientProfile? Profile { get; private set; }
     public string? LocalEndpointText { get; private set; }
@@ -43,6 +47,15 @@ public sealed class ClientRuntimeState
     public bool HasAvatar => Avatar is not null;
     public bool HasConfirmedAvatar => Avatar is not null && AvatarSession.IsSelectionConfirmed;
     public bool HasCachedLoginGrant => Account?.HasCachedLoginGrant ?? false;
+
+    public void ConfigureRpcSender(IClientEntityRpcSender? rpcSender)
+    {
+        _rpcSender = rpcSender;
+        foreach (ClientEntity entity in EntityManager.Snapshot())
+        {
+            entity.SetRpcSender(rpcSender);
+        }
+    }
 
     public void MarkConnected(ResolvedClientProfile profile, string? localEndpointText)
     {
@@ -167,6 +180,7 @@ public sealed class ClientRuntimeState
             EntityManager.TryGet<AvatarEntity>(AvatarSession.SelectedAvatarEntityId.Value, out AvatarEntity? previousAvatar) &&
             !AvatarSession.IsSelectionConfirmed)
         {
+            previousAvatar.SetRpcSender(null);
             EntityManager.Unregister(previousAvatar.EntityId);
         }
 
@@ -185,6 +199,7 @@ public sealed class ClientRuntimeState
                 $"Client EntityManager already contains AvatarEntity {avatar.AvatarId}.");
         }
 
+        avatar.SetRpcSender(_rpcSender);
         AvatarSession.Bind(avatar.EntityId);
         RefreshLifecycleState();
     }
@@ -228,10 +243,35 @@ public sealed class ClientRuntimeState
         AvatarSession.Clear();
         if (avatarEntityId.HasValue)
         {
+            if (EntityManager.TryGet<AvatarEntity>(avatarEntityId.Value, out AvatarEntity? avatar))
+            {
+                avatar.SetRpcSender(null);
+            }
+
             EntityManager.Unregister(avatarEntityId.Value);
         }
 
         RefreshLifecycleState();
+    }
+
+    public bool TryHandleServerRpcPacket(PacketView packet, out string? message)
+    {
+        if (packet.Header.MsgId != EntityRpcMessageIds.ServerToClientEntityRpcMsgId)
+        {
+            message = null;
+            return false;
+        }
+
+        EntityRpcDispatchErrorCode result = ClientEntityRpcDispatcher.Dispatch(
+            this,
+            packet.Payload,
+            out Guid entityId,
+            out string rpcName,
+            out string errorMessage);
+        message = result == EntityRpcDispatchErrorCode.None
+            ? $"clientRpc delivered entityId={entityId:D} rpc={rpcName}"
+            : $"clientRpc failed entityId={entityId:D} rpc={rpcName} error={errorMessage}";
+        return true;
     }
 
     public void UpdateAvatarPosition(float x, float y, float z)

@@ -1,3 +1,5 @@
+using XServer.Managed.Foundation.Rpc;
+
 namespace XServer.Client.Entities;
 
 public sealed class AvatarEntity : ClientEntity
@@ -24,11 +26,19 @@ public sealed class AvatarEntity : ClientEntity
 
     public Dictionary<string, int> WeaponInventory { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public bool? LastSetWeaponSucceeded { get; private set; }
+
     public void UpdateDisplayName(string? displayName)
     {
         if (!string.IsNullOrWhiteSpace(displayName))
         {
             DisplayName = displayName;
         }
+    }
+
+    [ClientRPC]
+    public void OnSetWeaponResult(bool succ)
+    {
+        LastSetWeaponSucceeded = succ;
     }
 }

@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using XServer.Managed.Foundation.Rpc;
 using XServer.Managed.Framework.Interop;
 using XServer.Managed.Framework.Runtime;
 
@@ -15,6 +16,8 @@ namespace XServer.Managed.Framework.Entities
         public ProxyAddress? Proxy { get; private set; }
 
         public IReadOnlyList<ReceivedProxyMessage> ReceivedProxyMessages => _receivedProxyMessages;
+
+        public string EquippedWeaponId { get; private set; } = string.Empty;
 
         public override bool IsMigratable()
         {
@@ -51,6 +54,14 @@ namespace XServer.Managed.Framework.Entities
             Proxy = new ProxyAddress(EntityId, routeGateNodeId);
         }
 
+        [ServerRPC]
+        public void SetWeapon(string w)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(w);
+            EquippedWeaponId = w;
+            CallClientRpc("OnSetWeaponResult", true);
+        }
+
         protected override ProxyCallErrorCode OnProxyCall(EntityMessage message)
         {
             NativeLoggerBridge.Info(nameof(AvatarEntity), $"AvatarEntity {EntityId:D} received proxy call msgId={message.MsgId}.");
@@ -59,7 +70,13 @@ namespace XServer.Managed.Framework.Entities
             {
                 PushToClient(Proxy, message.MsgId, message.Payload);
             }
+
             return ProxyCallErrorCode.None;
+        }
+
+        protected override ProxyAddress? GetDefaultClientRpcTargetAddress()
+        {
+            return Proxy;
         }
 
         public readonly record struct ReceivedProxyMessage(uint MsgId, byte[] Payload);

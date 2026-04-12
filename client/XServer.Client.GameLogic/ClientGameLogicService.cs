@@ -3,6 +3,7 @@ using System.Text.Json;
 using XServer.Client.Entities;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
+using XServer.Managed.Foundation.Rpc;
 
 namespace XServer.Client.GameLogic;
 
@@ -150,6 +151,11 @@ public sealed class ClientGameLogicService
     public string? TryHandleControlPacket(ClientRuntimeState state, PacketView packet)
     {
         ArgumentNullException.ThrowIfNull(state);
+
+        if (state.TryHandleServerRpcPacket(packet, out string? rpcMessage))
+        {
+            return rpcMessage;
+        }
 
         if (packet.Header.MsgId == BroadcastMessageMsgId)
         {
