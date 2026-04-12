@@ -2,7 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\managed\Foundation\Foundation.csproj" />
-    <Compile Include="..\..\src\shared\EntityRpc\*.cs" />
+    <Compile Include="..\..\src\shared\EntityRpc\*.cs"
+             Link="Rpc\Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <PropertyGroup>

@@ -6,7 +6,8 @@
                       OutputItemType="Analyzer"
                       SkipGetTargetFrameworkProperties="true"
                       ReferenceOutputAssembly="false" />
-    <Compile Include="..\..\shared\EntityRpc\*.cs" />
+    <Compile Include="..\..\shared\EntityRpc\*.cs"
+             Link="Rpc\Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -15,7 +16,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
-    <DefineConstants>$(DefineConstants);XSERVER_MANAGED_FRAMEWORK</DefineConstants>
+    <DefineConstants>$(DefineConstants);XSERVER_SERVER_FRAMEWORK</DefineConstants>
     <AssemblyName>XServer.Managed.Framework</AssemblyName>
     <RootNamespace>XServer.Managed.Framework</RootNamespace>
   </PropertyGroup>
