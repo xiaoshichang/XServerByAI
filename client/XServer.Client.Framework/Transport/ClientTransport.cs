@@ -21,7 +21,6 @@ public sealed class ClientTransport : IAsyncDisposable
 
     public event Action<string>? Trace;
     public event Action<PacketView>? PacketReceived;
-    public event Action<ReadOnlyMemory<byte>, string>? RawPayloadReceived;
 
     public bool IsConnected => _udpClient is not null;
     public string? LocalEndpointText { get; private set; }
@@ -187,7 +186,8 @@ public sealed class ClientTransport : IAsyncDisposable
             }
             else
             {
-                RawPayloadReceived?.Invoke(payload, PacketCodec.GetErrorMessage(decodeResult));
+                Trace?.Invoke(
+                    $"recv raw payloadBytes={payload.Length} decodeError=\"{PacketCodec.GetErrorMessage(decodeResult)}\" preview={HexPreview(payload.Span, 48)}");
             }
         }
     }
@@ -195,5 +195,13 @@ public sealed class ClientTransport : IAsyncDisposable
     private static uint CurrentKcpClockMilliseconds()
     {
         return unchecked((uint)Environment.TickCount64);
+    }
+
+    private static string HexPreview(ReadOnlySpan<byte> bytes, int maxBytes)
+    {
+        int previewLength = Math.Min(bytes.Length, maxBytes);
+        return bytes.Length <= maxBytes
+            ? Convert.ToHexString(bytes[..previewLength])
+            : $"{Convert.ToHexString(bytes[..previewLength])}...";
     }
 }

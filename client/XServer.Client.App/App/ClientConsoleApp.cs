@@ -162,7 +162,6 @@ public sealed class ClientConsoleApp
         ClientTransport transport = new(profile);
         transport.Trace += HandleTransportTrace;
         transport.PacketReceived += HandlePacketReceived;
-        transport.RawPayloadReceived += HandleRawPayloadReceived;
         await transport.ConnectAsync(cancellationToken);
 
         _transport = transport;
@@ -355,7 +354,6 @@ public sealed class ClientConsoleApp
 
         _transport.Trace -= HandleTransportTrace;
         _transport.PacketReceived -= HandlePacketReceived;
-        _transport.RawPayloadReceived -= HandleRawPayloadReceived;
         await _transport.DisposeAsync();
         _transport = null;
     }
@@ -378,12 +376,6 @@ public sealed class ClientConsoleApp
         {
             _output.WriteLine(controlMessage);
         }
-    }
-
-    private void HandleRawPayloadReceived(ReadOnlyMemory<byte> payload, string error)
-    {
-        _output.WriteLine(
-            $"recv raw payloadBytes={payload.Length} decodeError=\"{error}\" preview={HexPreview(payload.Span, 48)}");
     }
 
     private IClientEntityRpcSender CreateRpcSender(ClientTransport transport)
