@@ -7,7 +7,7 @@ using XServer.Managed.Foundation.Protocol;
 
 namespace XServer.Client.Tests;
 
-public sealed class GameInstanceTests
+public sealed class ClientRuntimeStateGameplayTests
 {
     [Fact]
     public void PrepareSelectAvatarRequestDefersLocalSelectionUntilSendCompletes()
@@ -15,11 +15,10 @@ public sealed class GameInstanceTests
         ClientRuntimeState state = new();
         state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        GameInstance service = new();
-        OutboundGameRequest request = service.PrepareSelectAvatarRequest(state);
+        OutboundGameRequest request = state.PrepareSelectAvatarRequest();
 
         Assert.False(state.HasAvatar);
-        Assert.Equal(GameInstance.DefaultSelectAvatarMsgId, request.Header.MsgId);
+        Assert.Equal(ClientRuntimeState.DefaultSelectAvatarMsgId, request.Header.MsgId);
 
         request.ApplyAfterSend?.Invoke();
 
@@ -35,8 +34,7 @@ public sealed class GameInstanceTests
         ClientRuntimeState state = new();
         state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        GameInstance service = new();
-        OutboundGameRequest request = service.PrepareSelectAvatarRequest(state);
+        OutboundGameRequest request = state.PrepareSelectAvatarRequest();
         request.ApplyAfterSend?.Invoke();
 
         AvatarEntity avatar = state.Avatar!;
@@ -53,13 +51,13 @@ public sealed class GameInstanceTests
 
         PacketView packet = new(
             PacketCodec.CreateHeader(
-                GameInstance.DefaultSelectAvatarMsgId,
+                ClientRuntimeState.DefaultSelectAvatarMsgId,
                 2U,
                 PacketFlags.Response,
                 checked((uint)payload.Length)),
             payload);
 
-        string? message = service.TryHandleControlPacket(state, packet);
+        string? message = state.TryHandleControlPacket(packet);
 
         Assert.NotNull(message);
         Assert.Contains("selectAvatar confirmed", message, StringComparison.Ordinal);
@@ -73,9 +71,7 @@ public sealed class GameInstanceTests
     public void PrepareMoveRequestAppliesLocalPositionWhenRequested()
     {
         ClientRuntimeState state = CreateReadyAvatarState();
-        GameInstance service = new();
-
-        OutboundGameRequest request = service.PrepareMoveRequest(state, x: 1.5f, y: 2.5f, z: -3.0f, localApply: true);
+        OutboundGameRequest request = state.PrepareMoveRequest(x: 1.5f, y: 2.5f, z: -3.0f, localApply: true);
 
         request.ApplyAfterSend?.Invoke();
 
@@ -90,9 +86,8 @@ public sealed class GameInstanceTests
         ClientRuntimeState state = CreateReadyAvatarState();
         CapturingClientEntityRpcSender sender = new();
         state.ConfigureRpcSender(sender);
-        GameInstance service = new();
 
-        string summary = service.SendSetWeaponRpc(state, "gun");
+        string summary = state.SendSetWeaponRpc("gun");
 
         ClientEntityRpcRequest request = Assert.Single(sender.Requests);
         Assert.Contains("set-weapon rpc sent msgId=6302", summary, StringComparison.Ordinal);
@@ -105,18 +100,17 @@ public sealed class GameInstanceTests
     public void TryHandleControlPacketFormatsBoardcaseBroadcast()
     {
         ClientRuntimeState state = new();
-        GameInstance service = new();
         byte[] payload = "hello"u8.ToArray();
 
         PacketView packet = new(
             PacketCodec.CreateHeader(
-                GameInstance.BroadcastMessageMsgId,
+                ClientRuntimeState.BroadcastMessageMsgId,
                 0U,
                 PacketFlags.None,
                 checked((uint)payload.Length)),
             payload);
 
-        string? message = service.TryHandleControlPacket(state, packet);
+        string? message = state.TryHandleControlPacket(packet);
 
         Assert.Equal("boardcase received: hello", message);
     }

@@ -2,12 +2,11 @@ using System.Text;
 using System.Text.Json;
 using XServer.Client.Entities;
 using XServer.Client.Rpc;
-using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
 
 namespace XServer.Client.Runtime;
 
-public sealed class GameInstance
+public sealed partial class ClientRuntimeState
 {
     public const uint DefaultMoveMsgId = 45011U;
     public const uint DefaultSelectAvatarMsgId = 45013U;
@@ -29,13 +28,12 @@ public sealed class GameInstance
         public string? Error { get; init; }
     }
 
-    public OutboundGameRequest PrepareSelectAvatarRequest(ClientRuntimeState state, uint? msgId = null)
+    public OutboundGameRequest PrepareSelectAvatarRequest(uint? msgId = null)
     {
-        ArgumentNullException.ThrowIfNull(state);
-        EnsureAccountReady(state);
+        EnsureAccountReady();
 
-        string accountId = state.Account!.AccountId;
-        AvatarEntity selectedAvatar = state.CreateTemporaryAvatarSelection();
+        string accountId = Account!.AccountId;
+        AvatarEntity selectedAvatar = CreateTemporaryAvatarSelection();
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
             new
             {
@@ -47,7 +45,7 @@ public sealed class GameInstance
         uint effectiveMsgId = msgId ?? DefaultSelectAvatarMsgId;
         PacketHeader header = PacketCodec.CreateHeader(
             effectiveMsgId,
-            state.AllocatePacketSequence(),
+            AllocatePacketSequence(),
             PacketFlags.None,
             checked((uint)payload.Length));
 
@@ -55,40 +53,38 @@ public sealed class GameInstance
             header,
             payload,
             $"selectAvatar request sent msgId={effectiveMsgId} account={accountId} avatarId={selectedAvatar.AvatarId}; waiting for server confirmation.",
-            () => state.SelectAvatar(selectedAvatar));
+            () => SelectAvatar(selectedAvatar));
     }
 
     public OutboundGameRequest PrepareMoveRequest(
-        ClientRuntimeState state,
         float? x = null,
         float? y = null,
         float? z = null,
         bool localApply = true,
         uint? msgId = null)
     {
-        ArgumentNullException.ThrowIfNull(state);
-        EnsureAvatarReady(state);
+        EnsureAvatarReady();
 
-        float effectiveX = x ?? state.Avatar!.PositionX;
-        float effectiveY = y ?? state.Avatar!.PositionY;
-        float effectiveZ = z ?? state.Avatar!.PositionZ;
+        float effectiveX = x ?? Avatar!.PositionX;
+        float effectiveY = y ?? Avatar!.PositionY;
+        float effectiveZ = z ?? Avatar!.PositionZ;
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
             new
             {
                 action = "move",
-                avatarId = state.Avatar!.AvatarId,
+                avatarId = Avatar!.AvatarId,
                 position = new { x = effectiveX, y = effectiveY, z = effectiveZ },
             });
 
         uint effectiveMsgId = msgId ?? DefaultMoveMsgId;
         PacketHeader header = PacketCodec.CreateHeader(
             effectiveMsgId,
-            state.AllocatePacketSequence(),
+            AllocatePacketSequence(),
             PacketFlags.None,
             checked((uint)payload.Length));
 
         Action? applyAfterSend = localApply
-            ? () => state.UpdateAvatarPosition(effectiveX, effectiveY, effectiveZ)
+            ? () => UpdateAvatarPosition(effectiveX, effectiveY, effectiveZ)
             : null;
 
         return new OutboundGameRequest(
@@ -98,26 +94,23 @@ public sealed class GameInstance
             applyAfterSend);
     }
 
-    public string SendSetWeaponRpc(ClientRuntimeState state, string weapon)
+    public string SendSetWeaponRpc(string weapon)
     {
-        ArgumentNullException.ThrowIfNull(state);
-        EnsureAvatarReady(state);
+        EnsureAvatarReady();
 
         if (string.IsNullOrWhiteSpace(weapon))
         {
             throw new ArgumentException("weapon must not be empty.", nameof(weapon));
         }
 
-        state.Avatar!.CallServerRpc("SetWeapon", weapon);
+        Avatar!.CallServerRpc("SetWeapon", weapon);
         return
-            $"set-weapon rpc sent msgId={EntityRpcMessageIds.ClientToServerEntityRpcMsgId} entityId={state.Avatar.AvatarId} weapon={weapon}";
+            $"set-weapon rpc sent msgId={EntityRpcMessageIds.ClientToServerEntityRpcMsgId} entityId={Avatar.AvatarId} weapon={weapon}";
     }
 
-    public string? TryHandleControlPacket(ClientRuntimeState state, PacketView packet)
+    public string? TryHandleControlPacket(PacketView packet)
     {
-        ArgumentNullException.ThrowIfNull(state);
-
-        if (state.TryHandleServerRpcPacket(packet, out string? rpcMessage))
+        if (TryHandleServerRpcPacket(packet, out string? rpcMessage))
         {
             return rpcMessage;
         }
@@ -150,7 +143,7 @@ public sealed class GameInstance
 
         if ((packet.Header.Flags & PacketFlags.Error) != PacketFlags.None || !response.Success)
         {
-            state.ClearAvatarSelection();
+            ClearAvatarSelection();
             return
                 $"selectAvatar failed account={response.AccountId ?? "<unknown>"} avatarId={response.AvatarId ?? "<unknown>"} error={response.Error ?? "unknown error"}";
         }
@@ -160,7 +153,7 @@ public sealed class GameInstance
             return "selectAvatar confirmation payload was incomplete.";
         }
 
-        if (!state.ConfirmAvatarSelection(
+        if (!ConfirmAvatarSelection(
                 response.AccountId,
                 response.AvatarId,
                 response.GameNodeId,
@@ -172,6 +165,26 @@ public sealed class GameInstance
 
         return
             $"selectAvatar confirmed account={response.AccountId} avatarId={response.AvatarId} game={response.GameNodeId ?? "<unknown>"} sessionId={response.SessionId}";
+    }
+
+    public bool TryHandleServerRpcPacket(PacketView packet, out string? message)
+    {
+        if (packet.Header.MsgId != EntityRpcMessageIds.ServerToClientEntityRpcMsgId)
+        {
+            message = null;
+            return false;
+        }
+
+        EntityRpcDispatchErrorCode result = ClientEntityRpcDispatcher.Dispatch(
+            this,
+            packet.Payload,
+            out Guid entityId,
+            out string rpcName,
+            out string errorMessage);
+        message = result == EntityRpcDispatchErrorCode.None
+            ? $"clientRpc delivered entityId={entityId:D} rpc={rpcName}"
+            : $"clientRpc failed entityId={entityId:D} rpc={rpcName} error={errorMessage}";
+        return true;
     }
 
     private static string TryHandleBroadcastPacket(PacketView packet)
@@ -189,30 +202,6 @@ public sealed class GameInstance
         catch (DecoderFallbackException)
         {
             return $"boardcase received: payloadBytes={packet.Payload.Length}";
-        }
-    }
-
-    private static void EnsureAccountReady(ClientRuntimeState state)
-    {
-        if (!state.HasAccount)
-        {
-            throw new InvalidOperationException(
-                "No local Account is cached yet. Run login <url> <account> <password> first.");
-        }
-    }
-
-    private static void EnsureAvatarReady(ClientRuntimeState state)
-    {
-        if (!state.HasAvatar)
-        {
-            throw new InvalidOperationException(
-                "No local Avatar is bound to the current Account. Run login <url> <account> <password>, connect, then selectAvatar before move/set-weapon.");
-        }
-
-        if (!state.HasConfirmedAvatar)
-        {
-            throw new InvalidOperationException(
-                "The selected Avatar is still waiting for server confirmation. Wait for the selectAvatar success response before move/set-weapon.");
         }
     }
 }
