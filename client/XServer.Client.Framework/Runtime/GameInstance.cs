@@ -6,7 +6,7 @@ using XServer.Managed.Foundation.Protocol;
 
 namespace XServer.Client.Runtime;
 
-public sealed partial class ClientRuntimeState
+public sealed partial class GameInstance
 {
     private IClientEntityRpcSender? _rpcSender;
 

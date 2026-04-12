@@ -2,7 +2,7 @@ using XServer.Client.Entities;
 
 namespace XServer.Client.Runtime;
 
-public sealed partial class ClientRuntimeState
+public sealed partial class GameInstance
 {
     public AvatarEntity CreateTemporaryAvatarSelection()
     {

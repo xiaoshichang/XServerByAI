@@ -17,7 +17,7 @@ public sealed class ClientConsoleApp
     private readonly ClientLaunchOptions _launchOptions;
     private readonly TextWriter _output;
     private readonly TextWriter _error;
-    private readonly ClientRuntimeState _state = new();
+    private readonly GameInstance _gameInstance = new();
 
     private ClientTransport? _transport;
 
@@ -95,7 +95,7 @@ public sealed class ClientConsoleApp
 
         case "disconnect":
             await DisposeTransportAsync();
-            _state.MarkDisconnected();
+            _gameInstance.MarkDisconnected();
             await _output.WriteLineAsync("disconnected");
             return true;
 
@@ -152,7 +152,7 @@ public sealed class ClientConsoleApp
             !command.HasOption("host") &&
             !command.HasOption("port") &&
             !command.HasOption("conversation") &&
-            _state.TryGetCachedLoginProfile(configuredProfile.ConfigPath, out ResolvedClientProfile cachedLoginProfile))
+            _gameInstance.TryGetCachedLoginProfile(configuredProfile.ConfigPath, out ResolvedClientProfile cachedLoginProfile))
         {
             profile = cachedLoginProfile;
         }
@@ -165,7 +165,7 @@ public sealed class ClientConsoleApp
         await transport.ConnectAsync(cancellationToken);
 
         _transport = transport;
-        _state.MarkConnected(profile, transport.LocalEndpointText);
+        _gameInstance.MarkConnected(profile, transport.LocalEndpointText);
         try
         {
             await SendClientHelloAsync(transport, cancellationToken);
@@ -173,10 +173,10 @@ public sealed class ClientConsoleApp
         catch
         {
             await DisposeTransportAsync();
-            _state.MarkDisconnected();
+            _gameInstance.MarkDisconnected();
             throw;
         }
-        _state.ConfigureRpcSender(CreateRpcSender(transport));
+        _gameInstance.ConfigureRpcSender(CreateRpcSender(transport));
         await _output.WriteLineAsync(
             $"connected remote={profile.DisplayEndpoint} gate={profile.GateNodeId} conv={profile.Conversation} source={profile.EndpointSource}; session primed with clientHello");
     }
@@ -192,11 +192,11 @@ public sealed class ClientConsoleApp
 
         PacketFlags flags = ParsePacketFlags(command.GetOptionalString("flags"));
         byte[] payload = BuildPayloadBytes(command);
-        uint sequence = command.GetUInt32OrDefault("seq", _state.AllocatePacketSequence());
+        uint sequence = command.GetUInt32OrDefault("seq", _gameInstance.AllocatePacketSequence());
         PacketHeader header = PacketCodec.CreateHeader(msgId, sequence, flags, checked((uint)payload.Length));
 
         await transport.SendPacketAsync(header, payload, cancellationToken);
-        _state.RecordSentPacket(header);
+        _gameInstance.RecordSentPacket(header);
         await _output.WriteLineAsync(
             $"sent msgId={header.MsgId} seq={header.Seq} flags={header.Flags} payloadBytes={payload.Length}");
     }
@@ -224,7 +224,7 @@ public sealed class ClientConsoleApp
             grant.KcpPort,
             grant.Conversation,
             "http login");
-        _state.StoreLoginGrant(grant.AccountId, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
+        _gameInstance.StoreLoginGrant(grant.AccountId, grantedProfile, grant.IssuedAt, grant.ExpiresAt);
         await _output.WriteLineAsync(
             $"http login succeeded account={grant.AccountId} kcp={grantedProfile.DisplayEndpoint} conv={grant.Conversation} expiresAt={grant.ExpiresAt:O}. local Account cached; run connect to open and prime the KCP session, then selectAvatar to enter game.");
     }
@@ -240,9 +240,9 @@ public sealed class ClientConsoleApp
         }
 
         uint? msgId = command.HasOption("msgId")
-            ? command.GetUInt32OrDefault("msgId", ClientRuntimeState.DefaultSelectAvatarMsgId)
+            ? command.GetUInt32OrDefault("msgId", GameInstance.DefaultSelectAvatarMsgId)
             : null;
-        OutboundGameRequest request = _state.PrepareSelectAvatarRequest(msgId);
+        OutboundGameRequest request = _gameInstance.PrepareSelectAvatarRequest(msgId);
         await SendGameRequestAsync(request, cancellationToken);
     }
 
@@ -250,11 +250,11 @@ public sealed class ClientConsoleApp
     {
         PacketHeader header = PacketCodec.CreateHeader(
             DefaultClientHelloMsgId,
-            _state.AllocatePacketSequence(),
+            _gameInstance.AllocatePacketSequence(),
             PacketFlags.None,
             0U);
         await transport.SendPacketAsync(header, ReadOnlyMemory<byte>.Empty, cancellationToken);
-        _state.RecordSentPacket(header);
+        _gameInstance.RecordSentPacket(header);
         await _output.WriteLineAsync(
             $"clientHello sent msgId={header.MsgId} seq={header.Seq} payloadBytes=0");
     }
@@ -268,9 +268,9 @@ public sealed class ClientConsoleApp
         float? z = command.HasOption("z") ? command.GetSingleOrDefault("z", 0.0f) : null;
         bool localApply = command.GetBooleanOrDefault("localApply", true);
         uint? msgId = command.HasOption("msgId")
-            ? command.GetUInt32OrDefault("msgId", ClientRuntimeState.DefaultMoveMsgId)
+            ? command.GetUInt32OrDefault("msgId", GameInstance.DefaultMoveMsgId)
             : null;
-        OutboundGameRequest request = _state.PrepareMoveRequest(x, y, z, localApply, msgId);
+        OutboundGameRequest request = _gameInstance.PrepareMoveRequest(x, y, z, localApply, msgId);
         await SendGameRequestAsync(request, cancellationToken);
     }
 
@@ -280,7 +280,7 @@ public sealed class ClientConsoleApp
         RequireTransport();
 
         string weapon = ResolveSetWeapon(command);
-        string summary = _state.SendSetWeaponRpc(weapon);
+        string summary = _gameInstance.SendSetWeaponRpc(weapon);
         await _output.WriteLineAsync(summary);
     }
 
@@ -315,8 +315,8 @@ public sealed class ClientConsoleApp
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
             "  login <url> <account> <password> [config=path]",
             "  connect auto-sends clientHello [msgId=45010] to prime the Gate session",
-            $"  selectAvatar [msgId={ClientRuntimeState.DefaultSelectAvatarMsgId}]",
-            $"  move [x=1] [y=2] [z=0] [msgId={ClientRuntimeState.DefaultMoveMsgId}] [localApply=true]",
+            $"  selectAvatar [msgId={GameInstance.DefaultSelectAvatarMsgId}]",
+            $"  move [x=1] [y=2] [z=0] [msgId={GameInstance.DefaultMoveMsgId}] [localApply=true]",
             "  set-weapon <weapon>",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
@@ -341,12 +341,12 @@ public sealed class ClientConsoleApp
         int pendingAckCount = _transport?.PendingAcknowledgementCount ?? 0;
         uint nextSendSequence = _transport?.NextKcpSendSequence ?? 0U;
         uint nextReceiveSequence = _transport?.NextKcpReceiveSequence ?? 0U;
-        await _output.WriteLineAsync(_state.BuildStatusText(pendingAckCount, nextSendSequence, nextReceiveSequence));
+        await _output.WriteLineAsync(_gameInstance.BuildStatusText(pendingAckCount, nextSendSequence, nextReceiveSequence));
     }
 
     private async Task DisposeTransportAsync()
     {
-        _state.ConfigureRpcSender(null);
+        _gameInstance.ConfigureRpcSender(null);
         if (_transport is null)
         {
             return;
@@ -365,13 +365,13 @@ public sealed class ClientConsoleApp
 
     private void HandlePacketReceived(PacketView packet)
     {
-        _state.RecordReceivedPacket(packet.Header);
+        _gameInstance.RecordReceivedPacket(packet.Header);
         string payloadPreview = TryFormatUtf8(packet.Payload);
         _output.WriteLine(
             $"recv msgId={packet.Header.MsgId} seq={packet.Header.Seq} flags={packet.Header.Flags} " +
             $"payloadBytes={packet.Payload.Length} payload={payloadPreview}");
 
-        string? controlMessage = _state.TryHandleControlPacket(packet);
+        string? controlMessage = _gameInstance.TryHandleControlPacket(packet);
         if (!string.IsNullOrWhiteSpace(controlMessage))
         {
             _output.WriteLine(controlMessage);
@@ -381,7 +381,7 @@ public sealed class ClientConsoleApp
     private IClientEntityRpcSender CreateRpcSender(ClientTransport transport)
     {
         return new ClientEntityRpcPacketSender(
-            _state,
+            _gameInstance,
             (header, payload) => transport.SendPacketAsync(header, payload, CancellationToken.None).GetAwaiter().GetResult());
     }
 
@@ -468,7 +468,7 @@ public sealed class ClientConsoleApp
     {
         ClientTransport transport = RequireTransport();
         await transport.SendPacketAsync(request.Header, request.Payload, cancellationToken);
-        _state.RecordSentPacket(request.Header);
+        _gameInstance.RecordSentPacket(request.Header);
         request.ApplyAfterSend?.Invoke();
         await _output.WriteLineAsync(request.Summary);
     }

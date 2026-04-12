@@ -6,14 +6,14 @@ namespace XServer.Client.Rpc;
 
 public sealed class ClientEntityRpcPacketSender : IClientEntityRpcSender
 {
-    private readonly ClientRuntimeState _state;
+    private readonly GameInstance _gameInstance;
     private readonly Action<PacketHeader, ReadOnlyMemory<byte>> _sendPacket;
 
     public ClientEntityRpcPacketSender(
-        ClientRuntimeState state,
+        GameInstance gameInstance,
         Action<PacketHeader, ReadOnlyMemory<byte>> sendPacket)
     {
-        _state = state ?? throw new ArgumentNullException(nameof(state));
+        _gameInstance = gameInstance ?? throw new ArgumentNullException(nameof(gameInstance));
         _sendPacket = sendPacket ?? throw new ArgumentNullException(nameof(sendPacket));
     }
 
@@ -25,11 +25,11 @@ public sealed class ClientEntityRpcPacketSender : IClientEntityRpcSender
 
         PacketHeader header = PacketCodec.CreateHeader(
             request.MsgId,
-            _state.AllocatePacketSequence(),
+            _gameInstance.AllocatePacketSequence(),
             PacketFlags.None,
             checked((uint)request.Payload.Length));
 
         _sendPacket(header, request.Payload);
-        _state.RecordSentPacket(header);
+        _gameInstance.RecordSentPacket(header);
     }
 }

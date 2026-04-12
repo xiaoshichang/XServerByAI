@@ -6,7 +6,7 @@ using XServer.Managed.Foundation.Protocol;
 
 namespace XServer.Client.Runtime;
 
-public sealed partial class ClientRuntimeState
+public sealed partial class GameInstance
 {
     public const uint DefaultMoveMsgId = 45011U;
     public const uint DefaultSelectAvatarMsgId = 45013U;

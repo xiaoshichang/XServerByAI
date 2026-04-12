@@ -7,37 +7,37 @@ using XServer.Managed.Foundation.Protocol;
 
 namespace XServer.Client.Tests;
 
-public sealed class ClientRuntimeStateGameplayTests
+public sealed class GameInstanceGameplayTests
 {
     [Fact]
     public void PrepareSelectAvatarRequestDefersLocalSelectionUntilSendCompletes()
     {
-        ClientRuntimeState state = new();
-        state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+        GameInstance gameInstance = new();
+        gameInstance.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        OutboundGameRequest request = state.PrepareSelectAvatarRequest();
+        OutboundGameRequest request = gameInstance.PrepareSelectAvatarRequest();
 
-        Assert.False(state.HasAvatar);
-        Assert.Equal(ClientRuntimeState.DefaultSelectAvatarMsgId, request.Header.MsgId);
+        Assert.False(gameInstance.HasAvatar);
+        Assert.Equal(GameInstance.DefaultSelectAvatarMsgId, request.Header.MsgId);
 
         request.ApplyAfterSend?.Invoke();
 
-        Assert.True(state.HasAvatar);
-        Assert.False(state.HasConfirmedAvatar);
-        Assert.Equal(1, state.EntityManager.Count);
-        Assert.Equal(ClientLifecycleState.AvatarSelecting, state.LifecycleState);
+        Assert.True(gameInstance.HasAvatar);
+        Assert.False(gameInstance.HasConfirmedAvatar);
+        Assert.Equal(1, gameInstance.EntityManager.Count);
+        Assert.Equal(ClientLifecycleState.AvatarSelecting, gameInstance.LifecycleState);
     }
 
     [Fact]
     public void TryHandleControlPacketConfirmsPendingAvatarSelection()
     {
-        ClientRuntimeState state = new();
-        state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+        GameInstance gameInstance = new();
+        gameInstance.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        OutboundGameRequest request = state.PrepareSelectAvatarRequest();
+        OutboundGameRequest request = gameInstance.PrepareSelectAvatarRequest();
         request.ApplyAfterSend?.Invoke();
 
-        AvatarEntity avatar = state.Avatar!;
+        AvatarEntity avatar = gameInstance.Avatar!;
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
             new
             {
@@ -51,77 +51,77 @@ public sealed class ClientRuntimeStateGameplayTests
 
         PacketView packet = new(
             PacketCodec.CreateHeader(
-                ClientRuntimeState.DefaultSelectAvatarMsgId,
+                GameInstance.DefaultSelectAvatarMsgId,
                 2U,
                 PacketFlags.Response,
                 checked((uint)payload.Length)),
             payload);
 
-        string? message = state.TryHandleControlPacket(packet);
+        string? message = gameInstance.TryHandleControlPacket(packet);
 
         Assert.NotNull(message);
         Assert.Contains("selectAvatar confirmed", message, StringComparison.Ordinal);
-        Assert.True(state.HasConfirmedAvatar);
-        Assert.Equal("Game0", state.AvatarSession.GameNodeId);
-        Assert.Equal(7UL, state.AvatarSession.SessionId);
-        Assert.Equal(ClientLifecycleState.AvatarReady, state.LifecycleState);
+        Assert.True(gameInstance.HasConfirmedAvatar);
+        Assert.Equal("Game0", gameInstance.AvatarSession.GameNodeId);
+        Assert.Equal(7UL, gameInstance.AvatarSession.SessionId);
+        Assert.Equal(ClientLifecycleState.AvatarReady, gameInstance.LifecycleState);
     }
 
     [Fact]
     public void PrepareMoveRequestAppliesLocalPositionWhenRequested()
     {
-        ClientRuntimeState state = CreateReadyAvatarState();
-        OutboundGameRequest request = state.PrepareMoveRequest(x: 1.5f, y: 2.5f, z: -3.0f, localApply: true);
+        GameInstance gameInstance = CreateReadyAvatarState();
+        OutboundGameRequest request = gameInstance.PrepareMoveRequest(x: 1.5f, y: 2.5f, z: -3.0f, localApply: true);
 
         request.ApplyAfterSend?.Invoke();
 
-        Assert.Equal(1.5f, state.Avatar!.PositionX);
-        Assert.Equal(2.5f, state.Avatar.PositionY);
-        Assert.Equal(-3.0f, state.Avatar.PositionZ);
+        Assert.Equal(1.5f, gameInstance.Avatar!.PositionX);
+        Assert.Equal(2.5f, gameInstance.Avatar.PositionY);
+        Assert.Equal(-3.0f, gameInstance.Avatar.PositionZ);
     }
 
     [Fact]
     public void SendSetWeaponRpc_UsesAvatarEntityRpcSurface()
     {
-        ClientRuntimeState state = CreateReadyAvatarState();
+        GameInstance gameInstance = CreateReadyAvatarState();
         CapturingClientEntityRpcSender sender = new();
-        state.ConfigureRpcSender(sender);
+        gameInstance.ConfigureRpcSender(sender);
 
-        string summary = state.SendSetWeaponRpc("gun");
+        string summary = gameInstance.SendSetWeaponRpc("gun");
 
         ClientEntityRpcRequest request = Assert.Single(sender.Requests);
         Assert.Contains("set-weapon rpc sent msgId=6302", summary, StringComparison.Ordinal);
         Assert.Equal(EntityRpcMessageIds.ClientToServerEntityRpcMsgId, request.MsgId);
-        Assert.Equal(state.Avatar!.EntityId, request.EntityId);
+        Assert.Equal(gameInstance.Avatar!.EntityId, request.EntityId);
         Assert.Equal("SetWeapon", request.RpcName);
     }
 
     [Fact]
     public void TryHandleControlPacketFormatsBoardcaseBroadcast()
     {
-        ClientRuntimeState state = new();
+        GameInstance gameInstance = new();
         byte[] payload = "hello"u8.ToArray();
 
         PacketView packet = new(
             PacketCodec.CreateHeader(
-                ClientRuntimeState.BroadcastMessageMsgId,
+                GameInstance.BroadcastMessageMsgId,
                 0U,
                 PacketFlags.None,
                 checked((uint)payload.Length)),
             payload);
 
-        string? message = state.TryHandleControlPacket(packet);
+        string? message = gameInstance.TryHandleControlPacket(packet);
 
         Assert.Equal("boardcase received: hello", message);
     }
 
-    private static ClientRuntimeState CreateReadyAvatarState()
+    private static GameInstance CreateReadyAvatarState()
     {
-        ClientRuntimeState state = new();
-        state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
-        AvatarEntity avatar = state.SelectAvatar();
-        Assert.True(state.ConfirmAvatarSelection("demo-account", avatar.AvatarId));
-        return state;
+        GameInstance gameInstance = new();
+        gameInstance.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+        AvatarEntity avatar = gameInstance.SelectAvatar();
+        Assert.True(gameInstance.ConfirmAvatarSelection("demo-account", avatar.AvatarId));
+        return gameInstance;
     }
 
     private static ResolvedClientProfile CreateProfile(

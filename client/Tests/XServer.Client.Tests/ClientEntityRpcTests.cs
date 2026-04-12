@@ -11,12 +11,12 @@ public sealed class ClientEntityRpcTests
     [Fact]
     public void CallServerRpc_UsesConfiguredSenderAndJsonPayload()
     {
-        ClientRuntimeState state = new();
+        GameInstance gameInstance = new();
         CapturingClientEntityRpcSender sender = new();
-        state.ConfigureRpcSender(sender);
-        state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+        gameInstance.ConfigureRpcSender(sender);
+        gameInstance.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        AvatarEntity avatar = state.SelectAvatar();
+        AvatarEntity avatar = gameInstance.SelectAvatar();
         avatar.CallServerRPC("SetWeapon", "gun");
 
         ClientEntityRpcRequest request = Assert.Single(sender.Requests);
@@ -46,29 +46,29 @@ public sealed class ClientEntityRpcTests
     [Fact]
     public void CallServerRpc_WithPacketSender_WrapsPayloadIntoClientPacketAndRecordsSend()
     {
-        ClientRuntimeState state = new();
+        GameInstance gameInstance = new();
         PacketHeader sentHeader = default;
         ReadOnlyMemory<byte> sentPayload = ReadOnlyMemory<byte>.Empty;
         ClientEntityRpcPacketSender sender = new(
-            state,
+            gameInstance,
             (header, payload) =>
             {
                 sentHeader = header;
                 sentPayload = payload;
             });
 
-        state.ConfigureRpcSender(sender);
-        state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+        gameInstance.ConfigureRpcSender(sender);
+        gameInstance.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        AvatarEntity avatar = state.SelectAvatar();
+        AvatarEntity avatar = gameInstance.SelectAvatar();
         avatar.CallServerRPC("SetWeapon", "gun");
 
         Assert.Equal(EntityRpcMessageIds.ClientToServerEntityRpcMsgId, sentHeader.MsgId);
         Assert.Equal(PacketFlags.None, sentHeader.Flags);
         Assert.Equal(1U, sentHeader.Seq);
         Assert.Equal((uint)sentPayload.Length, sentHeader.Length);
-        Assert.Equal(1, state.SentPacketCount);
-        Assert.Equal(2U, state.NextPacketSequence);
+        Assert.Equal(1, gameInstance.SentPacketCount);
+        Assert.Equal(2U, gameInstance.NextPacketSequence);
         Assert.True(EntityRpcJsonCodec.TryDecode(
             sentPayload.ToArray(),
             out EntityRpcInvocationEnvelope envelope,
@@ -83,9 +83,9 @@ public sealed class ClientEntityRpcTests
     [Fact]
     public void TryHandleControlPacket_DeliversServerRpcToTargetAvatar()
     {
-        ClientRuntimeState state = new();
-        state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
-        AvatarEntity avatar = state.SelectAvatar();
+        GameInstance gameInstance = new();
+        gameInstance.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+        AvatarEntity avatar = gameInstance.SelectAvatar();
 
         byte[] payload = EntityRpcJsonCodec.Encode(avatar.EntityId, "OnSetWeaponResult", "gun", true);
         PacketView packet = new(
@@ -96,7 +96,7 @@ public sealed class ClientEntityRpcTests
                 checked((uint)payload.Length)),
             payload);
 
-        string? message = state.TryHandleControlPacket(packet);
+        string? message = gameInstance.TryHandleControlPacket(packet);
 
         Assert.Equal($"clientRpc delivered entityId={avatar.EntityId:D} rpc=OnSetWeaponResult", message);
         Assert.Equal("gun", avatar.Weapon);

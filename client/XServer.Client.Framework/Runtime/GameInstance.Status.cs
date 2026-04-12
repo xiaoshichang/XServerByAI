@@ -1,6 +1,6 @@
 namespace XServer.Client.Runtime;
 
-public sealed partial class ClientRuntimeState
+public sealed partial class GameInstance
 {
     public string BuildStatusText(int pendingAckCount, uint nextKcpSendSequence, uint nextKcpReceiveSequence)
     {

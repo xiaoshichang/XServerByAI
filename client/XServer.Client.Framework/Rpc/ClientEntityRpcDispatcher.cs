@@ -7,13 +7,13 @@ namespace XServer.Client.Rpc;
 internal static class ClientEntityRpcDispatcher
 {
     public static EntityRpcDispatchErrorCode Dispatch(
-        ClientRuntimeState state,
+        GameInstance gameInstance,
         ReadOnlyMemory<byte> payload,
         out Guid entityId,
         out string rpcName,
         out string errorMessage)
     {
-        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(gameInstance);
 
         entityId = Guid.Empty;
         rpcName = string.Empty;
@@ -31,7 +31,7 @@ internal static class ClientEntityRpcDispatcher
         entityId = envelope.EntityId;
         rpcName = envelope.RpcName;
 
-        if (!state.EntityManager.TryGet(envelope.EntityId, out ClientEntity? entity) || entity is null)
+        if (!gameInstance.EntityManager.TryGet(envelope.EntityId, out ClientEntity? entity) || entity is null)
         {
             errorMessage = $"Client RPC target entity '{envelope.EntityId:D}' could not be found.";
             return EntityRpcDispatchErrorCode.EntityNotFound;
