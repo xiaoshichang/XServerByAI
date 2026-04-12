@@ -122,11 +122,6 @@ public sealed class ClientConsoleApp
             await HandleMoveAsync(command, cancellationToken);
             return true;
 
-        case "buyweapon":
-        case "buy-weapon":
-            await HandleBuyWeaponAsync(command, cancellationToken);
-            return true;
-
         case "setweapon":
         case "set-weapon":
             await HandleSetWeaponAsync(command, cancellationToken);
@@ -241,10 +236,10 @@ public sealed class ClientConsoleApp
     {
         RequireTransport();
 
-        if (command.HasOption("avatarId") || command.HasOption("avatarName"))
+        if (command.HasOption("avatarId"))
         {
             throw new ArgumentException(
-                "selectAvatar no longer accepts avatarId/avatarName parameters. It now always uses temporary random placeholder data.");
+                "selectAvatar no longer accepts avatarId parameters. It now always uses temporary random placeholder data.");
         }
 
         uint? msgId = command.HasOption("msgId")
@@ -279,20 +274,6 @@ public sealed class ClientConsoleApp
             ? command.GetUInt32OrDefault("msgId", ClientGameLogicService.DefaultMoveMsgId)
             : null;
         OutboundGameRequest request = _gameLogic.PrepareMoveRequest(_state, x, y, z, localApply, msgId);
-        await SendGameRequestAsync(request, cancellationToken);
-    }
-
-    private async Task HandleBuyWeaponAsync(ParsedCommand command, CancellationToken cancellationToken)
-    {
-        RequireTransport();
-
-        string weaponId = command.GetStringOrDefault("weaponId", "training-sword");
-        int count = command.GetInt32OrDefault("count", 1);
-        bool localApply = command.GetBooleanOrDefault("localApply", true);
-        uint? msgId = command.HasOption("msgId")
-            ? command.GetUInt32OrDefault("msgId", ClientGameLogicService.DefaultBuyWeaponMsgId)
-            : null;
-        OutboundGameRequest request = _gameLogic.PrepareBuyWeaponRequest(_state, weaponId, count, localApply, msgId);
         await SendGameRequestAsync(request, cancellationToken);
     }
 
@@ -339,7 +320,6 @@ public sealed class ClientConsoleApp
             "  connect auto-sends clientHello [msgId=45010] to prime the Gate session",
             $"  selectAvatar [msgId={ClientGameLogicService.DefaultSelectAvatarMsgId}]",
             $"  move [x=1] [y=2] [z=0] [msgId={ClientGameLogicService.DefaultMoveMsgId}] [localApply=true]",
-            $"  buyWeapon [weaponId=rifle] [count=1] [msgId={ClientGameLogicService.DefaultBuyWeaponMsgId}] [localApply=true]",
             "  set-weapon <weapon>",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
@@ -348,11 +328,11 @@ public sealed class ClientConsoleApp
             "  login caches the local Account after the HTTP grant succeeds, but does not auto-select an Avatar.",
             "  connect now sends a lightweight clientHello packet immediately after the UDP/KCP transport opens.",
             "  selectAvatar sends a placeholder choose-avatar request to Gate and locally enters a waiting-for-confirmation state.",
-            "  selectAvatar now always generates temporary random avatarId/avatarName placeholders locally.",
+            "  selectAvatar now always generates a temporary random avatarId locally.",
             "  Avatar-dependent commands become available only after Gate confirms AvatarEntity creation.",
             "  set-weapon sends a client entity RPC [msgId=6302] to the selected Avatar on Game.",
             $"  demo default login url is {DefaultGate1AuthUrl} (Gate1 auth).",
-            "  move/buyWeapon use temporary test-range msgIds by default and can be overridden.",
+            "  move uses a temporary test-range msgId by default and can be overridden.",
             "  connect reads configs/local-dev.json and Gate0 by default.",
             "  After login, connect without overrides reuses the most recent granted KCP endpoint.",
             "  If the Gate config binds clientNetwork.listenEndpoint.host to 0.0.0.0, the simulator dials 127.0.0.1 by default.");

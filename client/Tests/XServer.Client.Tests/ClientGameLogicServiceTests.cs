@@ -48,7 +48,6 @@ public sealed class ClientGameLogicServiceTests
                 success = true,
                 accountId = avatar.AccountId,
                 avatarId = avatar.AvatarId,
-                avatarName = avatar.DisplayName,
                 gameNodeId = "Game0",
                 sessionId = 7UL,
             });
@@ -128,7 +127,7 @@ public sealed class ClientGameLogicServiceTests
         ClientRuntimeState state = new();
         state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
         AvatarEntity avatar = state.SelectAvatar();
-        Assert.True(state.ConfirmAvatarSelection("demo-account", avatar.AvatarId, avatar.DisplayName));
+        Assert.True(state.ConfirmAvatarSelection("demo-account", avatar.AvatarId));
         return state;
     }
 

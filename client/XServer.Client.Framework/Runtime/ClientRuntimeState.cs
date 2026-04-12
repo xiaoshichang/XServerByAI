@@ -143,8 +143,7 @@ public sealed class ClientRuntimeState
 
         string accountId = Account!.AccountId;
         Guid avatarEntityId = Guid.NewGuid();
-        string avatarName = BuildTemporaryAvatarName(avatarEntityId);
-        return new AvatarEntity(avatarEntityId, accountId, avatarName);
+        return new AvatarEntity(avatarEntityId, accountId);
     }
 
     public AvatarEntity SelectAvatar()
@@ -167,11 +166,6 @@ public sealed class ClientRuntimeState
         if (string.IsNullOrWhiteSpace(avatar.AvatarId))
         {
             throw new ArgumentException("Avatar selection id must not be empty.", nameof(avatar));
-        }
-
-        if (string.IsNullOrWhiteSpace(avatar.DisplayName))
-        {
-            throw new ArgumentException("Avatar selection display name must not be empty.", nameof(avatar));
         }
 
         if (AvatarSession.SelectedAvatarEntityId.HasValue &&
@@ -206,7 +200,6 @@ public sealed class ClientRuntimeState
     public bool ConfirmAvatarSelection(
         string accountId,
         string avatarId,
-        string? avatarName = null,
         string? gameNodeId = null,
         ulong? sessionId = null)
     {
@@ -225,7 +218,6 @@ public sealed class ClientRuntimeState
             return false;
         }
 
-        currentAvatar.UpdateDisplayName(avatarName);
         AvatarSession.Confirm(gameNodeId, sessionId);
         RefreshLifecycleState();
         return true;
@@ -281,13 +273,6 @@ public sealed class ClientRuntimeState
         Avatar.PositionZ = z;
     }
 
-    public void AddWeapon(string weaponId, int count)
-    {
-        EnsureAvatarReady();
-        Avatar!.WeaponInventory.TryGetValue(weaponId, out int existingCount);
-        Avatar.WeaponInventory[weaponId] = existingCount + count;
-    }
-
     public string BuildStatusText(int pendingAckCount, uint nextKcpSendSequence, uint nextKcpReceiveSequence)
     {
         List<string> lines =
@@ -338,12 +323,9 @@ public sealed class ClientRuntimeState
             string currentWeapon = string.IsNullOrWhiteSpace(Avatar.Weapon)
                 ? "<none>"
                 : Avatar.Weapon;
-            string weapons = Avatar.WeaponInventory.Count == 0
-                ? "<empty>"
-                : string.Join(", ", Avatar.WeaponInventory.Select(entry => $"{entry.Key}x{entry.Value}"));
             lines.Add(
-                $"Avatar: id={Avatar.AvatarId}, account={Avatar.AccountId}, name={Avatar.DisplayName}, " +
-                $"pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapon={currentWeapon}, weapons={weapons}");
+                $"Avatar: id={Avatar.AvatarId}, account={Avatar.AccountId}, " +
+                $"pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapon={currentWeapon}");
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -400,12 +382,5 @@ public sealed class ClientRuntimeState
         }
 
         LifecycleState = ClientLifecycleState.Disconnected;
-    }
-
-    private static string BuildTemporaryAvatarName(Guid avatarEntityId)
-    {
-        string avatarId = avatarEntityId.ToString("D");
-        int suffixLength = Math.Min(8, avatarId.Length);
-        return $"TempAvatar-{avatarId[..suffixLength]}";
     }
 }

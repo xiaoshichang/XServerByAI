@@ -61,7 +61,6 @@ class GateNode final : public ServerNode
         std::uint32_t conversation{0U};
         std::string account_id{};
         std::string avatar_id{};
-        std::string avatar_name{};
         std::string game_node_id{};
         std::string gate_node_id{};
         std::uint32_t pending_select_avatar_seq{0U};
@@ -136,13 +135,11 @@ class GateNode final : public ServerNode
         bool success,
         std::string_view account_id,
         std::string_view avatar_id,
-        std::string_view avatar_name,
         std::string_view game_node_id,
         std::string_view error_message,
         std::string* transport_error_message);
     [[nodiscard]] bool SendCreateAvatarEntityRequest(
         const ClientSessionRecord& session_record,
-        std::string_view avatar_name,
         std::string* error_message);
     [[nodiscard]] std::string ResolveAvatarGameNodeId() const;
     void ClearClientSessionRecord(std::uint64_t session_id) noexcept;

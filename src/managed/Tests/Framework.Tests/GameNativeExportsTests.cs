@@ -16,7 +16,7 @@ namespace XServer.Managed.Framework.Tests
             AssignOnlineStubOwnership("GameInteropTest");
 
             Guid avatarEntityId = Guid.NewGuid();
-            SendCreateAvatarMessage(avatarEntityId, "demo-account", "TempHero", "Gate0", 42);
+            SendCreateAvatarMessage(avatarEntityId, "demo-account", "Gate0", 42);
 
             GameNodeRuntimeState runtimeState = GetRuntimeState();
             OnlineStub onlineStub = Assert.IsType<OnlineStub>(runtimeState.OwnedServerStubs.Single());
@@ -36,7 +36,7 @@ namespace XServer.Managed.Framework.Tests
             AssignOnlineStubOwnership("GameProxyInteropTest");
 
             Guid avatarEntityId = Guid.NewGuid();
-            SendCreateAvatarMessage(avatarEntityId, "proxy-account", "ProxyHero", "Gate3", 84);
+            SendCreateAvatarMessage(avatarEntityId, "proxy-account", "Gate3", 84);
 
             byte[] forwardedPayload = [0xAB, 0xCD, 0xEF];
             byte[] relayPayload = RelayProxyCallCodec.Encode(
@@ -121,12 +121,11 @@ namespace XServer.Managed.Framework.Tests
         private static void SendCreateAvatarMessage(
             Guid avatarEntityId,
             string accountId,
-            string avatarName,
             string gateNodeId,
             ulong sessionId)
         {
             string payloadText =
-                $$"""{"accountId":"{{accountId}}","avatarId":"{{avatarEntityId:D}}","avatarName":"{{avatarName}}","gateNodeId":"{{gateNodeId}}","sessionId":{{sessionId}}}""";
+                $$"""{"accountId":"{{accountId}}","avatarId":"{{avatarEntityId:D}}","gateNodeId":"{{gateNodeId}}","sessionId":{{sessionId}}}""";
             byte[] payloadUtf8 = Encoding.UTF8.GetBytes(payloadText);
 
             fixed (byte* payloadPtr = payloadUtf8)

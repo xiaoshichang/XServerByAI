@@ -963,7 +963,6 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
     std::string action;
     std::string account_id;
     std::string avatar_id;
-    std::string avatar_name;
     std::string game_node_id;
     std::string gate_node_id;
     std::string game_error;
@@ -991,16 +990,6 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
     {
         logger().Log(xs::core::LogLevel::Warn, "inner", "Gate node rejected create-avatar result payload with an unexpected action.");
         return;
-    }
-
-    const auto avatar_name_iterator = payload_json.find("avatarName");
-    if (avatar_name_iterator != payload_json.end() && avatar_name_iterator->is_string())
-    {
-        avatar_name = avatar_name_iterator->get<std::string>();
-    }
-    if (avatar_name.empty())
-    {
-        avatar_name = avatar_id;
     }
 
     const auto error_iterator = payload_json.find("error");
@@ -1035,8 +1024,7 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
     }
 
     const std::uint32_t request_seq = record->pending_select_avatar_seq;
-    const std::string response_avatar_name = record->avatar_name.empty() ? avatar_name : record->avatar_name;
-    const auto rollback_pending_selection = [this, record, session_id, request_seq, &account_id, &avatar_id, &response_avatar_name, &game_node_id](
+    const auto rollback_pending_selection = [this, record, session_id, request_seq, &account_id, &avatar_id, &game_node_id](
                                                 std::string_view rollback_error,
                                                 bool notify_client)
     {
@@ -1050,7 +1038,6 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
         }
 
         record->avatar_id.clear();
-        record->avatar_name.clear();
         record->game_node_id.clear();
         record->pending_select_avatar_seq = 0U;
 
@@ -1063,7 +1050,6 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
                 false,
                 account_id,
                 avatar_id,
-                response_avatar_name,
                 game_node_id,
                 rollback_error,
                 &transport_error);
@@ -1125,7 +1111,6 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
     }
 
     record->pending_select_avatar_seq = 0U;
-    record->avatar_name = response_avatar_name;
     record->game_node_id = game_node_id;
     record->last_active_unix_ms = CurrentUnixTimeMilliseconds();
 
@@ -1136,7 +1121,6 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
         true,
         account_id,
         avatar_id,
-        response_avatar_name,
         game_node_id,
         {},
         &transport_error);
@@ -1158,8 +1142,8 @@ void GateNode::HandleGameAvatarEntityCreateResultMessage(
         xs::core::LogContextField{"sessionId", ToString(session_id)},
         xs::core::LogContextField{"accountId", account_id},
         xs::core::LogContextField{"avatarId", avatar_id},
-        xs::core::LogContextField{"avatarName", response_avatar_name},
         xs::core::LogContextField{"gameNodeId", game_node_id},
+        xs::core::LogContextField{"routeState", std::string(ClientRouteStateName(client_session->route_state()))},
     };
     logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate confirmed AvatarEntity creation back to the client.", success_context);
 }
@@ -2755,7 +2739,6 @@ void GateNode::HandleClientPayloadReceived(
                 false,
                 record != nullptr ? std::string_view(record->account_id) : std::string_view{},
                 record != nullptr ? std::string_view(record->avatar_id) : std::string_view{},
-                record != nullptr ? std::string_view(record->avatar_name) : std::string_view{},
                 record != nullptr ? std::string_view(record->game_node_id) : std::string_view{},
                 handler_error,
                 &transport_error);
@@ -2841,7 +2824,6 @@ bool GateNode::TryRegisterAuthenticatedClientSession(
         .conversation = session.conversation(),
         .account_id = reservation.account,
         .avatar_id = {},
-        .avatar_name = {},
         .game_node_id = {},
         .gate_node_id = std::string(node_id()),
         .pending_select_avatar_seq = 0U,
@@ -2950,17 +2932,6 @@ bool GateNode::HandleClientSelectAvatarPacket(
         return false;
     }
 
-    std::string avatar_name;
-    const auto avatar_name_iterator = request_json.find("avatarName");
-    if (avatar_name_iterator != request_json.end() && avatar_name_iterator->is_string())
-    {
-        avatar_name = avatar_name_iterator->get<std::string>();
-    }
-    if (avatar_name.empty())
-    {
-        avatar_name = avatar_id;
-    }
-
     if (const auto avatar_iterator = session_ids_by_avatar_.find(avatar_id);
         avatar_iterator != session_ids_by_avatar_.end() &&
         avatar_iterator->second != session.session_id())
@@ -2984,12 +2955,11 @@ bool GateNode::HandleClientSelectAvatarPacket(
 
     ClientSessionRecord next_record = *record;
     next_record.avatar_id = avatar_id;
-    next_record.avatar_name = avatar_name;
     next_record.game_node_id = game_node_id;
     next_record.pending_select_avatar_seq = packet.header.seq;
     next_record.last_active_unix_ms = CurrentUnixTimeMilliseconds();
 
-    if (!SendCreateAvatarEntityRequest(next_record, avatar_name, error_message))
+    if (!SendCreateAvatarEntityRequest(next_record, error_message))
     {
         return false;
     }
@@ -3198,7 +3168,6 @@ bool GateNode::SendClientSelectAvatarResult(
     bool success,
     std::string_view account_id,
     std::string_view avatar_id,
-    std::string_view avatar_name,
     std::string_view game_node_id,
     std::string_view error_message,
     std::string* transport_error_message)
@@ -3227,7 +3196,6 @@ bool GateNode::SendClientSelectAvatarResult(
         {"sessionId", session_id},
         {"accountId", std::string(account_id)},
         {"avatarId", std::string(avatar_id)},
-        {"avatarName", std::string(avatar_name)},
         {"gameNodeId", std::string(game_node_id)},
     };
     if (!success)
@@ -3273,7 +3241,6 @@ bool GateNode::SendClientSelectAvatarResult(
 
 bool GateNode::SendCreateAvatarEntityRequest(
     const ClientSessionRecord& session_record,
-    std::string_view avatar_name,
     std::string* error_message)
 {
     if (inner_network() == nullptr)
@@ -3303,7 +3270,6 @@ bool GateNode::SendCreateAvatarEntityRequest(
     const xs::core::Json payload_json{
         {"accountId", session_record.account_id},
         {"avatarId", session_record.avatar_id},
-        {"avatarName", std::string(avatar_name)},
         {"gateNodeId", session_record.gate_node_id},
         {"sessionId", session_record.session_id},
     };

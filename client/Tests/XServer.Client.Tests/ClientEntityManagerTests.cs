@@ -9,8 +9,8 @@ public sealed class ClientEntityManagerTests
     {
         EntityManager manager = new();
         Guid entityId = Guid.NewGuid();
-        AvatarEntity first = new(entityId, "demo-account", "Avatar-One");
-        AvatarEntity duplicate = new(entityId, "demo-account", "Avatar-Two");
+        AvatarEntity first = new(entityId, "demo-account");
+        AvatarEntity duplicate = new(entityId, "demo-account");
 
         Assert.Equal(EntityManagerErrorCode.None, manager.Register(first));
         Assert.Equal(EntityManagerErrorCode.DuplicateEntityId, manager.Register(duplicate));
@@ -22,7 +22,7 @@ public sealed class ClientEntityManagerTests
     public void SnapshotByTypeFiltersRegisteredEntities()
     {
         EntityManager manager = new();
-        AvatarEntity avatar = new(Guid.NewGuid(), "demo-account", "Avatar-One");
+        AvatarEntity avatar = new(Guid.NewGuid(), "demo-account");
         TestClientEntity marker = new(Guid.NewGuid());
 
         Assert.Equal(EntityManagerErrorCode.None, manager.Register(avatar));

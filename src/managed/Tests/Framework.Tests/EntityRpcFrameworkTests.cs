@@ -21,7 +21,7 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(snapshot));
 
             Assert.True(runtimeState.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(Guid.NewGuid(), "demo-account", "RpcHero", "Gate0", 42),
+                new AvatarEntitySpawnRequest(Guid.NewGuid(), "demo-account", "Gate0", 42),
                 out AvatarEntity? avatar,
                 out string? error));
             Assert.Null(error);
@@ -74,7 +74,7 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, runtimeState.ApplyOwnership(snapshot));
 
             Assert.True(runtimeState.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(Guid.NewGuid(), "demo-account", "RpcHero", "Gate0", 42),
+                new AvatarEntitySpawnRequest(Guid.NewGuid(), "demo-account", "Gate0", 42),
                 out AvatarEntity? avatar,
                 out string? error));
             Assert.Null(error);

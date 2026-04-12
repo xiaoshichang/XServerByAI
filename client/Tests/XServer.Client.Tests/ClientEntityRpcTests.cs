@@ -101,7 +101,6 @@ public sealed class ClientEntityRpcTests
         string? message = service.TryHandleControlPacket(state, packet);
 
         Assert.Equal($"clientRpc delivered entityId={avatar.EntityId:D} rpc=OnSetWeaponResult", message);
-        Assert.True(avatar.LastSetWeaponSucceeded);
         Assert.Equal("gun", avatar.Weapon);
     }
 

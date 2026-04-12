@@ -84,4 +84,4 @@ dotnet run --project .\client\XServer.Client.App\XServer.Client.App.csproj
 ## 当前测试空白
 1. 还没有针对 `Gate` 客户端 RPC 转发链路的独立 C++ 单元测试。
 2. 还没有形成覆盖 `login -> connect -> selectAvatar -> set-weapon` 的自动化端到端测试。
-3. `move` / `buyWeapon` 仍主要用于联调占位，不属于当前稳定主链路。
+3. `move` 仍主要用于联调占位，不属于当前稳定主链路。

@@ -14,7 +14,6 @@ namespace XServer.Managed.Framework.Entities
         ulong SessionId,
         string GateNodeId,
         string GameNodeId,
-        string DisplayName,
         ProxyAddress Proxy);
 
     internal static class OnlineAvatarRegistrationPayloadCodec
@@ -31,7 +30,6 @@ namespace XServer.Managed.Framework.Entities
                 registration.SessionId == 0 ||
                 string.IsNullOrWhiteSpace(registration.GateNodeId) ||
                 string.IsNullOrWhiteSpace(registration.GameNodeId) ||
-                string.IsNullOrWhiteSpace(registration.DisplayName) ||
                 registration.Proxy == null ||
                 registration.Proxy.EntityId != registration.EntityId ||
                 string.IsNullOrWhiteSpace(registration.Proxy.RouteGateNodeId))
@@ -46,7 +44,6 @@ namespace XServer.Managed.Framework.Entities
                 SessionId = registration.SessionId,
                 GateNodeId = registration.GateNodeId,
                 GameNodeId = registration.GameNodeId,
-                DisplayName = registration.DisplayName,
                 ProxyEntityId = registration.Proxy.EntityId.ToString("D"),
                 ProxyRouteGateNodeId = registration.Proxy.RouteGateNodeId,
             };
@@ -68,7 +65,6 @@ namespace XServer.Managed.Framework.Entities
                 decoded.SessionId == 0 ||
                 string.IsNullOrWhiteSpace(decoded.GateNodeId) ||
                 string.IsNullOrWhiteSpace(decoded.GameNodeId) ||
-                string.IsNullOrWhiteSpace(decoded.DisplayName) ||
                 string.IsNullOrWhiteSpace(decoded.ProxyEntityId) ||
                 string.IsNullOrWhiteSpace(decoded.ProxyRouteGateNodeId) ||
                 !Guid.TryParse(decoded.EntityId, out Guid entityId) ||
@@ -85,7 +81,6 @@ namespace XServer.Managed.Framework.Entities
                 decoded.SessionId,
                 decoded.GateNodeId,
                 decoded.GameNodeId,
-                decoded.DisplayName,
                 new ProxyAddress(proxyEntityId, decoded.ProxyRouteGateNodeId));
             return true;
         }
@@ -101,8 +96,6 @@ namespace XServer.Managed.Framework.Entities
             public string? GateNodeId { get; init; }
 
             public string? GameNodeId { get; init; }
-
-            public string? DisplayName { get; init; }
 
             public string? ProxyEntityId { get; init; }
 

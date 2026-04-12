@@ -26,12 +26,12 @@ namespace XServer.Managed.Framework.Tests
             Guid sourceAvatarId = Guid.NewGuid();
             Guid targetAvatarId = Guid.NewGuid();
             Assert.True(runtimeState.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(sourceAvatarId, "account-1", "Hero One", "Gate0", 100),
+                new AvatarEntitySpawnRequest(sourceAvatarId, "account-1", "Gate0", 100),
                 out AvatarEntity? sourceAvatar,
                 out string? sourceError));
             Assert.Null(sourceError);
             Assert.True(runtimeState.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(targetAvatarId, "account-2", "Hero Two", "Gate0", 101),
+                new AvatarEntitySpawnRequest(targetAvatarId, "account-2", "Gate0", 101),
                 out AvatarEntity? targetAvatar,
                 out string? targetError));
             Assert.Null(targetError);
@@ -76,12 +76,12 @@ namespace XServer.Managed.Framework.Tests
             Guid sourceAvatarId = Guid.NewGuid();
             Guid targetAvatarId = Guid.NewGuid();
             Assert.True(sourceRuntime.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(sourceAvatarId, "account-1", "Hero One", "Gate0", 100),
+                new AvatarEntitySpawnRequest(sourceAvatarId, "account-1", "Gate0", 100),
                 out AvatarEntity? sourceAvatar,
                 out string? sourceError));
             Assert.Null(sourceError);
             Assert.True(targetRuntime.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(targetAvatarId, "account-2", "Hero Two", "Gate9", 101),
+                new AvatarEntitySpawnRequest(targetAvatarId, "account-2", "Gate9", 101),
                 out AvatarEntity? targetAvatar,
                 out string? targetError));
             Assert.Null(targetError);
@@ -123,12 +123,12 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(GameNodeRuntimeStateErrorCode.None, remoteRuntime.ApplyOwnership(snapshot));
 
             Assert.True(onlineRuntime.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(Guid.NewGuid(), "account-local", "Local Hero", "Gate0", 1),
+                new AvatarEntitySpawnRequest(Guid.NewGuid(), "account-local", "Gate0", 1),
                 out AvatarEntity? localAvatar,
                 out string? localError));
             Assert.Null(localError);
             Assert.True(remoteRuntime.TryCreateAvatarEntity(
-                new AvatarEntitySpawnRequest(Guid.NewGuid(), "account-remote", "Remote Hero", "Gate9", 2),
+                new AvatarEntitySpawnRequest(Guid.NewGuid(), "account-remote", "Gate9", 2),
                 out AvatarEntity? remoteAvatar,
                 out string? remoteError));
             Assert.Null(remoteError);

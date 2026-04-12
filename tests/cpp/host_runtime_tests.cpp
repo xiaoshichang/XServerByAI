@@ -528,19 +528,18 @@ std::vector<std::byte> EncodeRelayForwardProxyCallPayload(std::string_view sourc
     return buffer;
 }
 
-std::string BuildCreateAvatarPayload(std::string_view account_id, std::string_view avatar_id, std::string_view avatar_name,
+std::string BuildCreateAvatarPayload(std::string_view account_id, std::string_view avatar_id,
                                      std::string_view gate_node_id, std::uint64_t session_id)
 {
     return std::string("{\"accountId\":\"") + std::string(account_id) +
            "\",\"avatarId\":\"" + std::string(avatar_id) +
-           "\",\"avatarName\":\"" + std::string(avatar_name) +
            "\",\"gateNodeId\":\"" + std::string(gate_node_id) +
            "\",\"sessionId\":" + std::to_string(session_id) + "}";
 }
 
 std::string BuildOnlineAvatarRegistrationPayload(std::string_view account_id, std::string_view entity_id,
                                                  std::uint64_t session_id, std::string_view gate_node_id,
-                                                 std::string_view game_node_id, std::string_view display_name,
+                                                 std::string_view game_node_id,
                                                  std::string_view proxy_route_gate_node_id)
 {
     return std::string("{\"accountId\":\"") + std::string(account_id) +
@@ -548,7 +547,6 @@ std::string BuildOnlineAvatarRegistrationPayload(std::string_view account_id, st
            "\",\"sessionId\":" + std::to_string(session_id) +
            ",\"gateNodeId\":\"" + std::string(gate_node_id) +
            "\",\"gameNodeId\":\"" + std::string(game_node_id) +
-           "\",\"displayName\":\"" + std::string(display_name) +
            "\",\"proxyEntityId\":\"" + std::string(entity_id) +
            "\",\"proxyRouteGateNodeId\":\"" + std::string(proxy_route_gate_node_id) +
            "\"}";
@@ -1016,7 +1014,6 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
         77U,
         "Gate7",
         "Game9",
-        "Remote Hero",
         "Gate7");
     const std::span<const std::byte> registration_payload(
         reinterpret_cast<const std::byte*>(registration_payload_text.data()),
@@ -1185,7 +1182,6 @@ void TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar()
     const std::string create_payload_text = BuildCreateAvatarPayload(
         "proxy-account",
         kAvatarEntityId,
-        "Proxy Hero",
         "Gate3",
         84U);
     const xs::host::ManagedMessageView create_message{

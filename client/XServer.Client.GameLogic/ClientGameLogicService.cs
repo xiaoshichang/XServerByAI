@@ -10,7 +10,6 @@ namespace XServer.Client.GameLogic;
 public sealed class ClientGameLogicService
 {
     public const uint DefaultMoveMsgId = 45011U;
-    public const uint DefaultBuyWeaponMsgId = 45012U;
     public const uint DefaultSelectAvatarMsgId = 45013U;
     public const uint BroadcastMessageMsgId = 6201U;
 
@@ -25,7 +24,6 @@ public sealed class ClientGameLogicService
         public bool Success { get; init; }
         public string? AccountId { get; init; }
         public string? AvatarId { get; init; }
-        public string? AvatarName { get; init; }
         public string? GameNodeId { get; init; }
         public ulong SessionId { get; init; }
         public string? Error { get; init; }
@@ -44,7 +42,6 @@ public sealed class ClientGameLogicService
                 action = "selectAvatar",
                 accountId,
                 avatarId = selectedAvatar.AvatarId,
-                avatarName = selectedAvatar.DisplayName,
             });
 
         uint effectiveMsgId = msgId ?? DefaultSelectAvatarMsgId;
@@ -57,7 +54,7 @@ public sealed class ClientGameLogicService
         return new OutboundGameRequest(
             header,
             payload,
-            $"selectAvatar request sent msgId={effectiveMsgId} account={accountId} avatarId={selectedAvatar.AvatarId} avatarName={selectedAvatar.DisplayName}; waiting for server confirmation.",
+            $"selectAvatar request sent msgId={effectiveMsgId} account={accountId} avatarId={selectedAvatar.AvatarId}; waiting for server confirmation.",
             () => state.SelectAvatar(selectedAvatar));
     }
 
@@ -98,53 +95,6 @@ public sealed class ClientGameLogicService
             header,
             payload,
             $"move request sent msgId={effectiveMsgId} pos=({effectiveX}, {effectiveY}, {effectiveZ}) localApply={localApply}",
-            applyAfterSend);
-    }
-
-    public OutboundGameRequest PrepareBuyWeaponRequest(
-        ClientRuntimeState state,
-        string weaponId = "training-sword",
-        int count = 1,
-        bool localApply = true,
-        uint? msgId = null)
-    {
-        ArgumentNullException.ThrowIfNull(state);
-        EnsureAvatarReady(state);
-
-        if (string.IsNullOrWhiteSpace(weaponId))
-        {
-            throw new ArgumentException("weaponId must not be empty.", nameof(weaponId));
-        }
-
-        if (count <= 0)
-        {
-            throw new ArgumentException("count must be greater than zero.", nameof(count));
-        }
-
-        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
-            new
-            {
-                action = "buyWeapon",
-                avatarId = state.Avatar!.AvatarId,
-                weaponId,
-                count,
-            });
-
-        uint effectiveMsgId = msgId ?? DefaultBuyWeaponMsgId;
-        PacketHeader header = PacketCodec.CreateHeader(
-            effectiveMsgId,
-            state.AllocatePacketSequence(),
-            PacketFlags.None,
-            checked((uint)payload.Length));
-
-        Action? applyAfterSend = localApply
-            ? () => state.AddWeapon(weaponId, count)
-            : null;
-
-        return new OutboundGameRequest(
-            header,
-            payload,
-            $"buyWeapon request sent msgId={effectiveMsgId} weaponId={weaponId} count={count} localApply={localApply}",
             applyAfterSend);
     }
 
@@ -213,7 +163,6 @@ public sealed class ClientGameLogicService
         if (!state.ConfirmAvatarSelection(
                 response.AccountId,
                 response.AvatarId,
-                response.AvatarName,
                 response.GameNodeId,
                 response.SessionId))
         {
@@ -222,7 +171,7 @@ public sealed class ClientGameLogicService
         }
 
         return
-            $"selectAvatar confirmed account={response.AccountId} avatarId={response.AvatarId} avatarName={response.AvatarName ?? response.AvatarId} game={response.GameNodeId ?? "<unknown>"} sessionId={response.SessionId}";
+            $"selectAvatar confirmed account={response.AccountId} avatarId={response.AvatarId} game={response.GameNodeId ?? "<unknown>"} sessionId={response.SessionId}";
     }
 
     private static string TryHandleBroadcastPacket(PacketView packet)
@@ -257,13 +206,13 @@ public sealed class ClientGameLogicService
         if (!state.HasAvatar)
         {
             throw new InvalidOperationException(
-                "No local Avatar is bound to the current Account. Run login <url> <account> <password>, connect, then selectAvatar before move/buyWeapon/set-weapon.");
+                "No local Avatar is bound to the current Account. Run login <url> <account> <password>, connect, then selectAvatar before move/set-weapon.");
         }
 
         if (!state.HasConfirmedAvatar)
         {
             throw new InvalidOperationException(
-                "The selected Avatar is still waiting for server confirmation. Wait for the selectAvatar success response before move/buyWeapon/set-weapon.");
+                "The selected Avatar is still waiting for server confirmation. Wait for the selectAvatar success response before move/set-weapon.");
         }
     }
 }

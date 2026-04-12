@@ -388,7 +388,6 @@ namespace XServer.Managed.Framework.Interop
             return new AvatarEntitySpawnRequest(
                 entityId,
                 request.AccountId,
-                string.IsNullOrWhiteSpace(request.AvatarName) ? entityId.ToString("D") : request.AvatarName,
                 request.GateNodeId,
                 request.SessionId);
         }
@@ -601,8 +600,6 @@ namespace XServer.Managed.Framework.Interop
             public string? AccountId { get; init; }
 
             public string? AvatarId { get; init; }
-
-            public string? AvatarName { get; init; }
 
             public string? GateNodeId { get; init; }
 

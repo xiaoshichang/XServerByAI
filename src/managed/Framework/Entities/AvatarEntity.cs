@@ -11,8 +11,6 @@ namespace XServer.Managed.Framework.Entities
 
         public string AccountId { get; private set; } = string.Empty;
 
-        public string DisplayName { get; private set; } = string.Empty;
-
         public ProxyAddress? Proxy { get; private set; }
 
         public IReadOnlyList<ReceivedProxyMessage> ReceivedProxyMessages => _receivedProxyMessages;
@@ -27,7 +25,6 @@ namespace XServer.Managed.Framework.Entities
         public void BindIdentity(
             Guid entityId,
             string accountId,
-            string displayName,
             string routeGateNodeId)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(accountId);
@@ -39,7 +36,6 @@ namespace XServer.Managed.Framework.Entities
             IServerEntityProperties properties = this;
             properties.EntityId = entityId;
             AccountId = accountId;
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? entityId.ToString("D") : displayName;
             RebindProxy(routeGateNodeId);
         }
 

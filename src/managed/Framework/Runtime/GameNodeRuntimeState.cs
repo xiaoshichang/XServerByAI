@@ -388,7 +388,6 @@ namespace XServer.Managed.Framework.Runtime
                     request.SessionId,
                     request.RouteGateNodeId,
                     _nodeId,
-                    existingAvatar.DisplayName,
                     reboundProxy);
                 if (!TryRegisterAvatarWithOnlineStub(existingAvatar, existingRegistration, out string existingRegisterError))
                 {
@@ -405,7 +404,6 @@ namespace XServer.Managed.Framework.Runtime
             createdAvatar.BindIdentity(
                 request.EntityId,
                 request.AccountId,
-                request.AvatarName,
                 request.RouteGateNodeId);
             createdAvatar.SetMessageSender(this);
             createdAvatar.SetNativeTimerScheduler(_nativeTimerScheduler);
@@ -425,7 +423,6 @@ namespace XServer.Managed.Framework.Runtime
                 request.SessionId,
                 request.RouteGateNodeId,
                 _nodeId,
-                createdAvatar.DisplayName,
                 createdAvatar.Proxy!);
             if (!TryRegisterAvatarWithOnlineStub(createdAvatar, registration, out string registerError))
             {

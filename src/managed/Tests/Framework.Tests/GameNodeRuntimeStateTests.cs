@@ -194,7 +194,6 @@ namespace XServer.Managed.Framework.Tests
             AvatarEntitySpawnRequest request = new(
                 avatarEntityId,
                 "account-alpha",
-                "Hero Alpha",
                 "Gate7",
                 42);
 
@@ -204,7 +203,6 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal(EntityLifecycleState.Active, avatar!.LifecycleState);
             Assert.Equal(avatarEntityId, avatar.EntityId);
             Assert.Equal("account-alpha", avatar.AccountId);
-            Assert.Equal("Hero Alpha", avatar.DisplayName);
             Assert.NotNull(avatar.Proxy);
             Assert.Equal("Gate7", avatar.Proxy!.RouteGateNodeId);
             Assert.True(avatarRuntime.EntityManager.Contains(avatar.EntityId));

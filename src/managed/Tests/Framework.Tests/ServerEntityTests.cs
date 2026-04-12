@@ -66,14 +66,14 @@ namespace XServer.Managed.Framework.Tests
             Guid reassignedEntityId = Guid.NewGuid();
             serverEntityProperties.EntityId = reassignedEntityId;
             baseProperties.BaseScore = 42;
-            derivedProperties.DisplayName = "display-name";
+            derivedProperties.Label = "label";
             derivedProperties.ServerSequence = 7;
             derivedProperties.MigrationOnlySequence = 11;
             derivedProperties.PersistenceOnlySnapshot = "snapshot";
 
             Assert.Equal(reassignedEntityId, entity.EntityId);
             Assert.Equal(42, entity.BaseScore);
-            Assert.Equal("display-name", entity.DisplayName);
+            Assert.Equal("label", entity.Label);
             Assert.Equal(7L, entity.ServerSequence);
             Assert.Equal(11, entity.MigrationOnlySequence);
             Assert.Equal("snapshot", entity.PersistenceOnlySnapshot);
@@ -86,7 +86,7 @@ namespace XServer.Managed.Framework.Tests
             EntityPropertyAttribute? serverOnlyAttribute =
                 GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__ServerSequence");
             EntityPropertyAttribute? clientServerAttribute =
-                GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__DisplayName");
+                GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__Label");
             EntityPropertyAttribute? migrationOnlyAttribute =
                 GetEntityPropertyAttribute(typeof(DerivedPropertyEntity), "__MigrationOnlySequence");
             EntityPropertyAttribute? persistenceOnlyAttribute =
@@ -195,7 +195,7 @@ namespace XServer.Managed.Framework.Tests
         public int RuntimeOnlyCounter { get; set; }
 
         [EntityProperty(EntityPropertyFlags.ClientServer)]
-        protected string __DisplayName = string.Empty;
+        protected string __Label = string.Empty;
 
         [EntityProperty(EntityPropertyFlags.ServerOnly)]
         protected long __ServerSequence;

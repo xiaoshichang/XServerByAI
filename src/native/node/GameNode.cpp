@@ -49,7 +49,6 @@ struct AvatarCreateRequestPayload final
 {
     std::string account_id{};
     std::string avatar_id{};
-    std::string avatar_name{};
     std::string gate_node_id{};
     std::uint64_t session_id{0U};
 };
@@ -234,17 +233,6 @@ bool TryParseAvatarCreateRequestPayload(
         !TryReadRequiredJsonUInt64(payload_json, "sessionId", &request.session_id, error_message))
     {
         return false;
-    }
-
-    const auto avatar_name_iterator = payload_json.find("avatarName");
-    if (avatar_name_iterator != payload_json.end() && avatar_name_iterator->is_string())
-    {
-        request.avatar_name = avatar_name_iterator->get<std::string>();
-    }
-
-    if (request.avatar_name.empty())
-    {
-        request.avatar_name = request.avatar_id;
     }
 
     *output = std::move(request);
@@ -1770,7 +1758,6 @@ bool GameNode::SendGateAvatarEntityCreateResult(
         {"sessionId", request.session_id},
         {"accountId", request.account_id},
         {"avatarId", request.avatar_id},
-        {"avatarName", request.avatar_name},
         {"gameNodeId", std::string(node_id())},
         {"gateNodeId", request.gate_node_id},
     };

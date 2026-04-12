@@ -52,7 +52,6 @@
 | msgId | CanonicalName | Direction | Status | Description |
 | --- | --- | --- | --- | --- |
 | `45011` | `Client.Move` | `Client -> Gate` | `Experimental` | 当前模拟客户端默认占位消息号，主线 `Gate` 尚未处理 |
-| `45012` | `Client.BuyWeapon` | `Client -> Gate` | `Experimental` | 当前模拟客户端默认占位消息号，主线 `Gate` 尚未处理 |
 
 ## 命名约定
 1. 规范英文名使用 `PascalCase` 片段并以 `.` 分隔。
