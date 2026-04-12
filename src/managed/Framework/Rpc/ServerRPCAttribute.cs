@@ -4,8 +4,3 @@ namespace XServer.Managed.Framework.Rpc;
 public class ServerRPCAttribute : Attribute
 {
 }
-
-[AttributeUsage(AttributeTargets.Method, Inherited = true, AllowMultiple = false)]
-public sealed class ServerRpcAttribute : ServerRPCAttribute
-{
-}
