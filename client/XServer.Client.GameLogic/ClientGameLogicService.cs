@@ -148,6 +148,21 @@ public sealed class ClientGameLogicService
             applyAfterSend);
     }
 
+    public string SendSetWeaponRpc(ClientRuntimeState state, string weapon)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        EnsureAvatarReady(state);
+
+        if (string.IsNullOrWhiteSpace(weapon))
+        {
+            throw new ArgumentException("weapon must not be empty.", nameof(weapon));
+        }
+
+        state.Avatar!.CallServerRpc("SetWeapon", weapon);
+        return
+            $"set-weapon rpc sent msgId={EntityRpcMessageIds.ClientToServerEntityRpcMsgId} entityId={state.Avatar.AvatarId} weapon={weapon}";
+    }
+
     public string? TryHandleControlPacket(ClientRuntimeState state, PacketView packet)
     {
         ArgumentNullException.ThrowIfNull(state);
@@ -242,13 +257,13 @@ public sealed class ClientGameLogicService
         if (!state.HasAvatar)
         {
             throw new InvalidOperationException(
-                "No local Avatar is bound to the current Account. Run login <url> <account> <password>, connect, then selectAvatar before move/buyWeapon.");
+                "No local Avatar is bound to the current Account. Run login <url> <account> <password>, connect, then selectAvatar before move/buyWeapon/set-weapon.");
         }
 
         if (!state.HasConfirmedAvatar)
         {
             throw new InvalidOperationException(
-                "The selected Avatar is still waiting for server confirmation. Wait for the selectAvatar success response before move/buyWeapon.");
+                "The selected Avatar is still waiting for server confirmation. Wait for the selectAvatar success response before move/buyWeapon/set-weapon.");
         }
     }
 }

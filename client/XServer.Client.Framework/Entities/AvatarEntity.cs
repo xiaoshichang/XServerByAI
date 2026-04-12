@@ -26,6 +26,8 @@ public sealed class AvatarEntity : ClientEntity
 
     public Dictionary<string, int> WeaponInventory { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public string Weapon { get; private set; } = string.Empty;
+
     public bool? LastSetWeaponSucceeded { get; private set; }
 
     public void UpdateDisplayName(string? displayName)
@@ -37,8 +39,12 @@ public sealed class AvatarEntity : ClientEntity
     }
 
     [ClientRPC]
-    public void OnSetWeaponResult(bool succ)
+    public void OnSetWeaponResult(string weapon, bool succ)
     {
         LastSetWeaponSucceeded = succ;
+        if (succ && !string.IsNullOrWhiteSpace(weapon))
+        {
+            Weapon = weapon;
+        }
     }
 }

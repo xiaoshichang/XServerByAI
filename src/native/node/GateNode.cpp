@@ -37,6 +37,7 @@ constexpr std::uint32_t kDefaultHeartbeatTimeoutMs = 15000U;
 constexpr std::uint64_t kConversationReservationLifetimeMs = 30000U;
 constexpr std::uint32_t kClientHelloMsgId = 45010U;
 constexpr std::uint32_t kClientSelectAvatarMsgId = 45013U;
+constexpr std::uint32_t kClientEntityRpcMsgId = 6302U;
 constexpr std::uint32_t kGateCreateAvatarEntityMsgId = 2003U;
 constexpr std::uint32_t kGameAvatarEntityCreateResultMsgId = 2004U;
 
@@ -2790,6 +2791,24 @@ void GateNode::HandleClientPayloadReceived(
         return;
     }
 
+    if (packet.header.msg_id == kClientEntityRpcMsgId)
+    {
+        std::string handler_error;
+        if (!HandleClientEntityRpcPacket(session, packet, &handler_error))
+        {
+            const std::array<xs::core::LogContextField, 6> context{
+                xs::core::LogContextField{"nodeId", std::string(node_id())},
+                xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+                xs::core::LogContextField{"conversation", std::to_string(session.conversation())},
+                xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+                xs::core::LogContextField{"seq", std::to_string(packet.header.seq)},
+                xs::core::LogContextField{"error", handler_error},
+            };
+            logger().Log(xs::core::LogLevel::Warn, "client.kcp", "Gate rejected a client entity RPC request.", context);
+        }
+        return;
+    }
+
     const std::array<xs::core::LogContextField, 5> context{
         xs::core::LogContextField{"nodeId", std::string(node_id())},
         xs::core::LogContextField{"sessionId", ToString(session.session_id())},
@@ -2993,6 +3012,181 @@ bool GateNode::HandleClientSelectAvatarPacket(
         xs::core::LogContextField{"routeState", std::string(ClientRouteStateName(session.route_state()))},
     };
     logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate queued avatar selection and is waiting for Game create confirmation.", context);
+
+    ClearOptionalError(error_message);
+    return true;
+}
+
+bool GateNode::HandleClientEntityRpcPacket(
+    ClientSession& session,
+    const xs::net::PacketView& packet,
+    std::string* error_message)
+{
+    if (packet.header.flags != 0U || packet.header.seq == xs::net::kPacketSeqNone)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client entity RPC packet envelope is invalid.";
+        }
+        return false;
+    }
+
+    ClientSessionRecord* record = client_session_record(session.session_id());
+    if (record == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Authenticated client session record is missing.";
+        }
+        return false;
+    }
+
+    if (record->closed)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Authenticated client session is already closed.";
+        }
+        return false;
+    }
+
+    if (record->avatar_id.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client session does not have a bound avatar yet.";
+        }
+        return false;
+    }
+
+    if (record->game_node_id.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client session does not have a target Game route yet.";
+        }
+        return false;
+    }
+
+    if (record->gate_node_id != node_id())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client session route gate does not match the current Gate.";
+        }
+        return false;
+    }
+
+    const auto avatar_iterator = session_ids_by_avatar_.find(record->avatar_id);
+    if (avatar_iterator == session_ids_by_avatar_.end() || avatar_iterator->second != session.session_id())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Client session avatar binding is stale.";
+        }
+        return false;
+    }
+
+    InnerNetworkSession* target_session = remote_session(record->game_node_id);
+    if (target_session == nullptr ||
+        target_session->process_type != xs::core::ProcessType::Game ||
+        target_session->connection_state != ipc::ZmqConnectionState::Connected ||
+        !target_session->registered ||
+        !target_session->inner_network_ready ||
+        target_session->routing_id.empty())
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Target Game node is unavailable for client entity RPC forwarding.";
+        }
+        return false;
+    }
+
+    if (inner_network() == nullptr)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Gate inner network is unavailable.";
+        }
+        return false;
+    }
+
+    const xs::net::RelayForwardProxyCall relay_message{
+        .source_game_node_id = record->game_node_id,
+        .route_gate_node_id = record->gate_node_id,
+        .target_entity_id = record->avatar_id,
+        .proxy_call_msg_id = packet.header.msg_id,
+        .relay_flags = 0U,
+        .payload = std::vector<std::byte>(packet.payload.begin(), packet.payload.end()),
+    };
+
+    std::size_t relay_wire_size = 0U;
+    const xs::net::RelayCodecErrorCode wire_size_result =
+        xs::net::GetRelayForwardProxyCallWireSize(relay_message, &relay_wire_size);
+    if (wire_size_result != xs::net::RelayCodecErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Failed to size client entity RPC relay payload: " +
+                std::string(xs::net::RelayCodecErrorMessage(wire_size_result));
+        }
+        return false;
+    }
+
+    std::vector<std::byte> relay_payload(relay_wire_size);
+    const xs::net::RelayCodecErrorCode encode_relay_result =
+        xs::net::EncodeRelayForwardProxyCall(relay_message, relay_payload);
+    if (encode_relay_result != xs::net::RelayCodecErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Failed to encode client entity RPC relay payload: " +
+                std::string(xs::net::RelayCodecErrorMessage(encode_relay_result));
+        }
+        return false;
+    }
+
+    const xs::net::PacketHeader relay_header = xs::net::MakePacketHeader(
+        xs::net::kRelayForwardProxyCallMsgId,
+        xs::net::kPacketSeqNone,
+        0U,
+        static_cast<std::uint32_t>(relay_payload.size()));
+
+    std::vector<std::byte> relay_packet(xs::net::kPacketHeaderSize + relay_payload.size());
+    const xs::net::PacketCodecErrorCode encode_packet_result =
+        xs::net::EncodePacket(relay_header, relay_payload, relay_packet);
+    if (encode_packet_result != xs::net::PacketCodecErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = "Failed to encode client entity RPC relay packet: " +
+                std::string(xs::net::PacketCodecErrorMessage(encode_packet_result));
+        }
+        return false;
+    }
+
+    const NodeErrorCode send_result = inner_network()->Send(target_session->routing_id, relay_packet);
+    if (send_result != NodeErrorCode::None)
+    {
+        if (error_message != nullptr)
+        {
+            *error_message = std::string(inner_network()->last_error_message());
+        }
+        return false;
+    }
+
+    record->last_active_unix_ms = CurrentUnixTimeMilliseconds();
+
+    const std::array<xs::core::LogContextField, 7> context{
+        xs::core::LogContextField{"nodeId", std::string(node_id())},
+        xs::core::LogContextField{"sessionId", ToString(session.session_id())},
+        xs::core::LogContextField{"accountId", record->account_id},
+        xs::core::LogContextField{"avatarId", record->avatar_id},
+        xs::core::LogContextField{"gameNodeId", record->game_node_id},
+        xs::core::LogContextField{"msgId", std::to_string(packet.header.msg_id)},
+        xs::core::LogContextField{"payloadBytes", ToString(static_cast<std::uint64_t>(packet.payload.size()))},
+    };
+    logger().Log(xs::core::LogLevel::Info, "client.kcp", "Gate forwarded client entity RPC to Game.", context);
 
     ClearOptionalError(error_message);
     return true;

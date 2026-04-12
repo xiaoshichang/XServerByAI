@@ -33,7 +33,7 @@ namespace XServer.Managed.Framework.Tests
                 new EntityMessage(EntityRpcMessageIds.ClientToServerEntityRpcMsgId, payload));
 
             Assert.Equal(ProxyCallErrorCode.None, result);
-            Assert.Equal("gun", avatar.EquippedWeaponId);
+            Assert.Equal("gun", avatar.Weapon);
             Assert.Equal(1, transport.ClientProxyForwardCallCount);
             Assert.Equal(avatar.EntityId, transport.LastClientProxyTargetEntityId);
             Assert.Equal("Gate0", transport.LastClientProxyRouteGateNodeId);
@@ -50,12 +50,13 @@ namespace XServer.Managed.Framework.Tests
             Assert.Equal("OnSetWeaponResult", envelope.RpcName);
             Assert.True(EntityRpcJsonCodec.TryBindArguments(
                 envelope,
-                [typeof(bool)],
+                [typeof(string), typeof(bool)],
                 out object?[] arguments,
                 out errorCode,
                 out errorMessage));
             Assert.Equal(EntityRpcDispatchErrorCode.None, errorCode);
-            Assert.True(Assert.IsType<bool>(Assert.Single(arguments)));
+            Assert.Equal("gun", Assert.IsType<string>(arguments[0]));
+            Assert.True(Assert.IsType<bool>(arguments[1]));
         }
 
         [Fact]
@@ -86,7 +87,7 @@ namespace XServer.Managed.Framework.Tests
 
             Assert.Equal(ProxyCallErrorCode.EntityRejected, result);
             Assert.Equal(0, transport.ClientProxyForwardCallCount);
-            Assert.Equal(string.Empty, avatar.EquippedWeaponId);
+            Assert.Equal(string.Empty, avatar.Weapon);
         }
     }
 }

@@ -45,13 +45,50 @@ public sealed class ClientEntityRpcTests
     }
 
     [Fact]
+    public void CallServerRpc_WithPacketSender_WrapsPayloadIntoClientPacketAndRecordsSend()
+    {
+        ClientRuntimeState state = new();
+        PacketHeader sentHeader = default;
+        ReadOnlyMemory<byte> sentPayload = ReadOnlyMemory<byte>.Empty;
+        ClientEntityRpcPacketSender sender = new(
+            state,
+            (header, payload) =>
+            {
+                sentHeader = header;
+                sentPayload = payload;
+            });
+
+        state.ConfigureRpcSender(sender);
+        state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+
+        AvatarEntity avatar = state.SelectAvatar();
+        avatar.CallServerRPC("SetWeapon", "gun");
+
+        Assert.Equal(EntityRpcMessageIds.ClientToServerEntityRpcMsgId, sentHeader.MsgId);
+        Assert.Equal(PacketFlags.None, sentHeader.Flags);
+        Assert.Equal(1U, sentHeader.Seq);
+        Assert.Equal((uint)sentPayload.Length, sentHeader.Length);
+        Assert.Equal(1, state.SentPacketCount);
+        Assert.Equal(2U, state.NextPacketSequence);
+        Assert.True(EntityRpcJsonCodec.TryDecode(
+            sentPayload.ToArray(),
+            out EntityRpcInvocationEnvelope envelope,
+            out EntityRpcDispatchErrorCode errorCode,
+            out string errorMessage));
+        Assert.Equal(EntityRpcDispatchErrorCode.None, errorCode);
+        Assert.Equal(string.Empty, errorMessage);
+        Assert.Equal(avatar.EntityId, envelope.EntityId);
+        Assert.Equal("SetWeapon", envelope.RpcName);
+    }
+
+    [Fact]
     public void TryHandleControlPacket_DeliversServerRpcToTargetAvatar()
     {
         ClientRuntimeState state = new();
         state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
         AvatarEntity avatar = state.SelectAvatar();
 
-        byte[] payload = EntityRpcJsonCodec.Encode(avatar.EntityId, "OnSetWeaponResult", true);
+        byte[] payload = EntityRpcJsonCodec.Encode(avatar.EntityId, "OnSetWeaponResult", "gun", true);
         PacketView packet = new(
             PacketCodec.CreateHeader(
                 EntityRpcMessageIds.ServerToClientEntityRpcMsgId,
@@ -65,6 +102,7 @@ public sealed class ClientEntityRpcTests
 
         Assert.Equal($"clientRpc delivered entityId={avatar.EntityId:D} rpc=OnSetWeaponResult", message);
         Assert.True(avatar.LastSetWeaponSucceeded);
+        Assert.Equal("gun", avatar.Weapon);
     }
 
     private static ResolvedClientProfile CreateProfile(

@@ -126,6 +126,10 @@ class GateNode final : public ServerNode
         ClientSession& session,
         const xs::net::PacketView& packet,
         std::string* error_message);
+    [[nodiscard]] bool HandleClientEntityRpcPacket(
+        ClientSession& session,
+        const xs::net::PacketView& packet,
+        std::string* error_message);
     [[nodiscard]] bool SendClientSelectAvatarResult(
         std::uint64_t session_id,
         std::uint32_t request_seq,

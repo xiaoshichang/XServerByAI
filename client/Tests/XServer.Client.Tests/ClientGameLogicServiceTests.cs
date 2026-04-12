@@ -2,6 +2,7 @@ using System.Text.Json;
 using XServer.Client.Configuration;
 using XServer.Client.Entities;
 using XServer.Client.GameLogic;
+using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
 
@@ -86,6 +87,23 @@ public sealed class ClientGameLogicServiceTests
     }
 
     [Fact]
+    public void SendSetWeaponRpc_UsesAvatarEntityRpcSurface()
+    {
+        ClientRuntimeState state = CreateReadyAvatarState();
+        CapturingClientEntityRpcSender sender = new();
+        state.ConfigureRpcSender(sender);
+        ClientGameLogicService service = new();
+
+        string summary = service.SendSetWeaponRpc(state, "gun");
+
+        ClientEntityRpcRequest request = Assert.Single(sender.Requests);
+        Assert.Contains("set-weapon rpc sent msgId=6302", summary, StringComparison.Ordinal);
+        Assert.Equal(EntityRpcMessageIds.ClientToServerEntityRpcMsgId, request.MsgId);
+        Assert.Equal(state.Avatar!.EntityId, request.EntityId);
+        Assert.Equal("SetWeapon", request.RpcName);
+    }
+
+    [Fact]
     public void TryHandleControlPacketFormatsBoardcaseBroadcast()
     {
         ClientRuntimeState state = new();
@@ -128,5 +146,16 @@ public sealed class ClientGameLogicServiceTests
             "127.0.0.1",
             4100,
             endpointSource);
+    }
+
+    private sealed class CapturingClientEntityRpcSender : IClientEntityRpcSender
+    {
+        public List<ClientEntityRpcRequest> Requests { get; } = [];
+
+        public void SendServerRpc(ClientEntity sourceEntity, ClientEntityRpcRequest request)
+        {
+            _ = sourceEntity;
+            Requests.Add(request);
+        }
     }
 }

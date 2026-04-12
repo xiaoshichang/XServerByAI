@@ -2,6 +2,7 @@ using System.Text;
 using XServer.Client.Auth;
 using XServer.Client.Configuration;
 using XServer.Client.GameLogic;
+using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Client.Transport;
 using XServer.Managed.Foundation.Protocol;
@@ -126,6 +127,11 @@ public sealed class ClientConsoleApp
             await HandleBuyWeaponAsync(command, cancellationToken);
             return true;
 
+        case "setweapon":
+        case "set-weapon":
+            await HandleSetWeaponAsync(command, cancellationToken);
+            return true;
+
         case "script":
             return await HandleScriptCommandAsync(command, cancellationToken);
 
@@ -178,6 +184,7 @@ public sealed class ClientConsoleApp
             _state.MarkDisconnected();
             throw;
         }
+        _state.ConfigureRpcSender(CreateRpcSender(transport));
         await _output.WriteLineAsync(
             $"connected remote={profile.DisplayEndpoint} gate={profile.GateNodeId} conv={profile.Conversation} source={profile.EndpointSource}; session primed with clientHello");
     }
@@ -289,6 +296,16 @@ public sealed class ClientConsoleApp
         await SendGameRequestAsync(request, cancellationToken);
     }
 
+    private async Task HandleSetWeaponAsync(ParsedCommand command, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        RequireTransport();
+
+        string weapon = ResolveSetWeapon(command);
+        string summary = _gameLogic.SendSetWeaponRpc(_state, weapon);
+        await _output.WriteLineAsync(summary);
+    }
+
     private async Task<bool> HandleScriptCommandAsync(ParsedCommand command, CancellationToken cancellationToken)
     {
         string path = command.GetRequiredString("path");
@@ -323,6 +340,7 @@ public sealed class ClientConsoleApp
             $"  selectAvatar [msgId={ClientGameLogicService.DefaultSelectAvatarMsgId}]",
             $"  move [x=1] [y=2] [z=0] [msgId={ClientGameLogicService.DefaultMoveMsgId}] [localApply=true]",
             $"  buyWeapon [weaponId=rifle] [count=1] [msgId={ClientGameLogicService.DefaultBuyWeaponMsgId}] [localApply=true]",
+            "  set-weapon <weapon>",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
             "",
@@ -332,6 +350,7 @@ public sealed class ClientConsoleApp
             "  selectAvatar sends a placeholder choose-avatar request to Gate and locally enters a waiting-for-confirmation state.",
             "  selectAvatar now always generates temporary random avatarId/avatarName placeholders locally.",
             "  Avatar-dependent commands become available only after Gate confirms AvatarEntity creation.",
+            "  set-weapon sends a client entity RPC [msgId=6302] to the selected Avatar on Game.",
             $"  demo default login url is {DefaultGate1AuthUrl} (Gate1 auth).",
             "  move/buyWeapon use temporary test-range msgIds by default and can be overridden.",
             "  connect reads configs/local-dev.json and Gate0 by default.",
@@ -350,6 +369,7 @@ public sealed class ClientConsoleApp
 
     private async Task DisposeTransportAsync()
     {
+        _state.ConfigureRpcSender(null);
         if (_transport is null)
         {
             return;
@@ -388,9 +408,42 @@ public sealed class ClientConsoleApp
             $"recv raw payloadBytes={payload.Length} decodeError=\"{error}\" preview={HexPreview(payload.Span, 48)}");
     }
 
+    private IClientEntityRpcSender CreateRpcSender(ClientTransport transport)
+    {
+        return new ClientEntityRpcPacketSender(
+            _state,
+            (header, payload) => transport.SendPacketAsync(header, payload, CancellationToken.None).GetAwaiter().GetResult());
+    }
+
     private ClientTransport RequireTransport()
     {
         return _transport ?? throw new InvalidOperationException("The simulated client is not connected. Run 'connect' first.");
+    }
+
+    private static string ResolveSetWeapon(ParsedCommand command)
+    {
+        if (command.Positionals.Count > 1)
+        {
+            throw new ArgumentException("set-weapon expects exactly one weapon name, for example: set-weapon gun");
+        }
+
+        if (command.Positionals.Count == 1)
+        {
+            if (command.HasOption("weapon"))
+            {
+                throw new ArgumentException("set-weapon accepts either a positional weapon name or weapon=..., not both.");
+            }
+
+            return command.Positionals[0];
+        }
+
+        string? optionWeapon = command.GetOptionalString("weapon");
+        if (!string.IsNullOrWhiteSpace(optionWeapon))
+        {
+            return optionWeapon;
+        }
+
+        throw new ArgumentException("set-weapon expects a weapon name, for example: set-weapon gun");
     }
 
     private static (string Url, string Account, string Password) ResolveLoginRequest(ParsedCommand command)

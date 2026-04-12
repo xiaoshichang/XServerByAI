@@ -17,7 +17,7 @@ namespace XServer.Managed.Framework.Entities
 
         public IReadOnlyList<ReceivedProxyMessage> ReceivedProxyMessages => _receivedProxyMessages;
 
-        public string EquippedWeaponId { get; private set; } = string.Empty;
+        public string Weapon { get; private set; } = string.Empty;
 
         public override bool IsMigratable()
         {
@@ -55,11 +55,14 @@ namespace XServer.Managed.Framework.Entities
         }
 
         [ServerRPC]
-        public void SetWeapon(string w)
+        public void SetWeapon(string weapon)
         {
-            ArgumentException.ThrowIfNullOrWhiteSpace(w);
-            EquippedWeaponId = w;
-            CallClientRpc("OnSetWeaponResult", true);
+            ArgumentException.ThrowIfNullOrWhiteSpace(weapon);
+            Weapon = weapon;
+            NativeLoggerBridge.Info(
+                nameof(AvatarEntity),
+                $"AvatarEntity {EntityId:D} updated Weapon accountId={AccountId} weapon={Weapon}.");
+            CallClientRpc("OnSetWeaponResult", Weapon, true);
         }
 
         protected override ProxyCallErrorCode OnProxyCall(EntityMessage message)

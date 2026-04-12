@@ -335,12 +335,15 @@ public sealed class ClientRuntimeState
         }
         else
         {
+            string currentWeapon = string.IsNullOrWhiteSpace(Avatar.Weapon)
+                ? "<none>"
+                : Avatar.Weapon;
             string weapons = Avatar.WeaponInventory.Count == 0
                 ? "<empty>"
                 : string.Join(", ", Avatar.WeaponInventory.Select(entry => $"{entry.Key}x{entry.Value}"));
             lines.Add(
                 $"Avatar: id={Avatar.AvatarId}, account={Avatar.AccountId}, name={Avatar.DisplayName}, " +
-                $"pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapons={weapons}");
+                $"pos=({Avatar.PositionX}, {Avatar.PositionY}, {Avatar.PositionZ}), weapon={currentWeapon}, weapons={weapons}");
         }
 
         return string.Join(Environment.NewLine, lines);
