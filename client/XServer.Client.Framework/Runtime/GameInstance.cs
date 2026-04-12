@@ -5,9 +5,9 @@ using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
 
-namespace XServer.Client.GameLogic;
+namespace XServer.Client.Runtime;
 
-public sealed class ClientGameLogicService
+public sealed class GameInstance
 {
     public const uint DefaultMoveMsgId = 45011U;
     public const uint DefaultSelectAvatarMsgId = 45013U;

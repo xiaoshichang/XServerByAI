@@ -1,6 +1,5 @@
 using XServer.Client.Configuration;
 using XServer.Client.Entities;
-using XServer.Client.GameLogic;
 using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
@@ -97,7 +96,7 @@ public sealed class ClientEntityRpcTests
                 checked((uint)payload.Length)),
             payload);
 
-        ClientGameLogicService service = new();
+        GameInstance service = new();
         string? message = service.TryHandleControlPacket(state, packet);
 
         Assert.Equal($"clientRpc delivered entityId={avatar.EntityId:D} rpc=OnSetWeaponResult", message);

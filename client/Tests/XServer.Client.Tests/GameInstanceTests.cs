@@ -1,14 +1,13 @@
 using System.Text.Json;
 using XServer.Client.Configuration;
 using XServer.Client.Entities;
-using XServer.Client.GameLogic;
 using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
 
 namespace XServer.Client.Tests;
 
-public sealed class ClientGameLogicServiceTests
+public sealed class GameInstanceTests
 {
     [Fact]
     public void PrepareSelectAvatarRequestDefersLocalSelectionUntilSendCompletes()
@@ -16,11 +15,11 @@ public sealed class ClientGameLogicServiceTests
         ClientRuntimeState state = new();
         state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        ClientGameLogicService service = new();
+        GameInstance service = new();
         OutboundGameRequest request = service.PrepareSelectAvatarRequest(state);
 
         Assert.False(state.HasAvatar);
-        Assert.Equal(ClientGameLogicService.DefaultSelectAvatarMsgId, request.Header.MsgId);
+        Assert.Equal(GameInstance.DefaultSelectAvatarMsgId, request.Header.MsgId);
 
         request.ApplyAfterSend?.Invoke();
 
@@ -36,7 +35,7 @@ public sealed class ClientGameLogicServiceTests
         ClientRuntimeState state = new();
         state.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
 
-        ClientGameLogicService service = new();
+        GameInstance service = new();
         OutboundGameRequest request = service.PrepareSelectAvatarRequest(state);
         request.ApplyAfterSend?.Invoke();
 
@@ -54,7 +53,7 @@ public sealed class ClientGameLogicServiceTests
 
         PacketView packet = new(
             PacketCodec.CreateHeader(
-                ClientGameLogicService.DefaultSelectAvatarMsgId,
+                GameInstance.DefaultSelectAvatarMsgId,
                 2U,
                 PacketFlags.Response,
                 checked((uint)payload.Length)),
@@ -74,7 +73,7 @@ public sealed class ClientGameLogicServiceTests
     public void PrepareMoveRequestAppliesLocalPositionWhenRequested()
     {
         ClientRuntimeState state = CreateReadyAvatarState();
-        ClientGameLogicService service = new();
+        GameInstance service = new();
 
         OutboundGameRequest request = service.PrepareMoveRequest(state, x: 1.5f, y: 2.5f, z: -3.0f, localApply: true);
 
@@ -91,7 +90,7 @@ public sealed class ClientGameLogicServiceTests
         ClientRuntimeState state = CreateReadyAvatarState();
         CapturingClientEntityRpcSender sender = new();
         state.ConfigureRpcSender(sender);
-        ClientGameLogicService service = new();
+        GameInstance service = new();
 
         string summary = service.SendSetWeaponRpc(state, "gun");
 
@@ -106,12 +105,12 @@ public sealed class ClientGameLogicServiceTests
     public void TryHandleControlPacketFormatsBoardcaseBroadcast()
     {
         ClientRuntimeState state = new();
-        ClientGameLogicService service = new();
+        GameInstance service = new();
         byte[] payload = "hello"u8.ToArray();
 
         PacketView packet = new(
             PacketCodec.CreateHeader(
-                ClientGameLogicService.BroadcastMessageMsgId,
+                GameInstance.BroadcastMessageMsgId,
                 0U,
                 PacketFlags.None,
                 checked((uint)payload.Length)),

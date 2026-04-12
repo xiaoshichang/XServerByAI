@@ -22,9 +22,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\XServer.Client.App\XServer.Client.App.csproj" />
-    <ProjectReference Include="..\..\XServer.Client.Framework\XServer.Client.Framework.csproj" />
-    <ProjectReference Include="..\..\XServer.Client.GameLogic\XServer.Client.GameLogic.csproj" />
-    <ProjectReference Include="..\..\..\src\managed\Foundation\Foundation.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,7 +1,6 @@
 using System.Text;
 using XServer.Client.Auth;
 using XServer.Client.Configuration;
-using XServer.Client.GameLogic;
 using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Client.Transport;
@@ -18,7 +17,7 @@ public sealed class ClientConsoleApp
     private readonly ClientLaunchOptions _launchOptions;
     private readonly TextWriter _output;
     private readonly TextWriter _error;
-    private readonly ClientGameLogicService _gameLogic = new();
+    private readonly GameInstance _gameInstance = new();
     private readonly ClientRuntimeState _state = new();
 
     private ClientTransport? _transport;
@@ -243,9 +242,9 @@ public sealed class ClientConsoleApp
         }
 
         uint? msgId = command.HasOption("msgId")
-            ? command.GetUInt32OrDefault("msgId", ClientGameLogicService.DefaultSelectAvatarMsgId)
+            ? command.GetUInt32OrDefault("msgId", GameInstance.DefaultSelectAvatarMsgId)
             : null;
-        OutboundGameRequest request = _gameLogic.PrepareSelectAvatarRequest(_state, msgId);
+        OutboundGameRequest request = _gameInstance.PrepareSelectAvatarRequest(_state, msgId);
         await SendGameRequestAsync(request, cancellationToken);
     }
 
@@ -271,9 +270,9 @@ public sealed class ClientConsoleApp
         float? z = command.HasOption("z") ? command.GetSingleOrDefault("z", 0.0f) : null;
         bool localApply = command.GetBooleanOrDefault("localApply", true);
         uint? msgId = command.HasOption("msgId")
-            ? command.GetUInt32OrDefault("msgId", ClientGameLogicService.DefaultMoveMsgId)
+            ? command.GetUInt32OrDefault("msgId", GameInstance.DefaultMoveMsgId)
             : null;
-        OutboundGameRequest request = _gameLogic.PrepareMoveRequest(_state, x, y, z, localApply, msgId);
+        OutboundGameRequest request = _gameInstance.PrepareMoveRequest(_state, x, y, z, localApply, msgId);
         await SendGameRequestAsync(request, cancellationToken);
     }
 
@@ -283,7 +282,7 @@ public sealed class ClientConsoleApp
         RequireTransport();
 
         string weapon = ResolveSetWeapon(command);
-        string summary = _gameLogic.SendSetWeaponRpc(_state, weapon);
+        string summary = _gameInstance.SendSetWeaponRpc(_state, weapon);
         await _output.WriteLineAsync(summary);
     }
 
@@ -318,8 +317,8 @@ public sealed class ClientConsoleApp
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
             "  login <url> <account> <password> [config=path]",
             "  connect auto-sends clientHello [msgId=45010] to prime the Gate session",
-            $"  selectAvatar [msgId={ClientGameLogicService.DefaultSelectAvatarMsgId}]",
-            $"  move [x=1] [y=2] [z=0] [msgId={ClientGameLogicService.DefaultMoveMsgId}] [localApply=true]",
+            $"  selectAvatar [msgId={GameInstance.DefaultSelectAvatarMsgId}]",
+            $"  move [x=1] [y=2] [z=0] [msgId={GameInstance.DefaultMoveMsgId}] [localApply=true]",
             "  set-weapon <weapon>",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
@@ -375,7 +374,7 @@ public sealed class ClientConsoleApp
             $"recv msgId={packet.Header.MsgId} seq={packet.Header.Seq} flags={packet.Header.Flags} " +
             $"payloadBytes={packet.Payload.Length} payload={payloadPreview}");
 
-        string? controlMessage = _gameLogic.TryHandleControlPacket(_state, packet);
+        string? controlMessage = _gameInstance.TryHandleControlPacket(_state, packet);
         if (!string.IsNullOrWhiteSpace(controlMessage))
         {
             _output.WriteLine(controlMessage);
