@@ -1,3 +1,5 @@
+using XServer.Client.Protocol;
+
 namespace XServer.Client.Rpc;
 
 public sealed record ClientEntityRpcRequest(
@@ -5,5 +7,5 @@ public sealed record ClientEntityRpcRequest(
     string RpcName,
     byte[] Payload)
 {
-    public uint MsgId => EntityRpcMessageIds.ClientToServerEntityRpcMsgId;
+    public uint MsgId => ClientMessageIds.ClientToServerEntityRpc;
 }

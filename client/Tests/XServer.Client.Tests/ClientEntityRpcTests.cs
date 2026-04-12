@@ -1,5 +1,6 @@
 using XServer.Client.Configuration;
 using XServer.Client.Entities;
+using XServer.Client.Protocol;
 using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Managed.Foundation.Protocol;
@@ -21,7 +22,7 @@ public sealed class ClientEntityRpcTests
 
         ClientEntityRpcRequest request = Assert.Single(sender.Requests);
         Assert.Same(avatar, sender.LastSourceEntity);
-        Assert.Equal(EntityRpcMessageIds.ClientToServerEntityRpcMsgId, request.MsgId);
+        Assert.Equal(ClientMessageIds.ClientToServerEntityRpc, request.MsgId);
         Assert.Equal(avatar.EntityId, request.EntityId);
         Assert.Equal("SetWeapon", request.RpcName);
         Assert.True(EntityRpcJsonCodec.TryDecode(
@@ -63,7 +64,7 @@ public sealed class ClientEntityRpcTests
         AvatarEntity avatar = gameInstance.SelectAvatar();
         avatar.CallServerRPC("SetWeapon", "gun");
 
-        Assert.Equal(EntityRpcMessageIds.ClientToServerEntityRpcMsgId, sentHeader.MsgId);
+        Assert.Equal(ClientMessageIds.ClientToServerEntityRpc, sentHeader.MsgId);
         Assert.Equal(PacketFlags.None, sentHeader.Flags);
         Assert.Equal(1U, sentHeader.Seq);
         Assert.Equal((uint)sentPayload.Length, sentHeader.Length);
@@ -81,23 +82,26 @@ public sealed class ClientEntityRpcTests
     }
 
     [Fact]
-    public void TryHandleControlPacket_DeliversServerRpcToTargetAvatar()
+    public void TryHandleClientNetworkPacket_DeliversServerRpcToTargetAvatar()
     {
         GameInstance gameInstance = new();
         gameInstance.StoreLoginGrant("demo-account", CreateProfile(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(5));
+        List<string> messages = [];
+        gameInstance.ClientNetworkMessageGenerated += messages.Add;
         AvatarEntity avatar = gameInstance.SelectAvatar();
 
         byte[] payload = EntityRpcJsonCodec.Encode(avatar.EntityId, "OnSetWeaponResult", "gun", true);
         PacketView packet = new(
             PacketCodec.CreateHeader(
-                EntityRpcMessageIds.ServerToClientEntityRpcMsgId,
+                ClientMessageIds.ServerToClientEntityRpc,
                 3U,
                 PacketFlags.None,
                 checked((uint)payload.Length)),
             payload);
 
-        string? message = gameInstance.TryHandleControlPacket(packet);
+        gameInstance.TryHandleClientNetworkPacket(packet);
 
+        string message = Assert.Single(messages);
         Assert.Equal($"clientRpc delivered entityId={avatar.EntityId:D} rpc=OnSetWeaponResult", message);
         Assert.Equal("gun", avatar.Weapon);
     }

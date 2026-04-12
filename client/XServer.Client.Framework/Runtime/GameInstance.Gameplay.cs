@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using XServer.Client.Entities;
+using XServer.Client.Protocol;
 using XServer.Client.Rpc;
 using XServer.Managed.Foundation.Protocol;
 
@@ -8,10 +9,6 @@ namespace XServer.Client.Runtime;
 
 public sealed partial class GameInstance
 {
-    public const uint DefaultMoveMsgId = 45011U;
-    public const uint DefaultSelectAvatarMsgId = 45013U;
-    public const uint BroadcastMessageMsgId = 6201U;
-
     private static readonly JsonSerializerOptions ControlJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -42,7 +39,7 @@ public sealed partial class GameInstance
                 avatarId = selectedAvatar.AvatarId,
             });
 
-        uint effectiveMsgId = msgId ?? DefaultSelectAvatarMsgId;
+        uint effectiveMsgId = msgId ?? ClientMessageIds.SelectAvatar;
         PacketHeader header = PacketCodec.CreateHeader(
             effectiveMsgId,
             AllocatePacketSequence(),
@@ -76,7 +73,7 @@ public sealed partial class GameInstance
                 position = new { x = effectiveX, y = effectiveY, z = effectiveZ },
             });
 
-        uint effectiveMsgId = msgId ?? DefaultMoveMsgId;
+        uint effectiveMsgId = msgId ?? ClientMessageIds.Move;
         PacketHeader header = PacketCodec.CreateHeader(
             effectiveMsgId,
             AllocatePacketSequence(),
@@ -105,27 +102,36 @@ public sealed partial class GameInstance
 
         Avatar!.CallServerRpc("SetWeapon", weapon);
         return
-            $"set-weapon rpc sent msgId={EntityRpcMessageIds.ClientToServerEntityRpcMsgId} entityId={Avatar.AvatarId} weapon={weapon}";
+            $"set-weapon rpc sent msgId={ClientMessageIds.ClientToServerEntityRpc} entityId={Avatar.AvatarId} weapon={weapon}";
     }
 
-    public string? TryHandleControlPacket(PacketView packet)
+    public void TryHandleClientNetworkPacket(PacketView packet)
     {
-        if (TryHandleServerRpcPacket(packet, out string? rpcMessage))
+        string? message = (packet.Header.MsgId, (packet.Header.Flags & PacketFlags.Response) != PacketFlags.None) switch
         {
-            return rpcMessage;
+            (ClientMessageIds.ServerToClientEntityRpc, _) => DispatchServerRpcPacket(packet),
+            (ClientMessageIds.BroadcastMessage, _) => TryHandleBroadcastPacket(packet),
+            (ClientMessageIds.SelectAvatar, true) => TryHandleSelectAvatarResponsePacket(packet),
+            _ => null,
+        };
+
+        PublishClientNetworkMessage(message);
+    }
+
+    public bool TryHandleServerRpcPacket(PacketView packet, out string? message)
+    {
+        if (packet.Header.MsgId != ClientMessageIds.ServerToClientEntityRpc)
+        {
+            message = null;
+            return false;
         }
 
-        if (packet.Header.MsgId == BroadcastMessageMsgId)
-        {
-            return TryHandleBroadcastPacket(packet);
-        }
+        message = DispatchServerRpcPacket(packet);
+        return true;
+    }
 
-        if (packet.Header.MsgId != DefaultSelectAvatarMsgId ||
-            (packet.Header.Flags & PacketFlags.Response) == PacketFlags.None)
-        {
-            return null;
-        }
-
+    private string TryHandleSelectAvatarResponsePacket(PacketView packet)
+    {
         SelectAvatarResponse? response;
         try
         {
@@ -167,24 +173,17 @@ public sealed partial class GameInstance
             $"selectAvatar confirmed account={response.AccountId} avatarId={response.AvatarId} game={response.GameNodeId ?? "<unknown>"} sessionId={response.SessionId}";
     }
 
-    public bool TryHandleServerRpcPacket(PacketView packet, out string? message)
+    private string DispatchServerRpcPacket(PacketView packet)
     {
-        if (packet.Header.MsgId != EntityRpcMessageIds.ServerToClientEntityRpcMsgId)
-        {
-            message = null;
-            return false;
-        }
-
         EntityRpcDispatchErrorCode result = ClientEntityRpcDispatcher.Dispatch(
             this,
             packet.Payload,
             out Guid entityId,
             out string rpcName,
             out string errorMessage);
-        message = result == EntityRpcDispatchErrorCode.None
+        return result == EntityRpcDispatchErrorCode.None
             ? $"clientRpc delivered entityId={entityId:D} rpc={rpcName}"
             : $"clientRpc failed entityId={entityId:D} rpc={rpcName} error={errorMessage}";
-        return true;
     }
 
     private static string TryHandleBroadcastPacket(PacketView packet)

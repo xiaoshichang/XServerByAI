@@ -1,6 +1,7 @@
 using System.Text;
 using XServer.Client.Auth;
 using XServer.Client.Configuration;
+using XServer.Client.Protocol;
 using XServer.Client.Rpc;
 using XServer.Client.Runtime;
 using XServer.Client.Transport;
@@ -10,7 +11,6 @@ namespace XServer.Client.App;
 
 public sealed class ClientConsoleApp
 {
-    private const uint DefaultClientHelloMsgId = 45010U;
     private const string DefaultGate1AuthUrl = "http://127.0.0.1:4101";
     private const string DefaultGate1NodeId = "Gate1";
 
@@ -26,6 +26,7 @@ public sealed class ClientConsoleApp
         _launchOptions = launchOptions;
         _output = output;
         _error = error;
+        _gameInstance.ClientNetworkMessageGenerated += HandleClientNetworkMessage;
     }
 
     public async Task<int> RunAsync()
@@ -240,7 +241,7 @@ public sealed class ClientConsoleApp
         }
 
         uint? msgId = command.HasOption("msgId")
-            ? command.GetUInt32OrDefault("msgId", GameInstance.DefaultSelectAvatarMsgId)
+            ? command.GetUInt32OrDefault("msgId", ClientMessageIds.SelectAvatar)
             : null;
         OutboundGameRequest request = _gameInstance.PrepareSelectAvatarRequest(msgId);
         await SendGameRequestAsync(request, cancellationToken);
@@ -249,7 +250,7 @@ public sealed class ClientConsoleApp
     private async Task SendClientHelloAsync(ClientTransport transport, CancellationToken cancellationToken)
     {
         PacketHeader header = PacketCodec.CreateHeader(
-            DefaultClientHelloMsgId,
+            ClientMessageIds.ClientHello,
             _gameInstance.AllocatePacketSequence(),
             PacketFlags.None,
             0U);
@@ -268,7 +269,7 @@ public sealed class ClientConsoleApp
         float? z = command.HasOption("z") ? command.GetSingleOrDefault("z", 0.0f) : null;
         bool localApply = command.GetBooleanOrDefault("localApply", true);
         uint? msgId = command.HasOption("msgId")
-            ? command.GetUInt32OrDefault("msgId", GameInstance.DefaultMoveMsgId)
+            ? command.GetUInt32OrDefault("msgId", ClientMessageIds.Move)
             : null;
         OutboundGameRequest request = _gameInstance.PrepareMoveRequest(x, y, z, localApply, msgId);
         await SendGameRequestAsync(request, cancellationToken);
@@ -314,9 +315,9 @@ public sealed class ClientConsoleApp
             "  status",
             "  send msgId=45050 [text=\"hello\"] [json=\"{\\\"k\\\":1}\"] [flags=response,error,compressed] [seq=1]",
             "  login <url> <account> <password> [config=path]",
-            "  connect auto-sends clientHello [msgId=45010] to prime the Gate session",
-            $"  selectAvatar [msgId={GameInstance.DefaultSelectAvatarMsgId}]",
-            $"  move [x=1] [y=2] [z=0] [msgId={GameInstance.DefaultMoveMsgId}] [localApply=true]",
+            $"  connect auto-sends clientHello [msgId={ClientMessageIds.ClientHello}] to prime the Gate session",
+            $"  selectAvatar [msgId={ClientMessageIds.SelectAvatar}]",
+            $"  move [x=1] [y=2] [z=0] [msgId={ClientMessageIds.Move}] [localApply=true]",
             "  set-weapon <weapon>",
             "  script path=client/demo.txt [continueOnError=true]",
             "  quit | exit",
@@ -327,7 +328,7 @@ public sealed class ClientConsoleApp
             "  selectAvatar sends a placeholder choose-avatar request to Gate and locally enters a waiting-for-confirmation state.",
             "  selectAvatar now always generates a temporary random avatarId locally.",
             "  Avatar-dependent commands become available only after Gate confirms AvatarEntity creation.",
-            "  set-weapon sends a client entity RPC [msgId=6302] to the selected Avatar on Game.",
+            $"  set-weapon sends a client entity RPC [msgId={ClientMessageIds.ClientToServerEntityRpc}] to the selected Avatar on Game.",
             $"  demo default login url is {DefaultGate1AuthUrl} (Gate1 auth).",
             "  move uses a temporary test-range msgId by default and can be overridden.",
             "  connect reads configs/local-dev.json and Gate0 by default.",
@@ -371,11 +372,12 @@ public sealed class ClientConsoleApp
             $"recv msgId={packet.Header.MsgId} seq={packet.Header.Seq} flags={packet.Header.Flags} " +
             $"payloadBytes={packet.Payload.Length} payload={payloadPreview}");
 
-        string? controlMessage = _gameInstance.TryHandleControlPacket(packet);
-        if (!string.IsNullOrWhiteSpace(controlMessage))
-        {
-            _output.WriteLine(controlMessage);
-        }
+        _gameInstance.TryHandleClientNetworkPacket(packet);
+    }
+
+    private void HandleClientNetworkMessage(string message)
+    {
+        _output.WriteLine(message);
     }
 
     private IClientEntityRpcSender CreateRpcSender(ClientTransport transport)

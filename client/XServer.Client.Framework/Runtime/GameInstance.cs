@@ -10,6 +10,8 @@ public sealed partial class GameInstance
 {
     private IClientEntityRpcSender? _rpcSender;
 
+    public event Action<string>? ClientNetworkMessageGenerated;
+
     public ClientLifecycleState LifecycleState { get; private set; } = ClientLifecycleState.Disconnected;
     public ResolvedClientProfile? Profile { get; private set; }
     public string? LocalEndpointText { get; private set; }
@@ -135,5 +137,13 @@ public sealed partial class GameInstance
     {
         ReceivedPacketCount++;
         LastReceivedAt = DateTimeOffset.UtcNow;
+    }
+
+    private void PublishClientNetworkMessage(string? message)
+    {
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            ClientNetworkMessageGenerated?.Invoke(message);
+        }
     }
 }
