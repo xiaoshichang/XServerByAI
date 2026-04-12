@@ -34,9 +34,9 @@ public sealed class EntityRpcMethodBinding
     }
 }
 
-public static class EntityRpcMethodCatalog
+public static class EntityRpcMethodScanner
 {
-    private static readonly ConcurrentDictionary<EntityRpcMethodCatalogKey, IReadOnlyDictionary<string, EntityRpcMethodBinding>> Cache = new();
+    private static readonly ConcurrentDictionary<EntityRpcMethodScannerKey, IReadOnlyDictionary<string, EntityRpcMethodBinding>> Cache = new();
 
     public static IReadOnlyDictionary<string, EntityRpcMethodBinding> GetOrAdd(Type entityType, Type attributeType)
     {
@@ -44,7 +44,7 @@ public static class EntityRpcMethodCatalog
         ArgumentNullException.ThrowIfNull(attributeType);
 
         return Cache.GetOrAdd(
-            new EntityRpcMethodCatalogKey(entityType, attributeType),
+            new EntityRpcMethodScannerKey(entityType, attributeType),
             static key => Scan(key.EntityType, key.AttributeType));
     }
 
@@ -120,5 +120,5 @@ public static class EntityRpcMethodCatalog
         return bindings;
     }
 
-    private readonly record struct EntityRpcMethodCatalogKey(Type EntityType, Type AttributeType);
+    private readonly record struct EntityRpcMethodScannerKey(Type EntityType, Type AttributeType);
 }

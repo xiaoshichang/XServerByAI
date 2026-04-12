@@ -72,7 +72,7 @@ namespace XServer.Managed.Framework.Rpc
                     $"Server RPC target type '{entityType.FullName}' does not derive from ServerEntity.");
             }
 
-            return EntityRpcMethodCatalog.GetOrAdd(entityType, typeof(ServerRPCAttribute));
+            return EntityRpcMethodScanner.GetOrAdd(entityType, typeof(ServerRPCAttribute));
         }
     }
 }

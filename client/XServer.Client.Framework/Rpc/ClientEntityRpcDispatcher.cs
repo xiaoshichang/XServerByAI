@@ -76,6 +76,6 @@ internal static class ClientEntityRpcDispatcher
                 $"Client RPC target type '{entityType.FullName}' does not derive from ClientEntity.");
         }
 
-        return EntityRpcMethodCatalog.GetOrAdd(entityType, typeof(ClientRPCAttribute));
+        return EntityRpcMethodScanner.GetOrAdd(entityType, typeof(ClientRPCAttribute));
     }
 }
