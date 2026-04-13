@@ -75,7 +75,7 @@
 4. M4-04 实现模拟客户端的登录鉴权行为。Deps: M4-03 | 状态: 已完成
 5. M4-05 实现 Gate 会话管理表（SessionID,AccountID,AvatarID的关联）。Deps: M4-02 | 状态: 已完成
 6. M4-05A 实现 managed 层的 RPC 框架。Deps: M5-08, M5-09 | 状态: 已完成
-7. M4-06 实现 基于RPC 的 Client→Gate→Game 请求链路。Deps: M2-07, M2-09, M2-10, M3-13, M4-04, M4-05, M4-05A | 状态: 开发中
+7. M4-06 实现 基于RPC 的 Client→Gate→Game 请求链路。Deps: M2-07, M2-09, M2-10, M3-13, M4-04, M4-05, M4-05A | 状态: 已完成
 8. M4-07 实现 基于RPC 的 Game→Gate→Client 响应链路。Deps: M2-09, M2-10, M4-06 | 状态: 未开发
 9. M4-10 实现会话断开清理与 Game 通知。Deps: M4-05, M4-06 | 状态: 未开发
 10. M4-11 实现路由策略：固定绑定到首次分配 Game 节点。Deps: M3-13, M4-05 | 状态: 未开发
