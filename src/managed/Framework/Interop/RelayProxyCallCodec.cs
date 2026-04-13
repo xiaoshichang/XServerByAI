@@ -1,12 +1,13 @@
 ﻿using System;
 using System.Buffers.Binary;
 using System.Text;
+using XServer.Managed.Framework.Protocol;
 
 namespace XServer.Managed.Framework.Interop
 {
     internal static class RelayProxyCallCodec
     {
-        public const uint ForwardProxyCallMsgId = 2005u;
+        public const uint ForwardProxyCallMsgId = ServerInternalMessageIds.msgid_game_game_forwardproxycall;
 
         internal readonly record struct RelayProxyCallEnvelope(
             string SourceGameNodeId,

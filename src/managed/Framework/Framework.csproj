@@ -8,6 +8,8 @@
                       ReferenceOutputAssembly="false" />
     <Compile Include="..\..\shared\EntityRpc\*.cs"
              Link="Rpc\Shared\%(Filename)%(Extension)" />
+    <Compile Include="..\..\shared\Protocol\*.cs"
+             Link="Protocol\Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <PropertyGroup>

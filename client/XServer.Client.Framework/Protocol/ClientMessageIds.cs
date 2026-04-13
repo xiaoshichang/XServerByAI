@@ -1,13 +1,11 @@
-using XServer.Client.Rpc;
-
 namespace XServer.Client.Protocol;
 
 public static class ClientMessageIds
 {
-    public const uint ClientHello = 45010U;
-    public const uint Move = 45011U;
-    public const uint SelectAvatar = 45013U;
-    public const uint BroadcastMessage = 6201U;
-    public const uint ClientToServerEntityRpc = EntityRpcMessageIds.ClientToServerEntityRpcMsgId;
-    public const uint ServerToClientEntityRpc = EntityRpcMessageIds.ServerToClientEntityRpcMsgId;
+    public const uint ClientHello = ClientServerMessageIds.ClientHello;
+    public const uint Move = ClientServerMessageIds.Move;
+    public const uint SelectAvatar = ClientServerMessageIds.SelectAvatar;
+    public const uint BroadcastMessage = ClientServerMessageIds.Broadcast;
+    public const uint ClientToServerEntityRpc = ClientServerMessageIds.ClientToServerEntityRpc;
+    public const uint ServerToClientEntityRpc = ClientServerMessageIds.ServerToClientEntityRpc;
 }

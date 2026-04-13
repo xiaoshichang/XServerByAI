@@ -4,6 +4,8 @@
     <ProjectReference Include="..\..\src\managed\Foundation\Foundation.csproj" />
     <Compile Include="..\..\src\shared\EntityRpc\*.cs"
              Link="Rpc\Shared\%(Filename)%(Extension)" />
+    <Compile Include="..\..\src\shared\Protocol\*.cs"
+             Link="Protocol\Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 
   <PropertyGroup>

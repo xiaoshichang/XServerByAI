@@ -1,12 +1,13 @@
 using System;
 using System.Buffers.Binary;
 using System.Text;
+using XServer.Managed.Framework.Protocol;
 
 namespace XServer.Managed.Framework.Interop
 {
     internal static class RelayMailboxCallCodec
     {
-        public const uint ForwardMailboxCallMsgId = 2002u;
+        public const uint ForwardMailboxCallMsgId = ServerInternalMessageIds.msgid_game_game_forwardmailboxcall;
 
         internal readonly record struct RelayMailboxCallEnvelope(
             string SourceGameNodeId,

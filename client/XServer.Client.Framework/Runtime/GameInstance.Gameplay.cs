@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using XServer.Client.Entities;
 using XServer.Client.Protocol;
@@ -9,22 +8,6 @@ namespace XServer.Client.Runtime;
 
 public sealed partial class GameInstance
 {
-    private static readonly JsonSerializerOptions ControlJsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
-    private sealed class SelectAvatarResponse
-    {
-        public string? Action { get; init; }
-        public bool Success { get; init; }
-        public string? AccountId { get; init; }
-        public string? AvatarId { get; init; }
-        public string? GameNodeId { get; init; }
-        public ulong SessionId { get; init; }
-        public string? Error { get; init; }
-    }
-
     public OutboundGameRequest PrepareSelectAvatarRequest(uint? msgId = null)
     {
         EnsureAccountReady();
@@ -32,11 +15,10 @@ public sealed partial class GameInstance
         string accountId = Account!.AccountId;
         AvatarEntity selectedAvatar = CreateTemporaryAvatarSelection();
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
-            new
+            new ClientServerSelectAvatarPayload
             {
-                action = "selectAvatar",
-                accountId,
-                avatarId = selectedAvatar.AvatarId,
+                AccountId = accountId,
+                AvatarId = selectedAvatar.AvatarId,
             });
 
         uint effectiveMsgId = msgId ?? ClientMessageIds.SelectAvatar;
@@ -66,11 +48,15 @@ public sealed partial class GameInstance
         float effectiveY = y ?? Avatar!.PositionY;
         float effectiveZ = z ?? Avatar!.PositionZ;
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(
-            new
+            new ClientServerMovePayload
             {
-                action = "move",
-                avatarId = Avatar!.AvatarId,
-                position = new { x = effectiveX, y = effectiveY, z = effectiveZ },
+                AvatarId = Avatar!.AvatarId,
+                Position = new ClientServerMovePositionPayload
+                {
+                    X = effectiveX,
+                    Y = effectiveY,
+                    Z = effectiveZ,
+                },
             });
 
         uint effectiveMsgId = msgId ?? ClientMessageIds.Move;
@@ -132,10 +118,12 @@ public sealed partial class GameInstance
 
     private string TryHandleSelectAvatarResponsePacket(PacketView packet)
     {
-        SelectAvatarResponse? response;
+        ServerClientSelectAvatarResultPayload? response;
         try
         {
-            response = JsonSerializer.Deserialize<SelectAvatarResponse>(packet.Payload.Span, ControlJsonOptions);
+            response = JsonSerializer.Deserialize<ServerClientSelectAvatarResultPayload>(
+                packet.Payload.Span,
+                ProtocolJsonOptions.Default);
         }
         catch (JsonException)
         {
@@ -188,20 +176,14 @@ public sealed partial class GameInstance
 
     private static string TryHandleBroadcastPacket(PacketView packet)
     {
-        if (packet.Payload.IsEmpty)
+        if (!ServerClientBoardcasePayloadCodec.TryDecode(packet.Payload, out ServerClientBoardcasePayload message))
         {
-            return "boardcase received: <empty>";
+            return packet.Payload.IsEmpty
+                ? "boardcase received: <empty>"
+                : $"boardcase received: payloadBytes={packet.Payload.Length}";
         }
 
-        try
-        {
-            string text = Encoding.UTF8.GetString(packet.Payload.Span);
-            return $"boardcase received: {text}";
-        }
-        catch (DecoderFallbackException)
-        {
-            return $"boardcase received: payloadBytes={packet.Payload.Length}";
-        }
+        return $"boardcase received: {message.Text}";
     }
 }
 

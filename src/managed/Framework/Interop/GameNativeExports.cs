@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using XServer.Managed.Framework.Entities;
+using XServer.Managed.Framework.Protocol;
 using XServer.Managed.Framework.Reflection;
 using XServer.Managed.Framework.Runtime;
 
@@ -16,12 +17,8 @@ namespace XServer.Managed.Framework.Interop
         private const int BufferTooSmall = -4;
         private const int RuntimeOperationFailed = -5;
         private const int OwnershipApplyErrorOffset = 1000;
-        private const uint CreateAvatarEntityMsgId = 2003u;
+        private const uint CreateAvatarEntityMsgId = ServerInternalMessageIds.msgid_gate_game_createavatarentity;
         private const string RuntimeLogCategory = "managed.runtime";
-        private static readonly JsonSerializerOptions ControlJsonOptions = new()
-        {
-            PropertyNameCaseInsensitive = true,
-        };
         private static ManagedNativeCallbacks s_nativeCallbacks;
         private static ManagedNativeServerEntityMessageTransport? s_nativeMessageTransport;
         private static ManagedNativeTimerScheduler? s_nativeTimerScheduler;
@@ -368,9 +365,9 @@ namespace XServer.Managed.Framework.Interop
                 throw new ArgumentException("Avatar create payload pointer is invalid.");
             }
 
-            AvatarCreatePayload? request = JsonSerializer.Deserialize<AvatarCreatePayload>(
+            GateCreateAvatarEntityPayload? request = JsonSerializer.Deserialize<GateCreateAvatarEntityPayload>(
                 new ReadOnlySpan<byte>(payload, checked((int)payloadLength)),
-                ControlJsonOptions);
+                ProtocolJsonOptions.Default);
             if (request == null ||
                 string.IsNullOrWhiteSpace(request.AccountId) ||
                 string.IsNullOrWhiteSpace(request.AvatarId) ||
@@ -595,15 +592,5 @@ namespace XServer.Managed.Framework.Interop
             return ReadUtf8(utf8, utf8Length);
         }
 
-        private sealed class AvatarCreatePayload
-        {
-            public string? AccountId { get; init; }
-
-            public string? AvatarId { get; init; }
-
-            public string? GateNodeId { get; init; }
-
-            public ulong SessionId { get; init; }
-        }
     }
 }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using XServer.Managed.Framework.Interop;
+using XServer.Managed.Framework.Protocol;
 using XServer.Managed.Framework.Runtime;
 
 namespace XServer.Managed.Framework.Entities
@@ -109,7 +110,7 @@ namespace XServer.Managed.Framework.Entities
         private const uint StartupCallMsgId = 5101u;
         public const uint RegisterOnlineAvatarMessageStubMsgId = 5200u;
         public const uint BroadcastOnlineAvatarMessageStubMsgId = 5201u;
-        public const uint BroadcastOnlineAvatarProxyMsgId = 6201u;
+        public const uint BroadcastOnlineAvatarProxyMsgId = ClientServerMessageIds.msgid_server_client_broadcast;
         private readonly Dictionary<Guid, OnlineAvatarRegistration> _registeredAvatars = [];
         private long _startupTimerId;
 
