@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MessageIds.h"
 #include "InnerMessageTypes.h"
 
 #include <cstddef>
@@ -10,7 +11,6 @@
 namespace xs::net
 {
 
-inline constexpr std::uint32_t kInnerHeartbeatMsgId = 1100u;
 inline constexpr std::size_t kHeartbeatRequestSize = sizeof(std::uint64_t) + sizeof(std::uint32_t) + kInnerLoadSnapshotSize;
 inline constexpr std::size_t kHeartbeatSuccessResponseSize = sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MessageIds.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -10,11 +12,6 @@
 namespace xs::net
 {
 
-inline constexpr std::uint32_t kInnerClusterReadyNotifyMsgId = 1201u;
-inline constexpr std::uint32_t kInnerServerStubOwnershipSyncMsgId = 1202u;
-inline constexpr std::uint32_t kInnerGameServiceReadyReportMsgId = 1203u;
-inline constexpr std::uint32_t kInnerClusterNodesOnlineNotifyMsgId = 1204u;
-inline constexpr std::uint32_t kInnerGameGateMeshReadyReportMsgId = 1205u;
 inline constexpr std::size_t kClusterNodesOnlineNotifySize =
     sizeof(std::uint8_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kClusterReadyNotifySize =

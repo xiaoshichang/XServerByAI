@@ -8,6 +8,7 @@ add_library(net STATIC
     MessageDispatcher.h
     message/InnerClusterCodec.cpp
     message/InnerClusterCodec.h
+    message/MessageIds.h
     message/InnerMessageTypes.h
     message/HeartbeatCodec.cpp
     message/HeartbeatCodec.h

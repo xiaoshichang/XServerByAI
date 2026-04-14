@@ -5,6 +5,7 @@
 #include "Json.h"
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
+#include "message/MessageIds.h"
 #include "message/PacketCodec.h"
 #include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
@@ -42,8 +43,6 @@ constexpr std::int32_t kManagedNativeMailboxCallUnknownTargetMailbox = 3;
 constexpr std::int32_t kManagedNativeProxyCallInvalidArgument = 1;
 constexpr std::int32_t kManagedNativeProxyCallInvalidMessageId = 2;
 constexpr std::int32_t kManagedNativeCallbackTargetNodeUnavailable = 4;
-constexpr std::uint32_t kGateCreateAvatarEntityMsgId = 2003U;
-constexpr std::uint32_t kGameAvatarEntityCreateResultMsgId = 2004U;
 
 struct AvatarCreateRequestPayload final
 {
@@ -1581,7 +1580,7 @@ void GameNode::HandleGateMessage(std::string_view gate_node_id, std::span<const 
         return;
     }
 
-    if (packet.header.msg_id == kGateCreateAvatarEntityMsgId)
+    if (packet.header.msg_id == xs::net::kGateCreateAvatarEntityMsgId)
     {
         if (packet.header.flags != 0U || packet.header.seq != xs::net::kPacketSeqNone)
         {
@@ -1771,7 +1770,7 @@ bool GameNode::SendGateAvatarEntityCreateResult(
         reinterpret_cast<const std::byte*>(payload_text.data()),
         payload_text.size());
     const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        kGameAvatarEntityCreateResultMsgId,
+        xs::net::kGameAvatarEntityCreateResultMsgId,
         xs::net::kPacketSeqNone,
         0U,
         static_cast<std::uint32_t>(payload_bytes.size()));

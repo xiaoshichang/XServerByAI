@@ -959,7 +959,7 @@ void TestManagedRuntimeForwardsRemoteMailboxCallThroughNativeCallback()
     }
     if (callback_capture.forwarded_mailbox_calls.msg_ids.size() == 1U)
     {
-        XS_CHECK(callback_capture.forwarded_mailbox_calls.msg_ids[0] == 5101U);
+        XS_CHECK(callback_capture.forwarded_mailbox_calls.msg_ids[0] == xs::net::kMatchStubStartupCallMsgId);
     }
     if (callback_capture.forwarded_mailbox_calls.payloads.size() == 1U)
     {
@@ -1019,7 +1019,12 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
         reinterpret_cast<const std::byte*>(registration_payload_text.data()),
         registration_payload_text.size());
     const std::vector<std::byte> register_relay_payload =
-        EncodeRelayForwardMailboxCallPayload("GM", "Game0", "OnlineStub", 5200U, registration_payload);
+        EncodeRelayForwardMailboxCallPayload(
+            "GM",
+            "Game0",
+            "OnlineStub",
+            xs::net::kOnlineStubRegisterAvatarMsgId,
+            registration_payload);
 
     const xs::host::ManagedMessageView register_message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
@@ -1039,7 +1044,12 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
         reinterpret_cast<const std::byte*>(broadcast_payload_text.data()),
         broadcast_payload_text.size());
     const std::vector<std::byte> broadcast_relay_payload =
-        EncodeRelayForwardMailboxCallPayload("GM", "Game0", "OnlineStub", 5201U, broadcast_payload);
+        EncodeRelayForwardMailboxCallPayload(
+            "GM",
+            "Game0",
+            "OnlineStub",
+            xs::net::kOnlineStubBroadcastMsgId,
+            broadcast_payload);
 
     const xs::host::ManagedMessageView broadcast_message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
@@ -1069,7 +1079,7 @@ void TestManagedRuntimeForwardsOnlineBroadcastThroughNativeProxyCallback()
     }
     if (callback_capture.forwarded_proxy_calls.msg_ids.size() == 1U)
     {
-        XS_CHECK(callback_capture.forwarded_proxy_calls.msg_ids[0] == 6201U);
+        XS_CHECK(callback_capture.forwarded_proxy_calls.msg_ids[0] == xs::net::kOnlineAvatarBroadcastProxyMsgId);
     }
     if (callback_capture.forwarded_proxy_calls.payloads.size() == 1U)
     {
@@ -1122,7 +1132,12 @@ void TestManagedRuntimeDispatchesForwardedMailboxCallMessageToTargetStub()
         reinterpret_cast<const std::byte*>(stub_payload_text.data()),
         stub_payload_text.size());
     const std::vector<std::byte> relay_payload =
-        EncodeRelayForwardMailboxCallPayload("Game0", "Game1", "MatchStub", 5101U, stub_payload);
+        EncodeRelayForwardMailboxCallPayload(
+            "Game0",
+            "Game1",
+            "MatchStub",
+            xs::net::kMatchStubStartupCallMsgId,
+            stub_payload);
 
     const xs::host::ManagedMessageView message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
@@ -1186,7 +1201,7 @@ void TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar()
         84U);
     const xs::host::ManagedMessageView create_message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
-        .msg_id = 2003U,
+        .msg_id = xs::net::kGateCreateAvatarEntityMsgId,
         .seq = 0U,
         .flags = 0U,
         .session_id = 0U,
@@ -1202,7 +1217,12 @@ void TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar()
         reinterpret_cast<const std::byte*>(forwarded_payload_text.data()),
         forwarded_payload_text.size());
     const std::vector<std::byte> relay_payload =
-        EncodeRelayForwardProxyCallPayload("Game0", "Gate3", kAvatarEntityId, 6201U, forwarded_payload);
+        EncodeRelayForwardProxyCallPayload(
+            "Game0",
+            "Gate3",
+            kAvatarEntityId,
+            xs::net::kOnlineAvatarBroadcastProxyMsgId,
+            forwarded_payload);
 
     const xs::host::ManagedMessageView message{
         .struct_size = sizeof(xs::host::ManagedMessageView),
@@ -1237,7 +1257,7 @@ void TestManagedRuntimeDispatchesForwardedProxyCallMessageToAvatar()
     }
     if (callback_capture.pushed_client_messages.msg_ids.size() == 1U)
     {
-        XS_CHECK(callback_capture.pushed_client_messages.msg_ids[0] == 6201U);
+        XS_CHECK(callback_capture.pushed_client_messages.msg_ids[0] == xs::net::kOnlineAvatarBroadcastProxyMsgId);
     }
     if (callback_capture.pushed_client_messages.payloads.size() == 1U)
     {

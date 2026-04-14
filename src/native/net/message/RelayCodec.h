@@ -1,5 +1,7 @@
 #pragma once
 
+#include "MessageIds.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -9,11 +11,6 @@
 
 namespace xs::net
 {
-
-inline constexpr std::uint32_t kRelayForwardToGameMsgId = 2000u;
-inline constexpr std::uint32_t kRelayPushToClientMsgId = 2001u;
-inline constexpr std::uint32_t kRelayForwardMailboxCallMsgId = 2002u;
-inline constexpr std::uint32_t kRelayForwardProxyCallMsgId = 2005u;
 
 enum class RelayCodecErrorCode : std::uint8_t
 {

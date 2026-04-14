@@ -6,6 +6,7 @@
 #include "Json.h"
 #include "message/HeartbeatCodec.h"
 #include "message/InnerClusterCodec.h"
+#include "message/MessageIds.h"
 #include "message/PacketCodec.h"
 #include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
@@ -35,11 +36,6 @@ constexpr std::uint16_t kErrorResponseFlags =
 constexpr std::uint32_t kDefaultHeartbeatIntervalMs = 5000U;
 constexpr std::uint32_t kDefaultHeartbeatTimeoutMs = 15000U;
 constexpr std::uint64_t kConversationReservationLifetimeMs = 30000U;
-constexpr std::uint32_t kClientHelloMsgId = 45010U;
-constexpr std::uint32_t kClientSelectAvatarMsgId = 45013U;
-constexpr std::uint32_t kClientEntityRpcMsgId = 6302U;
-constexpr std::uint32_t kGateCreateAvatarEntityMsgId = 2003U;
-constexpr std::uint32_t kGameAvatarEntityCreateResultMsgId = 2004U;
 
 constexpr std::int32_t kInnerProcessTypeInvalid = 3000;
 constexpr std::int32_t kInnerNetworkEndpointInvalid = 3002;
@@ -868,7 +864,7 @@ void GateNode::HandleGameMessage(
         return;
     }
 
-    if (raw_header.msg_id == kGameAvatarEntityCreateResultMsgId)
+    if (raw_header.msg_id == xs::net::kGameAvatarEntityCreateResultMsgId)
     {
         HandleGameAvatarEntityCreateResultMessage(routing_id, payload);
         return;
@@ -2727,7 +2723,7 @@ void GateNode::HandleClientPayloadReceived(
         return;
     }
 
-    if (packet.header.msg_id == kClientSelectAvatarMsgId)
+    if (packet.header.msg_id == xs::net::kClientSelectAvatarMsgId)
     {
         std::string handler_error;
         if (!HandleClientSelectAvatarPacket(session, packet, &handler_error))
@@ -2754,7 +2750,7 @@ void GateNode::HandleClientPayloadReceived(
         return;
     }
 
-    if (packet.header.msg_id == kClientHelloMsgId)
+    if (packet.header.msg_id == xs::net::kClientHelloMsgId)
     {
         const std::array<xs::core::LogContextField, 5> context{
             xs::core::LogContextField{"nodeId", std::string(node_id())},
@@ -2774,7 +2770,7 @@ void GateNode::HandleClientPayloadReceived(
         return;
     }
 
-    if (packet.header.msg_id == kClientEntityRpcMsgId)
+    if (packet.header.msg_id == xs::net::kClientEntityRpcMsgId)
     {
         std::string handler_error;
         if (!HandleClientEntityRpcPacket(session, packet, &handler_error))
@@ -3208,7 +3204,7 @@ bool GateNode::SendClientSelectAvatarResult(
         reinterpret_cast<const std::byte*>(payload_text.data()),
         payload_text.size());
     const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        kClientSelectAvatarMsgId,
+        xs::net::kClientSelectAvatarMsgId,
         request_seq,
         success ? kResponseFlags : kErrorResponseFlags,
         static_cast<std::uint32_t>(payload_bytes.size()));
@@ -3278,7 +3274,7 @@ bool GateNode::SendCreateAvatarEntityRequest(
         reinterpret_cast<const std::byte*>(payload_text.data()),
         payload_text.size());
     const xs::net::PacketHeader header = xs::net::MakePacketHeader(
-        kGateCreateAvatarEntityMsgId,
+        xs::net::kGateCreateAvatarEntityMsgId,
         xs::net::kPacketSeqNone,
         0U,
         static_cast<std::uint32_t>(payload_bytes.size()));

@@ -6,6 +6,7 @@
 #include "ManagedRuntimeHost.h"
 #include "message/InnerClusterCodec.h"
 #include "message/HeartbeatCodec.h"
+#include "message/MessageIds.h"
 #include "message/PacketCodec.h"
 #include "message/RelayCodec.h"
 #include "message/RegisterCodec.h"
@@ -37,7 +38,6 @@ inline constexpr std::int32_t kInnerChannelInvalid = 3004;
 inline constexpr std::int32_t kInnerRequestInvalid = 3005;
 inline constexpr std::string_view kUnknownServerEntityId = "unknown";
 inline constexpr std::string_view kOnlineStubType = "OnlineStub";
-inline constexpr std::uint32_t kOnlineStubBroadcastMsgId = 5201U;
 
 std::string BuildTcpEndpoint(const xs::core::EndpointConfig& endpoint)
 {
@@ -917,7 +917,7 @@ GmControlHttpResponse GmNode::HandleBoardcaseRequest(std::string_view message)
             online_stub_entry->owner_game_node_id,
             kOnlineStubType,
             online_stub_entry->entity_id == kUnknownServerEntityId ? std::string_view{} : std::string_view(online_stub_entry->entity_id),
-            kOnlineStubBroadcastMsgId,
+            xs::net::kOnlineStubBroadcastMsgId,
             payload,
             &error_message))
     {

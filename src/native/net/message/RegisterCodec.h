@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MessageIds.h"
 #include "InnerMessageTypes.h"
 
 #include <cstddef>
@@ -12,7 +13,6 @@
 namespace xs::net
 {
 
-inline constexpr std::uint32_t kInnerRegisterMsgId = 1000u;
 inline constexpr std::size_t kRegisterSuccessResponseSize = sizeof(std::uint32_t) + sizeof(std::uint32_t) + sizeof(std::uint64_t);
 inline constexpr std::size_t kRegisterErrorResponseSize = sizeof(std::int32_t) + sizeof(std::uint32_t);
 inline constexpr std::size_t kRegisterMaxCapabilityTagCount = 32u;

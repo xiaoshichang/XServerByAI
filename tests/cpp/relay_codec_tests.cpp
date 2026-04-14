@@ -38,7 +38,7 @@ void TestRelayForwardMailboxCallRoundTrip()
         .target_game_node_id = "Game1",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
         .target_mailbox_name = "MatchStub",
-        .mailbox_call_msg_id = 5101u,
+        .mailbox_call_msg_id = xs::net::kMatchStubStartupCallMsgId,
         .relay_flags = 0u,
         .payload = {std::byte{0x01}, std::byte{0x02}, std::byte{0x03}},
     };
@@ -67,7 +67,7 @@ void TestRelayForwardMailboxCallRejectsSemanticViolations()
         .target_game_node_id = "Game1",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
         .target_mailbox_name = "MatchStub",
-        .mailbox_call_msg_id = 5101u,
+        .mailbox_call_msg_id = xs::net::kMatchStubStartupCallMsgId,
         .relay_flags = 0u,
         .payload = {},
     };
@@ -77,7 +77,7 @@ void TestRelayForwardMailboxCallRejectsSemanticViolations()
     XS_CHECK(xs::net::GetRelayForwardMailboxCallWireSize(message, &wire_size) ==
              xs::net::RelayCodecErrorCode::InvalidMessageId);
 
-    message.mailbox_call_msg_id = 5101u;
+    message.mailbox_call_msg_id = xs::net::kMatchStubStartupCallMsgId;
     message.source_game_node_id.clear();
     XS_CHECK(xs::net::GetRelayForwardMailboxCallWireSize(message, &wire_size) ==
              xs::net::RelayCodecErrorCode::InvalidSourceGameNodeId);
@@ -111,7 +111,7 @@ void TestRelayForwardMailboxCallRejectsMalformedBuffers()
         .target_game_node_id = "Game1",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
         .target_mailbox_name = "MatchStub",
-        .mailbox_call_msg_id = 5101u,
+        .mailbox_call_msg_id = xs::net::kMatchStubStartupCallMsgId,
         .relay_flags = 0u,
         .payload = {std::byte{0x0A}, std::byte{0x0B}},
     };
@@ -148,7 +148,7 @@ void TestRelayForwardProxyCallRoundTrip()
         .source_game_node_id = "Game0",
         .route_gate_node_id = "Gate3",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
-        .proxy_call_msg_id = 6201u,
+        .proxy_call_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId,
         .relay_flags = 0u,
         .payload = {std::byte{0x11}, std::byte{0x22}, std::byte{0x33}},
     };
@@ -175,7 +175,7 @@ void TestRelayForwardProxyCallRejectsSemanticViolations()
         .source_game_node_id = "Game0",
         .route_gate_node_id = "Gate3",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
-        .proxy_call_msg_id = 6201u,
+        .proxy_call_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId,
         .relay_flags = 0u,
         .payload = {},
     };
@@ -185,7 +185,7 @@ void TestRelayForwardProxyCallRejectsSemanticViolations()
     XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) ==
              xs::net::RelayCodecErrorCode::InvalidMessageId);
 
-    message.proxy_call_msg_id = 6201u;
+    message.proxy_call_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId;
     message.source_game_node_id.clear();
     XS_CHECK(xs::net::GetRelayForwardProxyCallWireSize(message, &wire_size) ==
              xs::net::RelayCodecErrorCode::InvalidSourceGameNodeId);
@@ -212,7 +212,7 @@ void TestRelayForwardProxyCallRejectsMalformedBuffers()
         .source_game_node_id = "Game0",
         .route_gate_node_id = "Gate3",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
-        .proxy_call_msg_id = 6201u,
+        .proxy_call_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId,
         .relay_flags = 0u,
         .payload = {std::byte{0x5A}, std::byte{0x5B}},
     };
@@ -248,7 +248,7 @@ void TestRelayPushToClientRoundTrip()
         .source_game_node_id = "Game0",
         .route_gate_node_id = "Gate3",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
-        .client_msg_id = 6201u,
+        .client_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId,
         .relay_flags = 0u,
         .payload = {std::byte{0x44}, std::byte{0x55}, std::byte{0x66}},
     };
@@ -275,7 +275,7 @@ void TestRelayPushToClientRejectsSemanticViolations()
         .source_game_node_id = "Game0",
         .route_gate_node_id = "Gate3",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
-        .client_msg_id = 6201u,
+        .client_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId,
         .relay_flags = 0u,
         .payload = {},
     };
@@ -285,7 +285,7 @@ void TestRelayPushToClientRejectsSemanticViolations()
     XS_CHECK(xs::net::GetRelayPushToClientWireSize(message, &wire_size) ==
              xs::net::RelayCodecErrorCode::InvalidMessageId);
 
-    message.client_msg_id = 6201u;
+    message.client_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId;
     message.source_game_node_id.clear();
     XS_CHECK(xs::net::GetRelayPushToClientWireSize(message, &wire_size) ==
              xs::net::RelayCodecErrorCode::InvalidSourceGameNodeId);
@@ -312,7 +312,7 @@ void TestRelayPushToClientRejectsMalformedBuffers()
         .source_game_node_id = "Game0",
         .route_gate_node_id = "Gate3",
         .target_entity_id = "01234567-89ab-cdef-0123-456789abcdef",
-        .client_msg_id = 6201u,
+        .client_msg_id = xs::net::kOnlineAvatarBroadcastProxyMsgId,
         .relay_flags = 0u,
         .payload = {std::byte{0x7A}, std::byte{0x7B}},
     };
