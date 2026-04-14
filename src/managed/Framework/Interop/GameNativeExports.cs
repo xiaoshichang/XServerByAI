@@ -74,84 +74,15 @@ namespace XServer.Managed.Framework.Interop
                 return 0;
             }
 
-            if (s_runtimeState == null)
+            GameNodeRuntimeState? runtimeState = s_runtimeState;
+            if (runtimeState == null)
             {
                 return RuntimeNotInitialized;
             }
 
             try
             {
-                if (message->MsgId == CreateAvatarEntityMsgId)
-                {
-                    AvatarEntitySpawnRequest createRequest = BuildAvatarEntitySpawnRequest(
-                        message->Payload,
-                        message->PayloadLength);
-                    if (!s_runtimeState.TryCreateAvatarEntity(createRequest, out AvatarEntity? avatar, out string? error))
-                    {
-                        NativeLoggerBridge.Warn(
-                            RuntimeLogCategory,
-                            $"Game managed runtime rejected create-avatar request: {error ?? "unknown error"}");
-                        return RuntimeOperationFailed;
-                    }
-
-                    NativeLoggerBridge.Info(
-                        RuntimeLogCategory,
-                        $"Game managed runtime created AvatarEntity entityId={avatar!.EntityId} gate={createRequest.RouteGateNodeId}.");
-                    return 0;
-                }
-
-                if (message->MsgId == RelayProxyCallCodec.ForwardProxyCallMsgId)
-                {
-                    if (!RelayProxyCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayProxyCallCodec.RelayProxyCallEnvelope proxyRelay))
-                    {
-                        NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded proxy call payload.");
-                        return InvalidArgument;
-                    }
-
-                    ProxyCallErrorCode proxyResult = s_runtimeState.ReceiveProxyCall(
-                        proxyRelay.TargetEntityId,
-                        new EntityMessage(proxyRelay.ProxyCallMsgId, proxyRelay.Payload));
-                    if (proxyResult != ProxyCallErrorCode.None)
-                    {
-                        NativeLoggerBridge.Warn(
-                            RuntimeLogCategory,
-                            $"Game managed runtime rejected forwarded proxy call: {ProxyCallError.Message(proxyResult)}");
-                        return (int)proxyResult;
-                    }
-
-                    return 0;
-                }
-
-                if (message->MsgId != RelayMailboxCallCodec.ForwardMailboxCallMsgId)
-                {
-                    return 0;
-                }
-
-                if (!RelayMailboxCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayMailboxCallCodec.RelayMailboxCallEnvelope relay))
-                {
-                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded mailbox call payload.");
-                    return InvalidArgument;
-                }
-
-                if (!string.Equals(relay.TargetGameNodeId, s_runtimeState.NodeId, StringComparison.Ordinal))
-                {
-                    NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime rejected forwarded mailbox call for another game node.");
-                    return InvalidArgument;
-                }
-
-                MailboxCallErrorCode result = s_runtimeState.ReceiveMailboxCall(
-                    relay.TargetEntityId,
-                    relay.TargetMailboxName,
-                    new EntityMessage(relay.MailboxCallMsgId, relay.Payload));
-                if (result != MailboxCallErrorCode.None)
-                {
-                    NativeLoggerBridge.Warn(
-                        RuntimeLogCategory,
-                        $"Game managed runtime rejected forwarded mailbox call: {MailboxCallError.Message(result)}");
-                    return (int)result;
-                }
-
-                return 0;
+                return DispatchMessageByMsgId(message, runtimeState);
             }
             catch (Exception exception)
             {
@@ -356,6 +287,87 @@ namespace XServer.Managed.Framework.Interop
             }
 
             return s_runtimeState.ReadyServerStubs;
+        }
+
+        private static int DispatchMessageByMsgId(ManagedMessageView* message, GameNodeRuntimeState runtimeState)
+        {
+            return message->MsgId switch
+            {
+                CreateAvatarEntityMsgId => HandleCreateAvatarEntityMessage(message, runtimeState),
+                RelayProxyCallCodec.ForwardProxyCallMsgId => HandleForwardProxyCallMessage(message, runtimeState),
+                RelayMailboxCallCodec.ForwardMailboxCallMsgId => HandleForwardMailboxCallMessage(message, runtimeState),
+                _ => 0,
+            };
+        }
+
+        private static int HandleCreateAvatarEntityMessage(ManagedMessageView* message, GameNodeRuntimeState runtimeState)
+        {
+            AvatarEntitySpawnRequest createRequest = BuildAvatarEntitySpawnRequest(
+                message->Payload,
+                message->PayloadLength);
+            if (!runtimeState.TryCreateAvatarEntity(createRequest, out AvatarEntity? avatar, out string? error))
+            {
+                NativeLoggerBridge.Warn(
+                    RuntimeLogCategory,
+                    $"Game managed runtime rejected create-avatar request: {error ?? "unknown error"}");
+                return RuntimeOperationFailed;
+            }
+
+            NativeLoggerBridge.Info(
+                RuntimeLogCategory,
+                $"Game managed runtime created AvatarEntity entityId={avatar!.EntityId} gate={createRequest.RouteGateNodeId}.");
+            return 0;
+        }
+
+        private static int HandleForwardProxyCallMessage(ManagedMessageView* message, GameNodeRuntimeState runtimeState)
+        {
+            if (!RelayProxyCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayProxyCallCodec.RelayProxyCallEnvelope proxyRelay))
+            {
+                NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded proxy call payload.");
+                return InvalidArgument;
+            }
+
+            ProxyCallErrorCode proxyResult = runtimeState.ReceiveProxyCall(
+                proxyRelay.TargetEntityId,
+                new EntityMessage(proxyRelay.ProxyCallMsgId, proxyRelay.Payload));
+            if (proxyResult != ProxyCallErrorCode.None)
+            {
+                NativeLoggerBridge.Warn(
+                    RuntimeLogCategory,
+                    $"Game managed runtime rejected forwarded proxy call: {ProxyCallError.Message(proxyResult)}");
+                return (int)proxyResult;
+            }
+
+            return 0;
+        }
+
+        private static int HandleForwardMailboxCallMessage(ManagedMessageView* message, GameNodeRuntimeState runtimeState)
+        {
+            if (!RelayMailboxCallCodec.TryDecode(message->Payload, message->PayloadLength, out RelayMailboxCallCodec.RelayMailboxCallEnvelope relay))
+            {
+                NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime failed to decode forwarded mailbox call payload.");
+                return InvalidArgument;
+            }
+
+            if (!string.Equals(relay.TargetGameNodeId, runtimeState.NodeId, StringComparison.Ordinal))
+            {
+                NativeLoggerBridge.Warn(RuntimeLogCategory, "Game managed runtime rejected forwarded mailbox call for another game node.");
+                return InvalidArgument;
+            }
+
+            MailboxCallErrorCode result = runtimeState.ReceiveMailboxCall(
+                relay.TargetEntityId,
+                relay.TargetMailboxName,
+                new EntityMessage(relay.MailboxCallMsgId, relay.Payload));
+            if (result != MailboxCallErrorCode.None)
+            {
+                NativeLoggerBridge.Warn(
+                    RuntimeLogCategory,
+                    $"Game managed runtime rejected forwarded mailbox call: {MailboxCallError.Message(result)}");
+                return (int)result;
+            }
+
+            return 0;
         }
 
         private static AvatarEntitySpawnRequest BuildAvatarEntitySpawnRequest(byte* payload, uint payloadLength)

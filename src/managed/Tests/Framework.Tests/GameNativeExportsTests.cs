@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using XServer.Managed.Framework.Entities;
 using XServer.Managed.Framework.Interop;
+using XServer.Managed.Framework.Protocol;
 using XServer.Managed.Framework.Runtime;
 
 namespace XServer.Managed.Framework.Tests
@@ -72,6 +73,28 @@ namespace XServer.Managed.Framework.Tests
                 });
         }
 
+        [Fact]
+        public void GameNativeOnMessage_UnknownMsgId_ReturnsZero()
+        {
+            InitializeRuntime("GameUnknownMsgIdInteropTest");
+
+            ManagedMessageView message = new()
+            {
+                StructSize = (uint)sizeof(ManagedMessageView),
+                MsgId = 999999U,
+                Seq = 0U,
+                Flags = 0U,
+                SessionId = 0UL,
+                PlayerId = 0UL,
+                Payload = null,
+                PayloadLength = 0U,
+            };
+
+            delegate* unmanaged[Cdecl]<ManagedMessageView*, int> onMessage = &GameNativeExports.GameNativeOnMessage;
+            int result = onMessage(&message);
+            Assert.Equal(0, result);
+        }
+
         private static void InitializeRuntime(string nodeId)
         {
             byte[] nodeIdUtf8 = Encoding.UTF8.GetBytes(nodeId);
@@ -133,7 +156,7 @@ namespace XServer.Managed.Framework.Tests
                 ManagedMessageView message = new()
                 {
                     StructSize = (uint)sizeof(ManagedMessageView),
-                    MsgId = 2003U,
+                    MsgId = ServerInternalMessageIds.msgid_gate_game_createavatarentity,
                     Seq = 0U,
                     Flags = 0U,
                     SessionId = 0UL,
